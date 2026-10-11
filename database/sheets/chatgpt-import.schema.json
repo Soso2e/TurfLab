@@ -1,0 +1,218 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "0.2" },
+    "example_only": { "type": "boolean" },
+    "import_id": { "type": "string", "minLength": 1 },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "predictions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prediction_id": { "type": "string", "minLength": 1 },
+          "race_id": { "type": "string", "minLength": 1 },
+          "model_version_id": { "type": "string", "minLength": 1 },
+          "snapshot_id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["morning", "final", "reanalysis", "backtest"] },
+          "information_cutoff_at": { "type": "string", "format": "date-time" },
+          "supersedes_prediction_id": { "type": ["string", "null"] },
+          "feature_ids": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "rationale": { "type": "string" },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "evidence_id": { "type": "string", "minLength": 1 },
+                "source": { "type": "string", "minLength": 1 },
+                "source_url": { "type": "string", "format": "uri" },
+                "valid_as_of": { "type": "string", "format": "date-time" },
+                "available_at": {
+                  "type": ["string", "null"],
+                  "format": "date-time"
+                },
+                "retrieved_at": { "type": "string", "format": "date-time" },
+                "classification": { "enum": ["fact", "estimate"] },
+                "note": { "type": "string" },
+                "confirmed": { "type": "boolean" }
+              },
+              "required": [
+                "evidence_id",
+                "source",
+                "source_url",
+                "valid_as_of",
+                "retrieved_at",
+                "classification"
+              ]
+            }
+          },
+          "horse_evaluations": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "entry_id": { "type": "string", "minLength": 1 },
+                "rank": { "type": "integer", "minimum": 1 },
+                "score": { "type": ["number", "null"] },
+                "win_probability": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "top3_probability": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "abilities": {
+                  "type": "object",
+                  "additionalProperties": { "type": ["number", "null"] }
+                },
+                "course_fit": { "type": "string", "minLength": 1 },
+                "jockey_fit": { "type": "string", "minLength": 1 },
+                "expected_position": { "type": "string", "minLength": 1 },
+                "classification": { "enum": ["fact", "estimate"] },
+                "confidence": {
+                  "type": ["number", "null"],
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "evidence_ids": {
+                  "type": "array",
+                  "items": { "type": "string", "minLength": 1 }
+                },
+                "rationale": { "type": "string", "minLength": 1 }
+              },
+              "required": [
+                "entry_id",
+                "rank",
+                "win_probability",
+                "top3_probability",
+                "abilities",
+                "course_fit",
+                "jockey_fit",
+                "expected_position",
+                "classification",
+                "evidence_ids",
+                "rationale"
+              ]
+            }
+          },
+          "simulation": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "simulation_id": { "type": "string", "minLength": 1 },
+              "mode": { "enum": ["narrative", "numeric"] },
+              "engine_version": { "type": ["string", "null"] },
+              "seed": { "type": ["integer", "null"] },
+              "trial_count": { "type": ["integer", "null"] },
+              "input_hash": { "type": ["string", "null"] },
+              "scenarios": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "pace": { "enum": ["slow", "middle", "high"] },
+                    "weight": { "type": "number", "minimum": 0, "maximum": 1 },
+                    "analysis": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["pace", "weight", "analysis"]
+                }
+              },
+              "evidence_ids": {
+                "type": "array",
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "limitations": { "type": "string", "minLength": 1 }
+            },
+            "required": [
+              "simulation_id",
+              "mode",
+              "engine_version",
+              "seed",
+              "trial_count",
+              "scenarios",
+              "evidence_ids",
+              "limitations"
+            ]
+          },
+          "recommendations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "recommendation_id": { "type": "string", "minLength": 1 },
+                "ticket_type": {
+                  "enum": [
+                    "win",
+                    "place",
+                    "quinella",
+                    "wide",
+                    "exacta",
+                    "trio",
+                    "trifecta"
+                  ]
+                },
+                "selections": {
+                  "type": "array",
+                  "items": { "type": "integer", "minimum": 1 }
+                },
+                "estimated_probability": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "odds_snapshot_id": { "type": ["string", "null"] },
+                "estimated_ev": { "type": ["number", "null"] },
+                "suggested_amount_yen": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "multipleOf": 100
+                },
+                "reason": { "type": "string", "minLength": 1 }
+              },
+              "required": [
+                "recommendation_id",
+                "ticket_type",
+                "selections",
+                "estimated_probability",
+                "suggested_amount_yen",
+                "reason"
+              ]
+            }
+          },
+          "skip_reason": { "type": "string" }
+        },
+        "required": [
+          "prediction_id",
+          "race_id",
+          "model_version_id",
+          "snapshot_id",
+          "kind",
+          "information_cutoff_at",
+          "evidence",
+          "horse_evaluations",
+          "simulation",
+          "recommendations"
+        ]
+      }
+    }
+  },
+  "required": ["schema_version", "import_id", "generated_at", "predictions"]
+}
