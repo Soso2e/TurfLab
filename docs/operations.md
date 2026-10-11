@@ -26,6 +26,8 @@ API_TOKEN="24文字以上のランダムな本人用キー"
 
 ## Google Sheets接続
 
+Cloudflareへの公開と無料枠・認証設定は [公開手順](cloudflare-deployment.md) を参照する。
+
 サービスアカウントでSheets APIを有効にし、対象Sheetsをそのアカウントに共有する。Googleの認証情報はWebへ渡さない。以下をWorkersのシークレット／ローカル `.dev.vars` に設定する。
 
 - `SHEETS_ID`: ブックのID
