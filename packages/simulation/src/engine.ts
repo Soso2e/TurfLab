@@ -1,9 +1,10 @@
 import {
   asOf,
-  canonical,
   hash,
   requireCondition,
   type Json,
+  ticket,
+  instant,
   type Row,
 } from "../../shared/src/domain";
 export const ENGINE_VERSION = "segment-mc-v1";
@@ -27,6 +28,7 @@ export interface Segment {
   phase: "start" | "early" | "middle" | "turn" | "straight" | "finish";
 }
 export interface SimulationInput {
+  place_positions?: number | null;
   cutoff_at: string;
   distance_m: number;
   going_factor: number;
@@ -35,6 +37,8 @@ export interface SimulationInput {
   scenarios: { pace: "slow" | "middle" | "high"; weight: number }[];
 }
 export interface SimulationOutput {
+  place_positions: number | null;
+  horse_numbers: number[];
   engine_version: string;
   input_hash: string;
   seed: number;
@@ -105,6 +109,13 @@ export function validateSimulation(
     ) < 0.01,
     "区間長の合計が距離と不一致です",
   );
+  if (input.place_positions != null)
+    requireCondition(
+      Number.isInteger(input.place_positions) &&
+        input.place_positions >= 1 &&
+        input.place_positions <= Math.min(3, input.runners.length),
+      "公式の複勝払戻対象順位が不正です",
+    );
   requireCondition(
     input.scenarios.length > 0 &&
       input.scenarios.every(
@@ -240,7 +251,7 @@ export async function simulate(
     });
     const ns = result.map((x) => x.runner.horse_number);
     count("win", [ns[0]]);
-    ns.slice(0, 3).forEach((n) => count("place", [n]));
+    ns.slice(0, input.place_positions ?? 0).forEach((n) => count("place", [n]));
     count("quinella", ns.slice(0, 2));
     count("exacta", ns.slice(0, 2));
     const top = ns.slice(0, 3);
@@ -258,6 +269,8 @@ export async function simulate(
   });
   Object.keys(tickets).forEach((k) => (tickets[k] /= trialCount));
   return {
+    place_positions: input.place_positions ?? null,
+    horse_numbers: input.runners.map((r) => r.horse_number),
     engine_version: ENGINE_VERSION,
     input_hash: await hash(input),
     seed,
@@ -283,15 +296,19 @@ export function expectedValues(
   return odds.map((o) => {
     asOf(o.source, cutoff);
     requireCondition(Number.isFinite(o.odds) && o.odds > 0, "オッズが不正です");
-    const ns = ["quinella", "wide", "trio"].includes(o.ticket_type)
-      ? [...o.selections].sort((a, b) => a - b)
-      : o.selections;
+    if (o.source.captured_at != null)
+      requireCondition(
+        instant(o.source.captured_at) <= instant(cutoff),
+        "オッズ観測が締切後です",
+      );
+    if (o.ticket_type === "place")
+      requireCondition(
+        output.place_positions !== null,
+        "公式の複勝払戻対象順位が未取得です",
+      );
+    const ns = ticket(o.ticket_type, o.selections, output.horse_numbers);
     const key = o.ticket_type + ":" + ns.join("-");
-    requireCondition(
-      key in output.ticket_probabilities,
-      `未計算買い目: ${canonical(ns)}`,
-    );
-    const p = output.ticket_probabilities[key];
+    const p = output.ticket_probabilities[key] ?? 0;
     return {
       ticket_type: o.ticket_type,
       selections: ns as Json[],

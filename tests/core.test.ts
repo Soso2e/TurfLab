@@ -27,6 +27,7 @@ import {
 import {
   confirmBet,
   purchaseStats,
+  recommendationStats,
   saveResult,
   settle,
   voidBet,
@@ -198,6 +199,47 @@ describe("入力・固定予想", () => {
   });
 });
 describe("本人購入と公式精算", () => {
+  it("推奨参考収支は本人購入へ混ぜない", async () => {
+    await ready();
+    await repo.put("recommendations", {
+      ...base,
+      recommendation_id: "reference",
+      prediction_id: "example-prediction-01",
+      simulation_id: "example-simulation-01",
+      ticket_type: "win",
+      selections_json: [1],
+      suggested_amount_yen: 100,
+    });
+    await saveResult(repo, resultPayload(), "2026-10-12T07:00:00Z");
+    expect((await recommendationStats(repo)).net_yen).toBe(200);
+    expect((await purchaseStats(repo)).purchased_tickets).toBe(0);
+  });
+  it("公式の券種全体返還規則を適用し的中へ含めない", async () => {
+    await ready();
+    await confirmBet(repo, bet(), NOW);
+    const r = resultPayload();
+    r.payouts = [
+      {
+        payout_id: "refund-all",
+        ticket_type: "win",
+        selections_json: [2],
+        payout_per_100_yen: 0,
+        refund_rule_json: {
+          kind: "refund",
+          scope: "ticket_type",
+          refund_per_100_yen: 100,
+        },
+      },
+    ];
+    await saveResult(repo, r, "2026-10-12T07:00:00Z");
+    await settle(repo, "result-1", "2026-10-12T07:00:00Z");
+    expect(await purchaseStats(repo)).toMatchObject({
+      refund_yen: 100,
+      hit_denominator: 0,
+      net_yen: 0,
+    });
+  });
+
   it("JSTの同日5,000円上限を6レース目でも守る", async () => {
     await ready();
     for (let i = 1; i <= 6; i++) {

@@ -4,6 +4,26 @@ import { CUTOFF, SOURCE } from "./fixtures";
 import { simulationFixture } from "./simulation-fixture";
 
 describe("数値シミュレーション", () => {
+  it("複勝圏と公式複勝券の対象順位を混同しない", async () => {
+    const output = await simulate(simulationFixture, 1, 100);
+    expect(() =>
+      expectedValues(
+        output,
+        [{ ticket_type: "place", selections: [1], odds: 2, source: SOURCE }],
+        CUTOFF,
+      ),
+    ).toThrow("未取得");
+    const known = await simulate(
+      { ...simulationFixture, place_positions: 2 },
+      1,
+      100,
+    );
+    expect(
+      Object.entries(known.ticket_probabilities)
+        .filter(([k]) => k.startsWith("place:"))
+        .reduce((n, [, p]) => n + p, 0),
+    ).toBeCloseTo(2);
+  });
   it("同じ入力・seed・版で全出力が再現する", async () => {
     expect(await simulate(simulationFixture, 123, 1000)).toEqual(
       await simulate(simulationFixture, 123, 1000),

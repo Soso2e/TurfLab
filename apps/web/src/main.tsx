@@ -192,7 +192,9 @@ function App() {
       setNotice(
         mode === "backtest"
           ? "評価を完了しました"
-          : "保存と読み返しを完了しました",
+          : result.status === "partial"
+            ? "一部の予想を保存しました。未完了の入力を確認してください"
+            : "保存と読み返しを完了しました",
       );
       await reload();
     });
@@ -645,7 +647,12 @@ function App() {
                             <JsonView value={s.scenarios_json} />
                             <details>
                               <summary>実行証跡・限界</summary>
-                              <JsonView value={s.outputs_json} />
+                              <JsonView
+                                value={{
+                                  output: s.outputs_json,
+                                  odds_evaluation: s.evidence_json,
+                                }}
+                              />
                             </details>
                           </div>
                         ))}
@@ -783,6 +790,7 @@ function App() {
                         <tr>
                           <th>推奨券種 / 馬番</th>
                           <th>推奨額</th>
+                          <th>推定確率 / オッズ期待値</th>
                           <th>根拠</th>
                         </tr>
                       </thead>
@@ -796,6 +804,12 @@ function App() {
                                 {arr(r, "selections_json").join("-")}
                               </td>
                               <td>{yen(r.suggested_amount_yen)}</td>
+                              <td>
+                                {pct(r.estimated_probability)} /{" "}
+                                {typeof r.estimated_ev === "number"
+                                  ? r.estimated_ev.toFixed(2)
+                                  : "オッズ未取得"}
+                              </td>
                               <td>{String(r.reason)}</td>
                             </tr>
                           ))}
@@ -1182,6 +1196,17 @@ function App() {
                       </p>
                       <p className="muted">
                         {String(obj(stats.purchases).rule)}
+                      </p>
+                    </section>
+                    <section className="panel">
+                      <h2>推奨買い目の参考収支</h2>
+                      <p>
+                        仮定購入額 {yen(obj(stats.recommendations).stake_yen)} ·
+                        参考損益 {yen(obj(stats.recommendations).net_yen)} ·
+                        参考回収率 {pct(obj(stats.recommendations).return_rate)}
+                      </p>
+                      <p className="muted">
+                        {String(obj(stats.recommendations).rule)}
                       </p>
                     </section>
                     <section className="panel">

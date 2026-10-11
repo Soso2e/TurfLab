@@ -61,6 +61,19 @@ export async function validatePrediction(
       instant(model.training_cutoff_at) <= instant(cutoff),
       "モデルの学習時点違反",
     );
+  for (const id of arr(snapshot, "odds_snapshot_ids_json")) {
+    requireCondition(typeof id === "string", "オッズIDが不正です");
+    const odds = await get(repo, "odds_snapshots", id);
+    requireCondition(
+      odds.race_id === race.race_id,
+      "snapshotのオッズは別レースです",
+    );
+    asOf(odds, cutoff);
+    requireCondition(
+      instant(odds.captured_at) <= instant(cutoff),
+      "オッズ観測が締切後です",
+    );
+  }
   const validEntries = (await repo.list("race_entries")).filter(
     (x) => x.race_id === race.race_id && x.status === "active",
   );
@@ -232,6 +245,10 @@ export async function preview(
   const result: Row[] = [];
   for (let i = 0; i < ps.length; i++) {
     try {
+      requireCondition(
+        instant(ps[i].information_cutoff_at) <= instant(input.generated_at),
+        "生成日時より後の情報締切は使えません",
+      );
       result.push({
         prediction_id: ps[i].prediction_id,
         valid: true,

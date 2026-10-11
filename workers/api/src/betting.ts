@@ -310,6 +310,21 @@ export async function saveResult(
         num(p, "payout_per_100_yen") >= 0,
       "払戻は非負整数です",
     );
+    if (p.refund_rule_json != null) {
+      const rule = obj(p.refund_rule_json);
+      requireCondition(
+        rule.kind === "refund" &&
+          ["selection", "ticket_type"].includes(str(rule, "scope")) &&
+          Number.isInteger(num(rule, "refund_per_100_yen")) &&
+          num(rule, "refund_per_100_yen") >= 0 &&
+          num(rule, "refund_per_100_yen") <= 100,
+        "公式返還規則が不正です",
+      );
+      requireCondition(
+        num(p, "payout_per_100_yen") === 0,
+        "払戻と返還を同じ行へ混在できません",
+      );
+    }
     const ns = ticket(str(p, "ticket_type"), p.selections_json, numbers);
     const key = canonical([p.ticket_type, ns]);
     requireCondition(!payoutKeys.has(key), "払戻買い目が重複しています");
@@ -374,7 +389,6 @@ export async function settle(
   const bets = (await repo.list("virtual_bets")).filter(
     (b) => b.race_id === result.race_id && b.status === "confirmed",
   );
-  const status = obj(result.entry_status_json);
   const settlements = await repo.list("settlements");
   const output: Row[] = [];
   for (const bet of bets) {
@@ -385,26 +399,7 @@ export async function settle(
       continue;
     }
     const amount = num(bet, "amount_yen");
-    const selection = arr(bet, "selections_json");
-    const refund =
-      result.official_status === "cancelled" ||
-      selection.some((n) =>
-        ["scratched", "cancelled"].includes(String(status[String(n)])),
-      )
-        ? amount
-        : 0;
-    const payout = refund
-      ? 0
-      : payouts
-          .filter(
-            (p) =>
-              p.ticket_type === bet.ticket_type &&
-              canonical(p.selections_json) === canonical(selection),
-          )
-          .reduce(
-            (s, p) => s + (num(p, "payout_per_100_yen") * amount) / 100,
-            0,
-          );
+    const { refund, payout } = financialOutcome(bet, result, payouts);
     const previous = settlements
       .filter((s) => s.bet_id === bet.bet_id)
       .sort((a, b) => num(b, "revision") - num(a, "revision"))[0];
@@ -472,5 +467,103 @@ export async function purchaseStats(repo: Repository): Promise<Row> {
     hit_rate: denominator.length ? hits / denominator.length : null,
     hit_denominator: denominator.length,
     rule: "最新公式結果で精算済みの本人購入のみ。回収率は返還を含む。返還券は的中率の分母・的中から除外。未精算購入額は収支に含めない。",
+  };
+}
+
+export function financialOutcome(
+  bet: Row,
+  result: Row,
+  payouts: Row[],
+): { refund: number; payout: number } {
+  const amount = num(bet, "amount_yen"),
+    selection = arr(bet, "selections_json"),
+    status = obj(result.entry_status_json);
+  let refund =
+    result.official_status === "cancelled" ||
+    selection.some((n) =>
+      ["scratched", "cancelled"].includes(String(status[String(n)])),
+    )
+      ? amount
+      : 0;
+  const matching = payouts.filter(
+    (p) =>
+      p.ticket_type === bet.ticket_type &&
+      canonical(p.selections_json) === canonical(selection),
+  );
+  if (!refund) {
+    const rules = payouts
+      .filter(
+        (p) => p.ticket_type === bet.ticket_type && p.refund_rule_json != null,
+      )
+      .filter(
+        (p) =>
+          obj(p.refund_rule_json).scope === "ticket_type" ||
+          canonical(p.selections_json) === canonical(selection),
+      );
+    requireCondition(rules.length <= 1, "返還規則が競合しています");
+    if (rules.length)
+      refund =
+        (num(obj(rules[0].refund_rule_json), "refund_per_100_yen") * amount) /
+        100;
+  }
+  const payout = refund
+    ? 0
+    : matching
+        .filter((p) => p.refund_rule_json == null)
+        .reduce((n, p) => n + (num(p, "payout_per_100_yen") * amount) / 100, 0);
+  requireCondition(
+    Number.isSafeInteger(refund) && Number.isSafeInteger(payout),
+    "精算金額が整数範囲を超えました",
+  );
+  return { refund, payout };
+}
+export async function recommendationStats(repo: Repository): Promise<Row> {
+  const predictions = (await repo.list("predictions")).filter(
+    (p) => p.status === "locked" && p.kind !== "backtest",
+  );
+  const results = await repo.list("race_results"),
+    payouts = await repo.list("payouts");
+  const recommendations = await repo.list("recommendations");
+  let stake = 0,
+    payout = 0,
+    refund = 0,
+    pending = 0,
+    count = 0;
+  for (const rec of recommendations) {
+    const p = predictions.find((p) => p.prediction_id === rec.prediction_id);
+    if (!p || num(rec, "suggested_amount_yen") === 0) continue;
+    const result = results
+      .filter((r) => r.race_id === p.race_id)
+      .sort((a, b) => num(b, "revision") - num(a, "revision"))[0];
+    if (
+      !result ||
+      !["official", "cancelled"].includes(str(result, "official_status"))
+    ) {
+      pending++;
+      continue;
+    }
+    const outcome = financialOutcome(
+      {
+        amount_yen: rec.suggested_amount_yen,
+        ticket_type: rec.ticket_type,
+        selections_json: rec.selections_json,
+      },
+      result,
+      payouts.filter((r) => r.result_id === result.result_id),
+    );
+    stake += num(rec, "suggested_amount_yen");
+    payout += outcome.payout;
+    refund += outcome.refund;
+    count++;
+  }
+  return {
+    reference_tickets: count,
+    pending_tickets: pending,
+    stake_yen: stake,
+    payout_yen: payout,
+    refund_yen: refund,
+    net_yen: payout + refund - stake,
+    return_rate: stake ? (payout + refund) / stake : null,
+    rule: "全確定予想の推奨をsuggested_amount_yenで仮定購入した参考値。0円推奨・未確定結果は除外。Morning/Final等の各版を別件として含む。本人購入・当日の採用版だけの収支ではない。",
   };
 }

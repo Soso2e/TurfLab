@@ -16,6 +16,7 @@ import {
 } from "../../../packages/shared/src/repository";
 import {
   simulate,
+  expectedValues,
   type SimulationInput,
 } from "../../../packages/simulation/src/engine";
 import {
@@ -34,6 +35,7 @@ import {
   audit,
   confirmBet,
   purchaseStats,
+  recommendationStats,
   saveResult,
   settle,
   skipRace,
@@ -141,6 +143,7 @@ export async function route(
     return {
       purchases: await purchaseStats(repo),
       predictions: await analytics(repo),
+      recommendations: await recommendationStats(repo),
     };
   if (method === "GET" && path === "/backup") return backup(repo);
   if (method === "GET" && path === "/integrity") return integrityReport(repo);
@@ -253,11 +256,30 @@ export async function route(
         model?.engine_version === "segment-mc-v1",
         "モデルのエンジン版を固定してください",
       );
+      requireCondition(
+        typeof input.seed === "number" && typeof input.trial_count === "number",
+        "seed・試行数は数値です",
+      );
       const output = await simulate(
         simulationInput,
         Number(input.seed),
         Number(input.trial_count),
       );
+      const cutoffOdds = [];
+      for (const oid of (snapshot.odds_snapshot_ids_json ?? []) as string[]) {
+        const o = await repo.get("odds_snapshots", oid);
+        requireCondition(
+          o && o.race_id === prediction.race_id,
+          "オッズ参照不足",
+        );
+        cutoffOdds.push({
+          ticket_type: str(o, "ticket_type"),
+          selections: o.selections_json as number[],
+          odds: Number(o.odds),
+          source: o,
+        });
+      }
+      const ev = expectedValues(output, cutoffOdds, simulationInput.cutoff_at);
       const simId = str(input, "simulation_id");
       const existing = await repo.get("simulation_runs", simId);
       const row: Row = {
@@ -273,6 +295,7 @@ export async function route(
         seed: output.seed,
         trial_count: output.trial_count,
         outputs_json: { ...output, input: simulationInput } as unknown as Json,
+        evidence_json: { expected_values: ev },
         started_at: existing?.started_at ?? now,
         completed_at: existing?.completed_at ?? now,
       };

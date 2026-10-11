@@ -21,6 +21,9 @@ async function call(path: string, body?: unknown) {
 const unauthorized = await fetch(apiOrigin + "/api/races");
 if (unauthorized.status !== 401)
   throw new Error("未認証アクセスを拒否できません");
+const connection = await call("/status");
+if (connection.data.storage_mode !== "local")
+  throw new Error("実Sheets接続では検証用データを作成できません");
 const { input, prediction, data } = await fixture();
 const current = new Date();
 const generated = new Date(current.getTime() - 120000).toISOString();
@@ -172,6 +175,7 @@ await page
 await page.getByRole("heading", { name: "推奨と本人の仮想購入" }).waitFor();
 await page.getByRole("button", { name: "03成績と検証" }).click();
 await page.getByRole("heading", { name: "本人購入の成績" }).waitFor();
+await page.getByRole("heading", { name: "推奨買い目の参考収支" }).waitFor();
 await page.getByRole("button", { name: "02データを取り込む" }).click();
 await page.getByLabel("取り込みJSON").fill("{");
 await page.getByRole("button", { name: "検証・プレビュー" }).click();
