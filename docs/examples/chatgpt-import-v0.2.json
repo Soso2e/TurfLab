@@ -1,0 +1,74 @@
+{
+  "schema_version": "0.2",
+  "example_only": true,
+  "import_id": "example-import-20261012-01",
+  "generated_at": "2026-10-11T23:10:00Z",
+  "predictions": [
+    {
+      "prediction_id": "example-prediction-01",
+      "race_id": "example-race-01",
+      "model_version_id": "example-model-v0",
+      "snapshot_id": "example-snapshot-01",
+      "kind": "morning",
+      "information_cutoff_at": "2026-10-11T23:00:00Z",
+      "evidence": [
+        {
+          "evidence_id": "example-evidence-01",
+          "source": "架空の事前入力",
+          "source_url": "https://example.invalid/race-01",
+          "valid_as_of": "2026-10-11T22:00:00Z",
+          "available_at": "2026-10-11T22:10:00Z",
+          "retrieved_at": "2026-10-11T22:30:00Z",
+          "classification": "fact",
+          "note": "説明専用。実際の出典ではなく、このまま予想を確定してはいけない。"
+        }
+      ],
+      "horse_evaluations": [
+        {
+          "entry_id": "example-entry-01",
+          "rank": 1,
+          "win_probability": 0.6,
+          "top3_probability": 1.0,
+          "abilities": {"stamina": null, "acceleration": null},
+          "course_fit": "未確認",
+          "jockey_fit": "未確認",
+          "expected_position": "先行と仮定",
+          "classification": "estimate",
+          "confidence": null,
+          "evidence_ids": ["example-evidence-01"],
+          "rationale": "2頭のみの架空例。実績に基づく評価ではない。"
+        },
+        {
+          "entry_id": "example-entry-02",
+          "rank": 2,
+          "win_probability": 0.4,
+          "top3_probability": 1.0,
+          "abilities": {"stamina": null, "acceleration": null},
+          "course_fit": "未確認",
+          "jockey_fit": "未確認",
+          "expected_position": "追走と仮定",
+          "classification": "estimate",
+          "confidence": null,
+          "evidence_ids": ["example-evidence-01"],
+          "rationale": "構造を説明するための推定例。"
+        }
+      ],
+      "simulation": {
+        "simulation_id": "example-simulation-01",
+        "mode": "narrative",
+        "engine_version": null,
+        "seed": null,
+        "trial_count": null,
+        "scenarios": [
+          {"pace": "slow", "weight": 0.3, "analysis": "終盤の加速を重視する仮説"},
+          {"pace": "middle", "weight": 0.5, "analysis": "持久力と加速の両方を考慮する仮説"},
+          {"pace": "high", "weight": 0.2, "analysis": "終盤の疲労差を考慮する仮説"}
+        ],
+        "evidence_ids": ["example-evidence-01"],
+        "limitations": "文章によるシナリオ分析。数値試行を実行していない。"
+      },
+      "recommendations": [],
+      "skip_reason": "架空入力で、根拠とオッズが未確認のため仮想購入を推奨しない。"
+    }
+  ]
+}
