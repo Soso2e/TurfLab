@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { canonical, columns, type Json } from "../packages/shared/src/domain";
+import { canonical, columns, DomainError, tables, type Json, type Table } from "../packages/shared/src/domain";
+import { route } from "../workers/api/src/index";
 import {
   GoogleSheetsClient,
   SheetsRepository,
@@ -95,6 +96,71 @@ describe("Sheets Repository", () => {
     const { repo, headers } = fakeSheets();
     headers.splice(headers.indexOf("schema_version"), 1);
     await expect(repo.list("horses")).rejects.toThrow("列が不足");
+  });
+
+  it("Core用の新規タブがなくても既存の一覧・統計・バックアップは読めるが、Core保存は拒否する", async () => {
+    const client = new GoogleSheetsClient({
+      SHEETS_ID: "test-only",
+      GOOGLE_CLIENT_EMAIL: "",
+      GOOGLE_PRIVATE_KEY: "",
+    });
+    const absent = new Set<Table>([
+      "race_pipeline_runs",
+      "reference_plans",
+      "reference_adoptions",
+    ]);
+    vi.spyOn(client, "batchRead").mockImplementation(async (ranges) =>
+      ranges.map((range) => {
+        const table = range.match(/'TL_([^']+)'/)?.[1] as Table;
+        if (absent.has(table))
+          throw new DomainError("Sheets read (400): Unable to parse range", 400);
+        return {
+          range,
+          values: range.endsWith("A1:AZ1") ? [columns(table)] : [],
+        };
+      }),
+    );
+    const write = vi.spyOn(client, "batchWrite").mockResolvedValue();
+    const repo = new SheetsRepository(client);
+    const inspect = vi.spyOn(repo, "inspect").mockResolvedValue({
+      sheets: tables
+        .filter((t) => !absent.has(t))
+        .map((t) => ({ properties: { title: "TL_" + t } })),
+    });
+    for (const endpoint of ["/api/races?date=2026-10-12", "/api/stats", "/api/backup"]) {
+      const result = await route(
+        repo,
+        new Request("https://local" + endpoint),
+        "2026-10-12T00:00:00Z",
+        repo,
+      );
+      expect(result).toBeDefined();
+    }
+    expect(await repo.list("reference_plans")).toEqual([]);
+    expect(inspect).toHaveBeenCalledTimes(1);
+    await expect(
+      repo.put("reference_plans", {
+        schema_version: "0.2",
+        plan_id: "p1",
+        race_id: "r1",
+      }),
+    ).rejects.toThrow("Core用タブがありません");
+    expect(write).not.toHaveBeenCalled();
+  });
+  it("Core用タブが存在する場合、読み取り障害を空テーブルと誤認しない", async () => {
+    const client = new GoogleSheetsClient({
+      SHEETS_ID: "test-only",
+      GOOGLE_CLIENT_EMAIL: "",
+      GOOGLE_PRIVATE_KEY: "",
+    });
+    vi.spyOn(client, "batchRead").mockRejectedValue(
+      new DomainError("Sheets read (400): 権限拒否", 400),
+    );
+    const repo = new SheetsRepository(client);
+    vi.spyOn(repo, "inspect").mockResolvedValue({
+      sheets: [{ properties: { title: "TL_reference_plans" } }],
+    });
+    await expect(repo.list("reference_plans")).rejects.toThrow("権限拒否");
   });
   it("列番号はAA以降も正しい", () => {
     expect(columnLetter(1)).toBe("A");
