@@ -8,6 +8,8 @@ React / TypeScript / ViteのWebとCloudflare Workers API、Sheets Repository、�
 
 本番接続は未設定。既存Sheetsを読み取り調査し、原本を変更せず旧タブ用の閲覧と新規TL_*用の保存基盤を用意した。Google認証・新規タブ・既存ChatGPT出力連携など、完了していない受入条件は [Issue別の実装状況](docs/implementation-status.md) に記録している。GitHub issueは閉じていない。
 
+Issue #30の手動Core実行を追加。6項目の固定スコア、全馬の3展開、1Rずつの参考プラン確定・復旧、最大5Rの独立実行に対応する。本番Sheets接続・自動推論・定時切替は未完了。[Coreの入力と操作](docs/core-pipeline.md) · [監査とADR](docs/adr/0001-race-core-pipeline.md)。
+
 ## 構成と運用
 
 **既存ChatGPT毎朝9時タスク → Google Sheets ↔ Web**。ChatGPTは前日の結果解析と原則5レースの予想を行う。有料AI APIは使わず、既存スケジュールも変更しない。Webは検証・表示・本人操作・集計を担当する。
@@ -37,7 +39,7 @@ npm run dev
 | ------------------- | ------------------------------------------------ |
 | apps/web            | PC・スマホのポータル                             |
 | workers/api         | 認証、直列化、永続ジャーナル、Sheets、業務API    |
-| packages/shared     | データ型、26テーブル、正規化・検証・バックアップ |
+| packages/shared     | データ型、29テーブル、正規化・検証・バックアップ |
 | packages/simulation | seed付き区間Monte Carlo                          |
 | database/sheets     | JSON Schema・旧タブ列対応                        |
 | database/d1         | 移行検証用SQL（本番切替は未実施）                |

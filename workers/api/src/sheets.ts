@@ -78,7 +78,11 @@ export class GoogleSheetsClient {
         assertion,
       }),
     });
-    if (!response.ok) throw new DomainError("Google認証に失敗しました", 503);
+    if (!response.ok)
+      throw new DomainError(
+        `Google認証に失敗しました (${response.status})`,
+        response.status,
+      );
     const data = (await response.json()) as {
       access_token: string;
       expires_in: number;
@@ -104,8 +108,15 @@ export class GoogleSheetsClient {
         body: body ? JSON.stringify(body) : undefined,
       },
     );
-    if (!response.ok)
-      throw new DomainError(`Sheets接続失敗 (${response.status})`, 503);
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: { message?: string };
+      };
+      throw new DomainError(
+        `Sheets ${body ? "write" : "read"} (${response.status}): ${data.error?.message ?? "接続失敗"}`,
+        response.status,
+      );
+    }
     return response.json() as Promise<Record<string, unknown>>;
   }
   async batchRead(

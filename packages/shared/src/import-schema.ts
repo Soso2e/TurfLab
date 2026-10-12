@@ -112,6 +112,13 @@ export const importSchema = object(
                     pace: { enum: ["slow", "middle", "high"] },
                     weight: probability,
                     analysis: text,
+                    lineup: {
+                      type: "array",
+                      items: object(
+                        { entry_id: text, position: text, advantage: text },
+                        ["entry_id", "position", "advantage"],
+                      ),
+                    },
                   },
                   ["pace", "weight", "analysis"],
                 ),

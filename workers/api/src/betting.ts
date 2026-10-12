@@ -517,9 +517,19 @@ export function financialOutcome(
   );
   return { refund, payout };
 }
-export async function recommendationStats(repo: Repository): Promise<Row> {
+export async function recommendationStats(
+  repo: Repository,
+  adoptedOnly = false,
+): Promise<Row> {
+  const referenceAdoptions = adoptedOnly
+    ? await repo.list("reference_adoptions")
+    : [];
   const predictions = (await repo.list("predictions")).filter(
-    (p) => p.status === "locked" && p.kind !== "backtest",
+    (p) =>
+      p.status === "locked" &&
+      p.kind !== "backtest" &&
+      (!adoptedOnly ||
+        referenceAdoptions.some((a) => a.prediction_id === p.prediction_id)),
   );
   const results = await repo.list("race_results"),
     payouts = await repo.list("payouts");
@@ -564,6 +574,8 @@ export async function recommendationStats(repo: Repository): Promise<Row> {
     refund_yen: refund,
     net_yen: payout + refund - stake,
     return_rate: stake ? (payout + refund) / stake : null,
-    rule: "全確定予想の推奨をsuggested_amount_yenで仮定購入した参考値。0円推奨・未確定結果は除外。Morning/Final等の各版を別件として含む。本人購入・当日の採用版だけの収支ではない。",
+    rule: adoptedOnly
+      ? "Coreで確定・採用したMorning/Finalの1R1プランだけの参考収支。0円・未確定結果は除外。本人購入台帳とは独立。"
+      : "全確定予想の推奨をsuggested_amount_yenで仮定購入した参考値。0円推奨・未確定結果は除外。Morning/Final等の各版を別件として含む。本人購入・当日の採用版だけの収支ではない。",
   };
 }

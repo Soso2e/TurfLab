@@ -42,6 +42,12 @@ const statusNames: Record<string, string> = {
   void: "購入取消",
   settled: "精算済み",
   revised: "訂正済み",
+  SELECTED: "選定済み",
+  DATA_READY: "入力固定済み",
+  SIMULATED: "展開分析済み",
+  VALIDATED: "検証・保存済み",
+  BET_LOCKED: "参考プラン確定",
+  SKIPPED: "見送り確定",
 };
 function JsonView({ value }: { value: unknown }) {
   return <pre className="json-view">{JSON.stringify(value, null, 2)}</pre>;
@@ -178,6 +184,8 @@ function App() {
       if (mode === "result") path = "/results";
       if (mode === "review") path = "/reviews";
       if (mode === "backtest") path = "/backtests";
+      if (mode === "pipeline") path = "/pipeline/race";
+      if (mode === "pipelineBatch") path = "/pipeline/batch";
       if (mode === "numeric") {
         path =
           "/predictions/" + encodeURIComponent(activePrediction) + "/simulate";
@@ -192,9 +200,11 @@ function App() {
       setNotice(
         mode === "backtest"
           ? "評価を完了しました"
-          : result.status === "partial"
-            ? "一部の予想を保存しました。未完了の入力を確認してください"
-            : "保存と読み返しを完了しました",
+          : result.status === "failed"
+            ? "処理は未完了です。エラーと再開位置を確認してください"
+            : result.status === "partial"
+              ? "一部の予想を保存しました。未完了の入力を確認してください"
+              : "保存と読み返しを完了しました",
       );
       await reload();
     });
@@ -441,6 +451,39 @@ function App() {
                   )}
                 </section>
                 <section className="panel">
+                  <h2>レースごとのCore処理</h2>
+                  <p>
+                    参考プランの採用・予約額 {yen(data?.reference_budget_yen)} /
+                    ¥5,000 · 本人購入とは別予算
+                  </p>
+                  {data && rows(data.pipeline_runs).length ? (
+                    rows(data.pipeline_runs).map((r) => (
+                      <div className="run-row" key={String(r.pipeline_id)}>
+                        <strong>{String(r.race_id)}</strong>
+                        <span>
+                          {statusNames[String(r.stage)] ?? String(r.stage)}
+                        </span>
+                        <span>
+                          {statusNames[String(r.status)] ?? String(r.status)} ·
+                          更新 {time(r.updated_at)}
+                        </span>
+                        {r.error_json && (
+                          <p className="alert">
+                            {String(obj(r.error_json).message)} ·{" "}
+                            {obj(r.error_json).retryable
+                              ? "同じJSONで再開可能（3回まで）"
+                              : "入力修正・新しいIDが必要"}
+                          </p>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="muted">
+                      Coreの実行記録はありません。取り込み画面から1Rを実行できます。
+                    </p>
+                  )}
+                </section>
+                <section className="panel">
                   <div className="section-heading">
                     <h2>日次の処理状況</h2>
                     <span>既存 ChatGPT タスク · 毎朝9時</span>
@@ -580,6 +623,24 @@ function App() {
                       ))}
                     </select>
                   </div>
+                  {rows(detail.reference_adoptions).map((a) => {
+                    const plan = rows(detail.reference_plans).find(
+                      (p) => p.plan_id === a.plan_id,
+                    );
+                    return plan ? (
+                      <div
+                        className="notice"
+                        key={String(a.reference_adoption_id)}
+                      >
+                        <strong>
+                          参考プラン採用：{String(a.prediction_id)} ·{" "}
+                          {yen(plan.amount_yen)}
+                        </strong>
+                        <p>確定 {time(plan.locked_at)} · 本人購入は別操作</p>
+                        <JsonView value={plan.tickets_json} />
+                      </div>
+                    ) : null;
+                  })}
                   {selected ? (
                     <>
                       <p>
@@ -606,7 +667,14 @@ function App() {
                               .sort((a, b) => Number(a.rank) - Number(b.rank))
                               .map((e) => (
                                 <tr key={String(e.evaluation_id)}>
-                                  <td>{String(e.rank)}</td>
+                                  <td>
+                                    {Number(e.rank) === 1 ? "◎ " : ""}
+                                    {String(e.rank)} ·{" "}
+                                    {e.score == null
+                                      ? "—"
+                                      : Number(e.score).toFixed(2)}
+                                    点
+                                  </td>
                                   <td>
                                     {String(
                                       rows(detail.entries).find(
@@ -1043,6 +1111,8 @@ function App() {
                     >
                       {[
                         ["prediction", "予想"],
+                        ["pipeline", "Core：1Rの計算・参考プラン確定"],
+                        ["pipelineBatch", "Core：最大5Rを順番に確定"],
                         ["master", "レース・基礎データ"],
                         ["result", "公式結果・払戻"],
                         ["review", "翌朝レビュー"],
@@ -1056,7 +1126,9 @@ function App() {
                     </select>
                   </div>
                   <p className="muted">
-                    確定・本人購入は別操作です。予想取り込みだけで購入は発生しません。JSON形式とサンプルは設計資料を参照してください。
+                    {mode.startsWith("pipeline")
+                      ? "Coreは6評価項目から総合点・順位を計算し、3展開を検証して参考プランを自動確定します。本人購入は別操作です。失敗時は同じJSONで再開します。"
+                      : "確定・本人購入は別操作です。予想取り込みだけで購入は発生しません。JSON形式とサンプルは設計資料を参照してください。"}
                   </p>
                   <label className="file-button">
                     JSONファイルを開く
@@ -1122,7 +1194,9 @@ function App() {
                         ? "処理中…"
                         : mode === "backtest"
                           ? "再評価を実行"
-                          : "内容を確認して保存"}
+                          : mode.startsWith("pipeline")
+                            ? "計算・検証して参考プランを確定"
+                            : "内容を確認して保存"}
                     </button>
                   </div>
                   {preview && (
@@ -1196,6 +1270,17 @@ function App() {
                       </p>
                       <p className="muted">
                         {String(obj(stats.purchases).rule)}
+                      </p>
+                    </section>
+                    <section className="panel">
+                      <h2>採用Morning / Finalの参考収支</h2>
+                      <p>
+                        採用投資 {yen(obj(stats.adopted_reference).stake_yen)} ·
+                        参考損益 {yen(obj(stats.adopted_reference).net_yen)} ·
+                        回収率 {pct(obj(stats.adopted_reference).return_rate)}
+                      </p>
+                      <p className="muted">
+                        {String(obj(stats.adopted_reference).rule)}
                       </p>
                     </section>
                     <section className="panel">

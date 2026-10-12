@@ -31,6 +31,7 @@ import {
   type Change,
 } from "./storage";
 import { adopt, lockPrediction, preview, saveImport } from "./imports";
+import { prepareRace, runBatch, runRace, safeFailure } from "./race-pipeline";
 import {
   audit,
   confirmBet,
@@ -49,6 +50,7 @@ import {
   ingestMaster,
   integrityReport,
   reanalysisPrompt,
+  refreshEntries,
   sheetsInbox,
 } from "./workflow";
 export interface Env extends GoogleCredentials {
@@ -144,6 +146,7 @@ export async function route(
       purchases: await purchaseStats(repo),
       predictions: await analytics(repo),
       recommendations: await recommendationStats(repo),
+      adopted_reference: await recommendationStats(repo, true),
     };
   if (method === "GET" && path === "/backup") return backup(repo);
   if (method === "GET" && path === "/integrity") return integrityReport(repo);
@@ -160,6 +163,17 @@ export async function route(
   if (path === "/data/import") return ingestMaster(repo, input, now);
   if (path === "/imports/validate") return preview(repo, input, now);
   if (path === "/imports") return saveImport(repo, input, now);
+  if (path === "/pipeline/preview") return prepareRace(repo, input, now);
+  if (path === "/pipeline/race") return runRace(repo, input, now);
+  if (path === "/pipeline/batch") return runBatch(repo, input, now);
+  const entriesRefresh = path.match(/^\/races\/([^/]+)\/refresh-entries$/);
+  if (entriesRefresh)
+    return refreshEntries(
+      repo,
+      decodeURIComponent(entriesRefresh[1]),
+      input,
+      now,
+    );
   if (path === "/bets") return confirmBet(repo, input, now);
   if (path === "/skip") return skipRace(repo, input, now);
   if (path === "/results") return saveResult(repo, input, now);
@@ -326,6 +340,17 @@ export class TurfCoordinator {
       if (!(await authenticated(request, this.env.API_TOKEN)))
         return response({ error: "本人用認証が必要です" }, 401);
       try {
+        if (
+          request.method === "GET" &&
+          new URL(request.url).pathname === "/api/pipeline/diagnostics"
+        )
+          return response({
+            failure:
+              (await this.state.storage.get("last-storage-failure")) ?? null,
+            pending_journal: Boolean(
+              await this.state.storage.get("pending-journal"),
+            ),
+          });
         const repo = this.underlying();
         const pending =
           await this.state.storage.get<Change[]>("pending-journal");
@@ -334,6 +359,38 @@ export class TurfCoordinator {
           await this.state.storage.delete("pending-journal");
         }
         const staged = new StagedRepository(repo);
+        // Pipeline stages commit through the same durable journal, then read the
+        // underlying storage. A batch finishes each race before starting another.
+        const pipelinePath = new URL(request.url).pathname;
+        if (
+          ["/api/pipeline/race", "/api/pipeline/batch"].includes(
+            pipelinePath,
+          ) &&
+          request.method === "POST"
+        ) {
+          const input = await readBody(request);
+          const commit = async (changes: Change[]) => {
+            if (!changes.length) return;
+            const unfinished =
+              await this.state.storage.get<Change[]>("pending-journal");
+            if (unfinished) {
+              await applyChanges(repo, unfinished);
+              await this.state.storage.delete("pending-journal");
+            }
+            await this.state.storage.put("pending-journal", changes);
+            await applyChanges(repo, changes);
+            await this.state.storage.delete("pending-journal");
+          };
+          return response(
+            await (pipelinePath.endsWith("/batch") ? runBatch : runRace)(
+              repo,
+              input,
+              new Date().toISOString(),
+              commit,
+              () => new Date().toISOString(),
+            ),
+          );
+        }
         const result = await route(
           staged,
           request,
@@ -351,14 +408,21 @@ export class TurfCoordinator {
           result === undefined ? 404 : 200,
         );
       } catch (e) {
+        const failure = safeFailure(
+          e,
+          "journal-or-route",
+          new URL(request.url).pathname,
+        );
+        await this.state.storage.put("last-storage-failure", {
+          ...failure,
+          recorded_at: new Date().toISOString(),
+        });
         return response(
           {
-            error:
-              e instanceof DomainError
-                ? e.message
-                : "処理に失敗しました。接続と入力を確認してください",
+            error: String(failure.message),
+            failure,
           },
-          e instanceof DomainError ? e.status : 503,
+          Number(failure.status),
         );
       }
     });

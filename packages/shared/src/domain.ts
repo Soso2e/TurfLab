@@ -100,6 +100,18 @@ export const tableDefinitions = {
     "event_id",
     "operation_id actor action entity_type entity_id before_hash after_hash event_at",
   ],
+  race_pipeline_runs: [
+    "pipeline_id",
+    "race_id prediction_id snapshot_id race_key prediction_key bet_key payload_hash stage status attempt checkpoint_json error_json updated_at completed_at",
+  ],
+  reference_plans: [
+    "plan_id",
+    "race_id prediction_id budget_date_jst amount_yen status tickets_json payload_hash locked_at",
+  ],
+  reference_adoptions: [
+    "reference_adoption_id",
+    "race_id prediction_id plan_id adopted_at history_json",
+  ],
 } as const;
 export type Table = keyof typeof tableDefinitions;
 export const tables = Object.keys(tableDefinitions) as Table[];
@@ -304,6 +316,13 @@ export const references: Partial<Record<Table, Record<string, Table>>> = {
   odds_snapshots: { race_id: "races" },
   prediction_adoptions: { race_id: "races", prediction_id: "predictions" },
   run_logs: { daily_run_id: "daily_runs", race_id: "races" },
+  race_pipeline_runs: { race_id: "races", snapshot_id: "race_snapshots" },
+  reference_plans: { race_id: "races" },
+  reference_adoptions: {
+    race_id: "races",
+    prediction_id: "predictions",
+    plan_id: "reference_plans",
+  },
 };
 export function validateRow(table: Table, row: Row): void {
   requireCondition(row.schema_version === "0.2", "schema_versionは0.2です");

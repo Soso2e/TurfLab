@@ -119,7 +119,13 @@ export function chronologicalSplit(
 export async function predictionSamples(
   repo: Repository,
 ): Promise<{ samples: ProbabilitySample[]; excluded: Row[] }> {
-  const adoptions = await repo.list("prediction_adoptions");
+  const referenceAdoptions = await repo.list("reference_adoptions");
+  const adoptions = [
+    ...(await repo.list("prediction_adoptions")).filter(
+      (a) => !referenceAdoptions.some((r) => r.race_id === a.race_id),
+    ),
+    ...referenceAdoptions,
+  ];
   const results = await repo.list("race_results");
   const evaluations = await repo.list("horse_evaluations");
   const entries = await repo.list("race_entries");

@@ -95,6 +95,11 @@ export interface Backup {
   counts: Record<Table, number>;
   hash: string;
 }
+const coreTables: Table[] = [
+  "race_pipeline_runs",
+  "reference_plans",
+  "reference_adoptions",
+];
 export async function backup(repo: Repository): Promise<Backup> {
   const content = Object.fromEntries(
     await Promise.all(
@@ -121,6 +126,14 @@ export async function verifyBackup(b: Backup): Promise<void> {
     "バックアップのハッシュ不一致",
   );
   for (const t of tables) {
+    // v0.2 backups taken before Issue #30 have no Core tables. Authenticate
+    // their original hash first, then restore these added tables as empty.
+    if (
+      coreTables.includes(t) &&
+      b.tables[t] === undefined &&
+      b.counts[t] === undefined
+    )
+      continue;
     requireCondition(
       Array.isArray(b.tables[t]) && b.counts[t] === b.tables[t].length,
       `${t}: 件数不一致`,
@@ -132,7 +145,7 @@ export async function verifyBackup(b: Backup): Promise<void> {
       for (const [key, target] of Object.entries(references[t] ?? {}))
         if (r[key] != null)
           requireCondition(
-            b.tables[target].some((x) => idOf(target, x) === r[key]),
+            (b.tables[target] ?? []).some((x) => idOf(target, x) === r[key]),
             `${t}.${key}: 参照不整合`,
           );
     }
@@ -146,9 +159,13 @@ export async function restoreEmpty(repo: Repository, b: Backup): Promise<void> {
       "復元先は空である必要があります",
       409,
     );
-  for (const t of tables) for (const r of b.tables[t]) await repo.put(t, r);
+  for (const t of tables)
+    for (const r of b.tables[t] ?? []) await repo.put(t, r);
   requireCondition(
-    (await backup(repo)).hash === b.hash,
+    (await backup(repo)).hash ===
+      (await hash(
+        Object.fromEntries(tables.map((t) => [t, b.tables[t] ?? []])),
+      )),
     "復元後のハッシュ不一致",
     503,
   );
