@@ -18,6 +18,7 @@ import {
   immutablePut,
   type Repository,
 } from "../../../packages/shared/src/repository";
+import { StagedRepository } from "./storage";
 export async function audit(
   repo: Repository,
   operationId: string,
@@ -26,6 +27,7 @@ export async function audit(
   now: string,
   before: Row | null,
   after: Row,
+  entityId = operationId,
 ): Promise<void> {
   const existing = await repo.get("audit_events", `${action}:${operationId}`);
   if (existing) {
@@ -44,7 +46,7 @@ export async function audit(
     actor: "owner",
     action,
     entity_type: entity,
-    entity_id: operationId,
+    entity_id: entityId,
     before_hash: before ? await hash(before) : null,
     after_hash: await hash(after),
     event_at: now,
@@ -160,6 +162,51 @@ export async function confirmBet(
   await audit(repo, op, "confirm-bet", "virtual_bets", now, null, bet);
   return bet;
 }
+// Validate the entire replacement in isolation before changing the caller's repository.
+// The coordinator persists these changes through its existing durable journal.
+export async function reviseBet(
+  repo: Repository,
+  id: string,
+  input: Row,
+  now: string,
+): Promise<Row> {
+  const op = str(input, "operation_id");
+  const before = obj(input.expected_bet);
+  requireCondition(before.bet_id === id, "変更元の購入IDが不一致です", 409);
+  const prior = await repo.get("audit_events", `revise-bet:${op}`);
+  const payload = {
+    ...input,
+    race_id: before.race_id,
+    prediction_id: before.prediction_id,
+    recommendation_id: null,
+  };
+  if (prior) {
+    requireCondition(
+      prior.entity_id === id && prior.before_hash === (await hash(before)),
+      "変更操作IDが競合しています",
+      409,
+    );
+    return confirmBet(repo, payload, now);
+  }
+  requireCondition(
+    !(await repo.get("virtual_bets", `bet:${op}`)),
+    "変更操作IDは使用済みです",
+    409,
+  );
+  const current = await get(repo, "virtual_bets", id);
+  requireCondition(
+    canonical(current) === canonical(before) && current.status === "confirmed",
+    "購入記録が更新されています。再読み込みしてください",
+    409,
+  );
+  const staged = new StagedRepository(repo);
+  await voidBet(staged, id, op, now);
+  const after = await confirmBet(staged, payload, now);
+  await audit(staged, op, "revise-bet", "virtual_bets", now, before, after, id);
+  for (const change of staged.changes.values())
+    await repo.put(change.table, change.after);
+  return after;
+}
 export async function skipRace(
   repo: Repository,
   input: Row,
@@ -197,8 +244,9 @@ export async function voidBet(
   if (bet.status === "void") return bet;
   const race = await get(repo, "races", str(bet, "race_id"));
   requireCondition(
-    instant(now) < instant(race.scheduled_start_at),
-    "発走後の任意取消は禁止です",
+    race.status === "scheduled" &&
+      instant(now) < instant(race.scheduled_start_at),
+    "発走後・取消レースの任意取消は禁止です",
   );
   const changed = { ...bet, status: "void" };
   await repo.put("virtual_bets", changed);

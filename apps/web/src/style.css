@@ -435,6 +435,8 @@ label {
 input,
 select,
 textarea {
+  max-width: 100%;
+  min-width: 0;
   background: #fbfcf8;
   border: 1px solid #d6dfcf;
   border-radius: 5px;

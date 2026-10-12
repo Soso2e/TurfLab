@@ -35,6 +35,7 @@ import { prepareRace, runBatch, runRace, safeFailure } from "./race-pipeline";
 import {
   audit,
   confirmBet,
+  reviseBet,
   purchaseStats,
   recommendationStats,
   saveResult,
@@ -174,6 +175,9 @@ export async function route(
       input,
       now,
     );
+  const revision = path.match(/^\/bets\/([^/]+)\/revise$/);
+  if (revision)
+    return reviseBet(repo, decodeURIComponent(revision[1]), input, now);
   if (path === "/bets") return confirmBet(repo, input, now);
   if (path === "/skip") return skipRace(repo, input, now);
   if (path === "/results") return saveResult(repo, input, now);
