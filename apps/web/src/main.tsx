@@ -87,6 +87,8 @@ function App() {
   const [preview, setPreview] = useState<Row>();
   const [output, setOutput] = useState<Row>();
   const [activePrediction, setActivePrediction] = useState("");
+  const [editingBet, setEditingBet] = useState<Row>();
+  const [verificationMode, setVerificationMode] = useState(false);
   const [betType, setBetType] = useState("win");
   const [selections, setSelections] = useState("");
   const [amount, setAmount] = useState(100);
@@ -161,6 +163,7 @@ function App() {
         String(ps.at(-1)?.information_cutoff_at ?? new Date().toISOString()),
       );
       setConfirmed(false);
+      setEditingBet(undefined);
       setOperation(uid());
     });
   }
@@ -171,6 +174,9 @@ function App() {
   );
   const purchase = data?.purchase_stats ? obj(data.purchase_stats) : {};
   const race = detail ? obj(detail.race) : undefined;
+  const canEditBet =
+    race?.status === "scheduled" &&
+    Date.now() < Date.parse(String(race.scheduled_start_at));
   const changedEditor = (v: string) => {
     setEditor(v);
     setPreview(undefined);
@@ -486,7 +492,7 @@ function App() {
                 <section className="panel">
                   <div className="section-heading">
                     <h2>日次の処理状況</h2>
-                    <span>既存 ChatGPT タスク · 毎朝9時</span>
+                    <span>既存 ChatGPT タスク · 受信自動化は本番検証待ち</span>
                   </div>
                   {data && rows(data.daily_runs).length ? (
                     rows(data.daily_runs).map((r) => (
@@ -887,6 +893,12 @@ function App() {
                   <p className="muted">
                     推奨は購入ではありません。本人が選んだ買い目だけを別に記録します。
                   </p>
+                  {editingBet && (
+                    <p role="status">
+                      購入 {String(editingBet.bet_id)}{" "}
+                      を変更中。元の記録は履歴に残ります。
+                    </p>
+                  )}
                   <div className="form-grid">
                     <label>
                       券種
@@ -952,19 +964,34 @@ function App() {
                   <div className="toolbar">
                     <button
                       className="primary"
-                      disabled={busy || !confirmed || !activePrediction}
+                      disabled={
+                        busy || !confirmed || !activePrediction || !canEditBet
+                      }
                       onClick={() =>
                         void action(async () => {
-                          await api("/bets", {
-                            operation_id: operation,
-                            race_id: race.race_id,
-                            prediction_id: activePrediction,
-                            ticket_type: betType,
-                            selections: selections.split("-").map(Number),
-                            amount_yen: amount,
-                          });
+                          await api(
+                            editingBet
+                              ? "/bets/" +
+                                  encodeURIComponent(
+                                    String(editingBet.bet_id),
+                                  ) +
+                                  "/revise"
+                              : "/bets",
+                            {
+                              ...(editingBet
+                                ? { expected_bet: editingBet }
+                                : {}),
+                              operation_id: operation,
+                              race_id: race.race_id,
+                              prediction_id: activePrediction,
+                              ticket_type: betType,
+                              selections: selections.split("-").map(Number),
+                              amount_yen: amount,
+                            },
+                          );
                           setOperation(uid());
                           setConfirmed(false);
+                          setEditingBet(undefined);
                           setDetail(
                             await api(
                               "/races/" +
@@ -976,7 +1003,7 @@ function App() {
                         })
                       }
                     >
-                      仮想購入を確定
+                      {editingBet ? "変更を保存" : "仮想購入を確定"}
                     </button>
                     <button
                       disabled={busy}
@@ -994,6 +1021,23 @@ function App() {
                       見送る
                     </button>
                   </div>
+                  {editingBet && (
+                    <button
+                      disabled={busy}
+                      onClick={() => {
+                        setEditingBet(undefined);
+                        setConfirmed(false);
+                        setOperation(uid());
+                      }}
+                    >
+                      編集をやめる
+                    </button>
+                  )}
+                  {!canEditBet && (
+                    <p>
+                      発走後・取消レースは購入を変更できません。保存時にもサーバーが発走時刻を確認します。
+                    </p>
+                  )}
                   <h3>本人購入の記録</h3>
                   {rows(detail.bets).length ? (
                     rows(detail.bets).map((b) => (
@@ -1005,7 +1049,23 @@ function App() {
                         <strong>{yen(b.amount_yen)}</strong>
                         <span>{statusNames[String(b.status)]}</span>
                         <button
-                          disabled={busy || b.status === "void"}
+                          disabled={
+                            busy || b.status !== "confirmed" || !canEditBet
+                          }
+                          onClick={() => {
+                            setEditingBet(b);
+                            setBetType(String(b.ticket_type));
+                            setSelections(arr(b, "selections_json").join("-"));
+                            setAmount(Number(b.amount_yen));
+                            setActivePrediction(String(b.prediction_id));
+                            setConfirmed(false);
+                            setOperation(uid());
+                          }}
+                        >
+                          変更
+                        </button>
+                        <button
+                          disabled={busy || b.status === "void" || !canEditBet}
                           onClick={() =>
                             void action(async () => {
                               await api(
@@ -1032,6 +1092,25 @@ function App() {
                   ) : (
                     <p>まだ購入していません。</p>
                   )}
+                  <h3>購入の変更履歴</h3>
+                  {rows(detail.bet_changes).map((e) => {
+                    const before = rows(detail.bets).find(
+                      (b) => b.bet_id === e.entity_id,
+                    );
+                    const after = rows(detail.bets).find(
+                      (b) => b.bet_id === `bet:${e.operation_id}`,
+                    );
+                    const summary = (b: Row | undefined) =>
+                      b
+                        ? `${b.ticket_type} ${arr(b, "selections_json").join("-")} / ${yen(b.amount_yen)}`
+                        : "記録未取得";
+                    return (
+                      <p key={String(e.event_id)}>
+                        {time(e.event_at)} · {summary(before)} →{" "}
+                        {summary(after)}
+                      </p>
+                    );
+                  })}
                 </section>
                 <section className="panel">
                   <h2>公式結果と翌朝レビュー</h2>
@@ -1118,13 +1197,40 @@ function App() {
                         ["review", "翌朝レビュー"],
                         ["numeric", "数値シミュレーション"],
                         ["backtest", "時間順の再評価"],
-                      ].map(([v, n]) => (
-                        <option key={v} value={v}>
-                          {n}
-                        </option>
-                      ))}
+                      ]
+                        .filter(
+                          ([v]) =>
+                            verificationMode ||
+                            ![
+                              "pipeline",
+                              "pipelineBatch",
+                              "numeric",
+                              "backtest",
+                            ].includes(v),
+                        )
+                        .map(([v, n]) => (
+                          <option key={v} value={v}>
+                            {n}
+                          </option>
+                        ))}
                     </select>
                   </div>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={verificationMode}
+                      onChange={(e) => {
+                        setVerificationMode(e.target.checked);
+                        setMode("prediction");
+                        setPreview(undefined);
+                        setOutput(undefined);
+                      }}
+                    />
+                    検証用のCore・数値計算を表示する
+                  </label>
+                  <p>
+                    予想・展開/数値シミュレーションはChatGPTが担当します。Webは結果を受け取り、本人Betを管理します。ChatGPT→Sheetsの自動受信は本番検証待ちです。
+                  </p>
                   <p className="muted">
                     {mode.startsWith("pipeline")
                       ? "Coreは6評価項目から総合点・順位を計算し、3展開を検証して参考プランを自動確定します。本人購入は別操作です。失敗時は同じJSONで再開します。"
@@ -1437,7 +1543,8 @@ function App() {
                       : "ローカル開発用の記録を使用しています。Sheets の接続設定はサーバー側で行います。"}
                   </p>
                   <p>
-                    分析元: 既存 ChatGPT 毎朝9時タスク · 有料 AI API: 使用なし
+                    分析元: 既存 ChatGPT タスク（接続検証待ち） · 有料 AI API:
+                    使用なし
                   </p>
                   <p className="muted">
                     Web の接続キーと Google の接続情報は別です。Google

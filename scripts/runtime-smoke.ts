@@ -1,4 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fixture, NOW } from "../tests/fixtures";
 import {
   obj,
@@ -7,6 +7,8 @@ import {
   type Row,
 } from "../packages/shared/src/domain";
 import { chromium } from "@playwright/test";
+const outputDir = "test-results";
+await mkdir(outputDir, { recursive: true });
 const apiOrigin = "http://localhost:8787";
 const vars = await readFile("workers/api/.dev.vars", "utf8");
 const token = vars.match(/^API_TOKEN="(.+)"$/m)?.[1];
@@ -169,6 +171,38 @@ const retry = await ok("/bets", {
 });
 if (retry.bet_id !== successful.bet_id)
   throw new Error("購入再送の冪等性に失敗");
+const revisions = await Promise.all(
+  [1, 2].map((i) =>
+    call(`/bets/${encodeURIComponent(String(successful.bet_id))}/revise`, {
+      operation_id: `runtime-edit-${runId}-${i}`,
+      expected_bet: successful,
+      ticket_type: "place",
+      selections: [2],
+      amount_yen: 500,
+    }),
+  ),
+);
+if (
+  revisions
+    .map((r) => r.status)
+    .sort()
+    .join(",") !== "200,409"
+)
+  throw new Error("同時変更の競合拒否に失敗");
+const edited = revisions.find((r) => r.status === 200)!.data;
+const editPayload = {
+  operation_id: edited.operation_id,
+  expected_bet: successful,
+  ticket_type: "place",
+  selections: [2],
+  amount_yen: 500,
+};
+const editRetry = await ok(
+  `/bets/${encodeURIComponent(String(successful.bet_id))}/revise`,
+  editPayload,
+);
+if (editRetry.bet_id !== edited.bet_id)
+  throw new Error("変更再送が重複しました");
 // Core uses a separate reference ledger and the same owner serialization.
 const coreInputs: Row[] = [];
 for (let n = 1; n <= 7; n++) {
@@ -282,7 +316,7 @@ const coreDashboard = await call("/races?date=" + coreDate);
 if (coreDashboard.data.reference_budget_yen !== 5000)
   throw new Error("Core参考予算が不正");
 const browser = await chromium.launch({
-  executablePath: "/usr/bin/chromium",
+  executablePath: process.env.SMOKE_BROWSER_PATH,
   headless: true,
   args: ["--no-sandbox"],
 });
@@ -298,7 +332,7 @@ await page
   .getByRole("heading", { name: "架空レース · ローカル動作確認 " + runId })
   .waitFor();
 await page.screenshot({
-  path: "/workspace/scratch/turflab-desktop.png",
+  path: `${outputDir}/turflab-desktop.png`,
   fullPage: true,
 });
 await page
@@ -307,10 +341,43 @@ await page
   })
   .click();
 await page.getByRole("heading", { name: "推奨と本人の仮想購入" }).waitFor();
-await page.getByRole("button", { name: "03成績と検証" }).click();
+await page.setViewportSize({ width: 390, height: 844 });
+await page
+  .getByRole("button", { name: "変更", exact: true })
+  .filter({ visible: true })
+  .last()
+  .click();
+await page.getByLabel("本人購入額", { exact: true }).fill("400");
+await page.getByLabel("買い目・金額・採用版を確認しました（仮想購入）").check();
+await page.getByRole("button", { name: "変更を保存", exact: true }).click();
+await page.getByText("本人の仮想購入を保存しました").waitFor();
+await page.getByRole("heading", { name: "購入の変更履歴" }).waitFor();
+const updated = await call(`/races/${raceId}`);
+if (
+  rows(updated.data.bets).filter((b) => b.status === "confirmed").length !==
+    1 ||
+  rows(updated.data.bet_changes).length !== 2
+)
+  throw new Error("画面編集後の購入・変更履歴が不正です");
+if (
+  await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  )
+)
+  throw new Error("モバイル詳細が横幅を超えています");
+await page.screenshot({
+  path: `${outputDir}/turflab-mobile-edit.png`,
+  fullPage: true,
+});
+await page.getByRole("button", { name: /成績と検証/ }).click();
 await page.getByRole("heading", { name: "本人購入の成績" }).waitFor();
 await page.getByRole("heading", { name: "推奨買い目の参考収支" }).waitFor();
-await page.getByRole("button", { name: "02データを取り込む" }).click();
+await page.getByRole("button", { name: /データを取り込む/ }).click();
+if (
+  await page.getByLabel("入力種別").locator('option[value="pipeline"]').count()
+)
+  throw new Error("検証計算が通常導線に混在しています");
+await page.getByLabel("検証用のCore・数値計算を表示する").check();
 await page.getByLabel("入力種別").selectOption("pipeline");
 await page.getByLabel("取り込みJSON").fill(JSON.stringify(coreInputs[6]));
 await page
@@ -328,7 +395,7 @@ await page.getByRole("heading", { name: "本日のレース" }).waitFor();
 await page.locator('input[type="date"]').fill(coreDate);
 await page.getByText("参考プランの採用・予約額", { exact: false }).waitFor();
 await page.screenshot({
-  path: "/workspace/scratch/turflab-mobile.png",
+  path: `${outputDir}/turflab-mobile.png`,
   fullPage: true,
 });
 const overflow = await page.evaluate(
@@ -338,7 +405,7 @@ if (overflow) throw new Error("モバイルの横幅が画面を超えていま�
 if (errors.length) throw new Error("ブラウザエラー: " + errors.join(";"));
 await browser.close();
 await writeFile(
-  "/workspace/scratch/turflab-runtime-report.json",
+  `${outputDir}/turflab-runtime-report.json`,
   JSON.stringify(
     {
       unauthenticated_status: unauthorized.status,
@@ -347,7 +414,8 @@ await writeFile(
       core_score: 85,
       core_ui_skip: "complete",
       concurrent_purchase_statuses: concurrent.map((r) => r.status),
-      spent_yen: 600,
+      concurrent_revision_statuses: revisions.map((r) => r.status),
+      mobile_bet_edit: "400yen, one active bet, two linked revisions",
       duplicate_retry: "same-bet",
       browser_errors: errors,
       mobile_horizontal_overflow: overflow,

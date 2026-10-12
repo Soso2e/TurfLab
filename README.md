@@ -10,6 +10,8 @@ React / TypeScript / ViteのWebとCloudflare Workers API、Sheets Repository、�
 
 Issue #30の手動Core実行を追加。6項目の固定スコア、全馬の3展開、1Rずつの参考プラン確定・復旧、最大5Rの独立実行に対応する。本番Sheets接続・自動推論・定時切替は未完了。[Coreの入力と操作](docs/core-pipeline.md) · [監査とADR](docs/adr/0001-race-core-pipeline.md)。
 
+今回の合意方針と差分は [運用方針監査](docs/operating-policy-audit.md) を参照。ChatGPTが予想・展開/数値シミュレーションを担当し、Core/MCは取り込み画面で明示的に表示する検証用です。本人Betの券種・買い目・金額は発走前だけ変更でき、旧新の記録と関連監査を残します。AI推奨は変更しません。
+
 ## 構成と運用
 
 **既存ChatGPT毎朝9時タスク → Google Sheets ↔ Web**。ChatGPTは前日の結果解析と原則5レースの予想を行う。有料AI APIは使わず、既存スケジュールも変更しない。Webは検証・表示・本人操作・集計を担当する。
