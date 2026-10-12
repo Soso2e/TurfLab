@@ -23,9 +23,10 @@ import {
 } from "../../../packages/shared/src/repository";
 import { importSchema } from "../../../packages/shared/src/import-schema";
 import { preview, saveImport } from "./imports";
-import { purchaseStats, saveResult, settle } from "./betting";
+import { audit, purchaseStats, saveResult, settle } from "./betting";
 import { SheetsRepository } from "./sheets";
 import { StagedRepository } from "./storage";
+import { referenceBudget } from "./race-pipeline";
 const masterTables: Table[] = [
   "tracks",
   "course_layouts",
@@ -40,6 +41,71 @@ const masterTables: Table[] = [
   "course_segments",
   "entity_features",
 ];
+export async function refreshEntries(
+  repo: Repository,
+  raceId: string,
+  input: Row,
+  now: string,
+): Promise<Row> {
+  const operationId = str(input, "operation_id");
+  const payloadHash = await hash(input);
+  const existing = await repo.get(
+    "audit_events",
+    `refresh-entries:${operationId}`,
+  );
+  if (existing) {
+    requireCondition(
+      existing.after_hash ===
+        (await hash({ race_id: raceId, payload_hash: payloadHash })),
+      "同操作ID・異内容です",
+      409,
+    );
+    return { status: "complete", race_id: raceId };
+  }
+  const race = await get(repo, "races", raceId);
+  requireCondition(
+    race.status === "scheduled" &&
+      instant(now) < instant(race.scheduled_start_at),
+    "出走情報の更新は発走前です",
+  );
+  const current = (await repo.list("race_entries")).filter(
+    (e) => e.race_id === raceId,
+  );
+  const updates = rows(input.entries);
+  requireCondition(
+    canonical(current.map((e) => e.entry_id).sort()) ===
+      canonical(updates.map((e) => e.entry_id).sort()),
+    "取消を含む全出走馬の更新が必要です",
+  );
+  for (const entry of updates) {
+    validateRow("race_entries", entry);
+    const before = obj(current.find((e) => e.entry_id === entry.entry_id));
+    for (const key of ["race_id", "horse_id", "horse_number"])
+      requireCondition(entry[key] === before[key], `${key}は更新できません`);
+    asOf(entry, now);
+    requireCondition(
+      instant(entry.retrieved_at) >= instant(before.retrieved_at),
+      "出走情報の時点を戻せません",
+    );
+    requireCondition(
+      typeof entry.source_url === "string" &&
+        /^https?:\/\//.test(entry.source_url),
+      "更新の出典URLが必要です",
+    );
+    await get(repo, "jockeys", str(entry, "jockey_id"));
+  }
+  for (const entry of updates) await repo.put("race_entries", entry);
+  await audit(
+    repo,
+    operationId,
+    "refresh-entries",
+    "race_entries",
+    now,
+    { race_id: raceId, entries: current },
+    { race_id: raceId, payload_hash: payloadHash },
+  );
+  return { status: "complete", race_id: raceId };
+}
 export async function ingestMaster(
   repo: Repository,
   input: Row,
@@ -264,6 +330,9 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
     results: await select("race_results"),
     adoptions: await select("prediction_adoptions"),
     reviews: await select("reviews"),
+    pipeline_runs: await select("race_pipeline_runs"),
+    reference_plans: await select("reference_plans"),
+    reference_adoptions: await select("reference_adoptions"),
   };
 }
 export async function dashboard(repo: Repository, date: string): Promise<Row> {
@@ -301,6 +370,10 @@ export async function dashboard(repo: Repository, date: string): Promise<Row> {
   return {
     date,
     races: cards,
+    pipeline_runs: (await repo.list("race_pipeline_runs")).filter((r) =>
+      races.some((race) => race.race_id === r.race_id),
+    ),
+    reference_budget_yen: await referenceBudget(repo, date),
     spent_yen: spent,
     remaining_yen: 5000 - spent,
     purchase_stats: await purchaseStats(repo),

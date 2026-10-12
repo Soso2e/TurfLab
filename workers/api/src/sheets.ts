@@ -78,7 +78,11 @@ export class GoogleSheetsClient {
         assertion,
       }),
     });
-    if (!response.ok) throw new DomainError("Google認証に失敗しました", 503);
+    if (!response.ok)
+      throw new DomainError(
+        `Google認証に失敗しました (${response.status})`,
+        response.status,
+      );
     const data = (await response.json()) as {
       access_token: string;
       expires_in: number;
@@ -104,8 +108,15 @@ export class GoogleSheetsClient {
         body: body ? JSON.stringify(body) : undefined,
       },
     );
-    if (!response.ok)
-      throw new DomainError(`Sheets接続失敗 (${response.status})`, 503);
+    if (!response.ok) {
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: { message?: string };
+      };
+      throw new DomainError(
+        `Sheets ${body ? "write" : "read"} (${response.status}): ${data.error?.message ?? "接続失敗"}`,
+        response.status,
+      );
+    }
     return response.json() as Promise<Record<string, unknown>>;
   }
   async batchRead(
@@ -126,23 +137,53 @@ export class GoogleSheetsClient {
   }
 }
 export const sheetName = (t: Table) => `TL_${t}`;
+const optionalCoreTables = new Set<Table>([
+  "race_pipeline_runs",
+  "reference_plans",
+  "reference_adoptions",
+]);
 export class SheetsRepository implements Repository {
   private cache = new Map<
     Table,
-    { headers: string[]; rows: Row[]; physical: number[] }
+    { headers: string[]; rows: Row[]; physical: number[]; missing?: boolean }
   >();
+  private sheetNames?: Set<string>;
   constructor(public client: GoogleSheetsClient) {}
   refresh() {
     this.cache.clear();
+    this.sheetNames = undefined;
+  }
+  private async missingOptionalTable(table: Table): Promise<boolean> {
+    if (!optionalCoreTables.has(table)) return false;
+    if (!this.sheetNames) {
+      const metadata = await this.inspect();
+      this.sheetNames = new Set(
+        (metadata.sheets as { properties: { title: string } }[]).map(
+          (sheet) => sheet.properties.title,
+        ),
+      );
+    }
+    return !this.sheetNames.has(sheetName(table));
   }
   private async read(
     table: Table,
-  ): Promise<{ headers: string[]; rows: Row[]; physical: number[] }> {
+  ): Promise<{ headers: string[]; rows: Row[]; physical: number[]; missing?: boolean }> {
     const cached = this.cache.get(table);
     if (cached) return cached;
+    let missing = false;
     const headers =
       (
-        await this.client.batchRead([`'${sheetName(table)}'!A1:AZ1`])
+        await this.client.batchRead([`'${sheetName(table)}'!A1:AZ1`]).catch(async (error: unknown) => {
+          // A missing new Core tab is treated as empty for legacy reads only.
+          // All other API errors remain failures.
+          if (
+            !(error instanceof DomainError) ||
+            error.status !== 400 ||
+            !(await this.missingOptionalTable(table))
+          ) throw error;
+          missing = true;
+          return [{ range: '', values: [columns(table)] }];
+        })
       )[0]?.values?.[0]?.map(String) ?? [];
     requireCondition(
       columns(table).every((c) => headers.includes(c)) &&
@@ -150,6 +191,11 @@ export class SheetsRepository implements Repository {
       `${sheetName(table)}: 列が不足または重複しています`,
       503,
     );
+    if (missing) {
+      const data = { headers, rows: [] as Row[], physical: [] as number[], missing: true };
+      this.cache.set(table, data);
+      return data;
+    }
     const result: Row[] = [];
     const physical: number[] = [];
     for (let start = 2; ; start += 500) {
@@ -201,6 +247,11 @@ export class SheetsRepository implements Repository {
     records.forEach((row) => validateRow(table, row));
     this.refresh();
     const data = await this.read(table);
+    requireCondition(
+      !data.missing,
+      `${sheetName(table)}: Core用タブがありません。Sheets移行・provisionを先に実行してください`,
+      503,
+    );
     let next = Math.max(1, ...data.physical) + 1;
     const writes = records.flatMap((row) => {
       const index = data.rows.findIndex(

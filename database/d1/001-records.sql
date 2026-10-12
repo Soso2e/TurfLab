@@ -236,6 +236,36 @@ CREATE TABLE audit_events (
   CHECK(json_extract(data_json, '$.event_id') = event_id)
 );
 
+CREATE TABLE race_pipeline_runs (
+  pipeline_id TEXT PRIMARY KEY NOT NULL,
+  data_json TEXT NOT NULL CHECK(json_valid(data_json)),
+  race_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.race_id')) STORED,
+  snapshot_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.snapshot_id')) STORED,
+  CHECK(json_extract(data_json, '$.pipeline_id') = pipeline_id),
+  FOREIGN KEY (race_id) REFERENCES races(race_id) DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (snapshot_id) REFERENCES race_snapshots(snapshot_id) DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE reference_plans (
+  plan_id TEXT PRIMARY KEY NOT NULL,
+  data_json TEXT NOT NULL CHECK(json_valid(data_json)),
+  race_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.race_id')) STORED,
+  CHECK(json_extract(data_json, '$.plan_id') = plan_id),
+  FOREIGN KEY (race_id) REFERENCES races(race_id) DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE TABLE reference_adoptions (
+  reference_adoption_id TEXT PRIMARY KEY NOT NULL,
+  data_json TEXT NOT NULL CHECK(json_valid(data_json)),
+  race_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.race_id')) STORED,
+  prediction_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.prediction_id')) STORED,
+  plan_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.plan_id')) STORED,
+  CHECK(json_extract(data_json, '$.reference_adoption_id') = reference_adoption_id),
+  FOREIGN KEY (race_id) REFERENCES races(race_id) DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (prediction_id) REFERENCES predictions(prediction_id) DEFERRABLE INITIALLY DEFERRED,
+  FOREIGN KEY (plan_id) REFERENCES reference_plans(plan_id) DEFERRABLE INITIALLY DEFERRED
+);
+
 CREATE UNIQUE INDEX entry_number ON race_entries(race_id, json_extract(data_json, '$.horse_number'));
 CREATE UNIQUE INDEX race_external ON races(json_extract(data_json, '$.source'), json_extract(data_json, '$.external_id'));
 CREATE UNIQUE INDEX adoption_race ON prediction_adoptions(race_id);
