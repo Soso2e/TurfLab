@@ -4,7 +4,7 @@
 
 ## 前提
 
-既存の本人用API_TOKENとRepositoryを使用する。実Sheetsを利用する場合は、バックアップと列確認の後、既存の `/api/sheets/provision` で追加の `TL_race_pipeline_runs` / `TL_reference_plans` / `TL_reference_adoptions` を作成する。旧タブは変更しない。新しいタブがないまま更新すると、一覧/成績取得も列不足で停止する。ローカルモードは自動的に新テーブルを利用できる。Core追加前のv0.2バックアップは原ハッシュを検証し、新テーブルを空として復元できる。
+既存の本人用API_TOKENとRepositoryを使用する。実Sheetsを利用する場合は、バックアップと列確認の後、既存の `/api/sheets/provision` で追加の `TL_race_pipeline_runs` / `TL_reference_plans` / `TL_reference_adoptions` を作成する。旧タブは変更しない。Core用タブが未作成の場合、旧画面の一覧・統計・バックアップからの読み取りは空テーブルとして扱う（Sheets APIの400応答と、メタデータ上のタブ不在をともに確認できた場合のみ）。Core書き込みは503で明示的に拒否し、タブが存在する場合の権限エラーやヘッダー不一致は隠さない。本番のCore保存を始める前に3タブを準備し、サービスアカウントの認証・権限・実書込/読み返し・既存画面の回帰を確認する。ローカルモードは自動的に新テーブルを利用できる。Core追加前のv0.2バックアップは原ハッシュを検証し、新テーブルを空として復元できる。
 
 レース・馬・騎手・コース・出典・モデル版を既存の基礎データ取込で先に保存する。固定snapshotの `entries_state_json` には、取消馬も含む全馬について `entry_id`, `horse_id`, `jockey_id`, `horse_number`, `draw_number`, `carried_weight_kg`, `status` が必要。現在の出走馬と一致し、情報締切以前の出典時刻であること。snapshotのinput_hashは `snapshotContents` を `hash` で計算し、基礎データ取込で照合する。
 
