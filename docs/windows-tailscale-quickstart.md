@@ -128,4 +128,4 @@ Windowsローカル、ブラウザの390px試験、再起動/復元と、実tail
 | 競合保護 | 二重起動拒否、別サービスのServe 443上書き拒否を実行確認 |
 | 未検証 | iPhone実機/別端末、実データ1R、Sheets本番同期、Windows再起動/停電・スリープ復帰。プロセス再起動試験と区別する |
 
-再現結果はGit対象外の`test-results/*report.json`と画面PNGに保存。Node 22のWindows試験もCIに追加しており、実行結果は当該PRのChecksを参照する。
+再現結果はGit対象外の`test-results/*report.json`と画面PNGに保存。実装コミット`7c71895`は[Windows Node 22のCI受入試験も成功](https://github.com/Soso2e/TurfLab/actions/runs/39373388416)。最終HEADの実行結果は当該PRのChecksを参照する。
