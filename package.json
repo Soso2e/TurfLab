@@ -4,18 +4,18 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --config apps/web/vite.config.ts",
+    "dev": "node scripts/run-tool.mjs vite --config apps/web/vite.config.ts",
     "dev:api": "wrangler dev --config workers/api/wrangler.jsonc",
-    "build": "vite build --config apps/web/vite.config.ts",
+    "build": "node scripts/run-tool.mjs vite build --config apps/web/vite.config.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "node scripts/run-tool.mjs vitest run",
+    "test:watch": "node scripts/run-tool.mjs vitest",
     "benchmark": "tsx scripts/benchmark.ts",
     "check": "npm run typecheck && npm run lint && npm test && npm run build",
     "generate:schema": "tsx scripts/generate-schema.ts",
     "format": "prettier --write .",
-    "test:runtime": "tsx scripts/runtime-smoke.ts",
+    "test:runtime": "node scripts/run-tool.mjs tsx scripts/runtime-smoke.ts",
     "generate:d1": "tsx scripts/generate-d1.ts"
   },
   "dependencies": {
@@ -40,5 +40,8 @@
     "vite": "^7.0.0",
     "vitest": "^3.0.0",
     "wrangler": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

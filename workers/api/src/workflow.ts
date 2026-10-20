@@ -328,6 +328,9 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
     simulations: await select("simulation_runs"),
     recommendations: await select("recommendations"),
     bets: await select("virtual_bets"),
+    skips: (await repo.list("audit_events")).filter(
+      (event) => event.action === "skip" && event.entity_id === raceId,
+    ),
     bet_changes: (await repo.list("audit_events")).filter(
       (e) =>
         e.action === "revise-bet" && bets.some((b) => b.bet_id === e.entity_id),

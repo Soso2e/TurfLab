@@ -1,6 +1,6 @@
 # ChatGPT JSON受け渡し仕様 v0.2
 
-この文書と[サンプル](examples/chatgpt-import-v0.2.json)は設計契約です。実際のインポーター・JSON SchemaはPhase 3で実装します。レース・出走馬・モデル・入力スナップショットはPhase 1で登録済みであることを前提にします。
+既存インポーターとJSON Schemaは実装済み。この文書と[サンプル](examples/chatgpt-import-v0.2.json)は入力契約を示します。レース・出走馬・モデル・入力スナップショットを先に登録してください。全馬6項目の固定スコア・3展開・参考プラン確定は [1R Core](core-pipeline.md)、Windowsでの手動受渡しは [クイックスタート](windows-tailscale-quickstart.md) を参照してください。実データ1RとSheets本番受入は別です。
 
 ## 受け渡し
 
@@ -10,18 +10,18 @@
 
 ## 必須構造
 
-| フィールド | 型・意味 |
-|---|---|
-| schema_version | 固定文字列 `0.2` |
-| import_id | 本取り込みの安定ID。同じ内容の再送で変更しない |
-| generated_at | ISO 8601日時 |
-| predictions | レース単位の予想配列 |
-| prediction_id / race_id / model_version_id / snapshot_id | 登録済みデータへのID参照（予想IDは新規） |
-| kind / information_cutoff_at | morning/final/reanalysis/backtestと情報締切 |
-| evidence | ID付き出典一覧。URL・情報基準/公開/取得時刻、fact/estimateを保持 |
-| horse_evaluations | 全有効出走馬の評価。entry_id、確率、根拠ID、推定能力・適性・位置取り |
-| simulation | mode、シナリオ重み、根拠、実行証跡 |
-| recommendations | 券種・馬番配列・推奨額・根拠。0件と見送り理由も可 |
+| フィールド                                               | 型・意味                                                             |
+| -------------------------------------------------------- | -------------------------------------------------------------------- |
+| schema_version                                           | 固定文字列 `0.2`                                                     |
+| import_id                                                | 本取り込みの安定ID。同じ内容の再送で変更しない                       |
+| generated_at                                             | ISO 8601日時                                                         |
+| predictions                                              | レース単位の予想配列                                                 |
+| prediction_id / race_id / model_version_id / snapshot_id | 登録済みデータへのID参照（予想IDは新規）                             |
+| kind / information_cutoff_at                             | morning/final/reanalysis/backtestと情報締切                          |
+| evidence                                                 | ID付き出典一覧。URL・情報基準/公開/取得時刻、fact/estimateを保持     |
+| horse_evaluations                                        | 全有効出走馬の評価。entry_id、確率、根拠ID、推定能力・適性・位置取り |
+| simulation                                               | mode、シナリオ重み、根拠、実行証跡                                   |
+| recommendations                                          | 券種・馬番配列・推奨額・根拠。0件と見送り理由も可                    |
 
 サンプルは説明用に2頭のみの架空レースです。example.invalidは実出典ではなく、実データとして採用しません。生成JSONに virtual_bets や settlements を含めることは禁止します。
 
@@ -38,6 +38,6 @@
 
 エラーは配列位置と項目名で提示し、時点違反・参照不足・確率不整合を黙って修正しません。1バッチ内のレースは独立して検証・復旧し、日次画面で成功・失敗件数を明示します。
 
-## API案
+## 実装API（`/api`配下）
 
-`GET /races?date=`、`GET /races/:id`、`POST /imports/validate`、`POST /imports`、`GET /imports/:id`、`POST /predictions/:id/lock`、`POST /races/:id/reanalysis-prompt`。Phase 4で仮想購入・結果・精算、Phase 5で数値計算を追加します。確定/保存系は認証・操作IDを要求し、ブラウザからSheetsへ直接書きません。
+`GET /races?date=`、`GET /races/:id`、`POST /imports/validate`、`POST /imports`、`GET /imports/:id`、`POST /predictions/:id/lock`、`POST /races/:id/reanalysis-prompt`。仮想購入・結果・精算・数値計算も既存APIを利用します。すべてのAPIは本人認証を要求し、ブラウザからSheetsへ直接書きません。

@@ -440,7 +440,7 @@ export class TurfCoordinator {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    if (!url.pathname.startsWith("/api/")) return env.ASSETS.fetch(request);
+    if (!/^\/api(?:\/|$)/.test(url.pathname)) return env.ASSETS.fetch(request);
     if (!(await authenticated(request, env.API_TOKEN)))
       return response({ error: "本人用認証が必要です" }, 401);
     return env.COORDINATOR.get(env.COORDINATOR.idFromName("owner")).fetch(

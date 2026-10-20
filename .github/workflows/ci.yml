@@ -17,3 +17,23 @@ jobs:
       - run: npm run generate:schema
       - run: git diff --exit-code -- workers/api/src/import-validator.js database/sheets/chatgpt-import.schema.json
       - run: npm run check
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Initialize and check on Windows
+        shell: powershell
+        run: ./scripts/windows/Initialize.ps1
+      - name: Single origin, mobile, restart and restore acceptance
+        shell: powershell
+        run: ./scripts/windows/Test-Acceptance.ps1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-local-acceptance
+          path: test-results/
+          if-no-files-found: ignore

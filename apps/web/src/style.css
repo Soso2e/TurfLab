@@ -627,7 +627,55 @@ button:focus-visible {
     font-size: 23px;
   }
 }
+.scenario-card {
+  border: 1px solid #dce3d5;
+  border-radius: 8px;
+  padding: 14px;
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 640px) {
+  button,
+  input,
+  select,
+  summary {
+    min-height: 44px;
+  }
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+    max-width: 100%;
+  }
+  .horse-evaluations thead {
+    display: none;
+  }
+  .horse-evaluations,
+  .horse-evaluations tbody {
+    display: block;
+    min-width: 0;
+  }
+  .horse-evaluations tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid #dce3d5;
+    padding: 12px 0;
+  }
+  .horse-evaluations td {
+    min-width: 0;
+    padding: 8px;
+    border: 0;
+    overflow-wrap: anywhere;
+  }
+  .horse-evaluations td::before {
+    content: attr(data-label);
+    display: block;
+    color: #668057;
+    font-size: 11px;
+  }
+  .horse-evaluations td:last-child {
+    grid-column: 1 / -1;
+  }
   .app {
     display: block;
   }
