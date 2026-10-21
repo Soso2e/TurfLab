@@ -2,7 +2,7 @@
 
 最終更新: 2026-10-21
 
-現在フェーズ: Issue #36 公式出馬表ウィザード・ChatGPT→Core橋渡し / PR・CI・実データ受入待ち
+現在フェーズ: Issue #36 実装・隔離受入済み / PR #37レビュー・実データ1R・iPhone受入待ち
 
 ## 現在の状態
 
@@ -21,20 +21,23 @@
 - 完了: Wrangler Local Explorer/観測APIを無効化。`/api`と配下のキーなし/不正キーを拒否。ログ/ソースに秘密を記録しない。
 - 完了: [PR #35](https://github.com/Soso2e/TurfLab/pull/35)はmainへマージ済み（今回origin/mainで確認）。当時の作業履歴は下表に保持。
 - 完了: 実装コミット`7c71895`の[CI](https://github.com/Soso2e/TurfLab/actions/runs/39373388416)でUbuntu checkとWindows Node 22の初期化/104テスト/390px/再起動/復元が成功。最終HEADの状態はPR Checksを参照。
-- 作業中: Issue #36の作業ブランチでPR提出・Windows/Ubuntu CIの確認。mainへ自動マージしない。
+- 完了: `1e42f6b`をPushし[PR #37](https://github.com/Soso2e/TurfLab/pull/37)を提出。[実装コミットのCI](https://github.com/Soso2e/TurfLab/actions/runs/39594940844)でUbuntu check・Windows Node 22の初期化/127テスト/既存モバイル・再起動・復元/新ウィザード試験が成功。最新HEADの結果はPR Checksを参照。mainへマージしない。
+- 作業中: なし。PRレビューと本人による実データ1R/iPhone受入待ち。
 - 未確認: iPhone実機/別端末からの利用、Windows自体の再起動・停電/スリープ復帰。プロセス再起動の確認とは別。
 - 未確認: 発走前の実データ1Rと実ChatGPT回答。対象の公式出馬表/時刻/外部ID・予想回答を依頼したが、この時点では未提供。自動スクレイピングや過去Morningの遡及確定で埋めない。iPhone Safari実機も未確認。
 - 未確認: Sheets本番同期の認証・権限・既存バックアップ・実書込/読み返し。既存シート、朝9時タスク、Notion、タスクスケジューラは変更していない。
 - 問題: npmはESLintのサポート終了と、esbuild/workerdのインストールスクリプト許可未登録を警告。依存更新・許可設定変更・今回の脆弱性監査は未実施。
 - 問題/制限: 現行restore APIは256KiB上限。大きなデータは停止後のstate全体退避/別の空環境への復元が必要で、その経路は未検証。
-- TODO: Issue #36のPR/CI確認後、本人が発走前の公式出馬表と実ChatGPT回答で1Rを完走し、iPhone実機から本人Bet→PC一致を確認。Sheets自動受信は別PRで扱う。
-- 次にやること: PRの未検証項目を明記し、mainを自動マージせず本人受入へ引き渡す。
+- TODO: PR #37をレビューし、本人が発走前の公式出馬表と実ChatGPT回答で1Rを完走し、iPhone実機から本人Bet→PC一致を確認。Sheets自動受信は別PRで扱う。
+- 次にやること: 発走前の実データを用意してウィザードへ入力し、公式/許諾情報と本人確認のもと実1Rの受入を行う。
 
 ## 確認方法
 
 - `npm ci --no-audit --no-fund`: 依存パッケージを導入できること（今回成功）。
 - `npm run check`: 型・lint・104テスト・ビルド成功（2026-10-20）。
 - `npm run build`: Web本番ビルド成功（2026-10-20）。
+- `npm run check`: 型・lint・127テスト・本番ビルド成功（2026-10-21）。
+- `npm run test:wizard`: 別ポート/隔離DOの390pxウィザード・パック実ダウンロード・Coreロック/読返し・本人Bet・再起動hash/pack一致、JSエラー/横はみ出しなし（Windows Edge/Chromium、2026-10-21）。実データ/iPhoneは含まない。
 - `scripts/windows/Test-Acceptance.ps1`: 毎回新しい隔離local保存先でAPI/390px/再読込/再起動/論理復元。今回成功。結果と画面はGit対象外`test-results`。
 - `scripts/windows/Test-Tailscale.ps1`: 実Serve設定からURLを取り、WindowsでTLSと二重の認証境界を確認。今回成功。iPhone受入は含まない。
 - Web/API起動は `README.md` と `docs/operations.md` に従う。本人用接続キーなどの認証情報はGitへ追加しない。
@@ -52,3 +55,4 @@
 | 2026-10-20-01 | Windows単一オリジン・固定DO永続化・運用スクリプト・390px評価/3展開/Bet・重複拒否/見送り履歴・手順書を実装。104テスト、隔離ブラウザ/再起動/論理復元、実tailnet HTTPSをWindowsで確認。実データとiPhoneは未確認 | 動作確認済み | `scripts/windows/*`, `scripts/run-tool.mjs`, Web/API/テスト/CI、`docs/windows-tailscale-quickstart.md`他 | PR/CI、Issue #34のiPhone、Issue #30の実1R受入 |
 | 2026-10-20-02 | 実装をコミット/PushしてPR #35を作成。実装コミットのUbuntu/Windows Node 22 CI成功、実Serveの停止/再開とHTTPS二重認証を確認。通常DataHomeは試験データなしで起動・共有中 | 動作確認済み | `PROGRESS.md`, Windows手順書 | iPhone実機、実データ1R、Sheets別受入。mainは未マージ |
 | 2026-10-21-01 | 最新mainからIssue #36を実装。公式出馬表draft/照合/ID/snapshot、AIパック/回答変換、null確率整合、既存Coreロック/実読返し、DO途中失敗復旧、390px本人Bet/再起動を隔離検証。長いIDの横はみ出しを検出し修正、再試験成功 | 動作確認済み | `race-wizard`共有/API/UI、Core検証/生成Schema、テスト/Windows CI、受渡し/Windows手順/プロンプト | PR/CI、本人の発走前実1R・iPhone受入。既存Sheets/Notion/実スケジュールは変更なし |
+| 2026-10-21-02 | `1e42f6b`をPushしPR #37を作成。実装コミットのUbuntu/Windows Node 22 CI（既存復元/モバイルと新ウィザード/再起動を含む）成功。PRに未検証・手動出典確認・再開手順を明記。開始時と同じ8787の稼働PIDを確認 | 動作確認済み | `PROGRESS.md`、PR #37 | mainは未マージ。実データ1R・iPhone Safari/別端末の本人受入 |
