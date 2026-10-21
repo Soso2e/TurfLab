@@ -257,6 +257,8 @@ header {
   color: #939c8c;
 }
 .panel {
+  min-width: 0;
+  overflow-wrap: anywhere;
   background: #fff;
   border: 1px solid #dce3d5;
   border-radius: 8px;

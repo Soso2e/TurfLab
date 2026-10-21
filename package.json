@@ -16,6 +16,7 @@
     "generate:schema": "tsx scripts/generate-schema.ts",
     "format": "prettier --write .",
     "test:runtime": "node scripts/run-tool.mjs tsx scripts/runtime-smoke.ts",
+    "test:wizard": "node scripts/run-tool.mjs tsx scripts/wizard-smoke.ts",
     "generate:d1": "tsx scripts/generate-d1.ts"
   },
   "dependencies": {

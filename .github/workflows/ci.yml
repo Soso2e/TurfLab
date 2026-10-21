@@ -31,6 +31,9 @@ jobs:
       - name: Single origin, mobile, restart and restore acceptance
         shell: powershell
         run: ./scripts/windows/Test-Acceptance.ps1
+      - name: Race import wizard, 390px, personal Bet and restart
+        shell: powershell
+        run: npm run test:wizard
       - uses: actions/upload-artifact@v4
         if: always()
         with:

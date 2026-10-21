@@ -8,6 +8,7 @@ import {
   type Json,
 } from "../../../packages/shared/src/domain";
 import "./style.css";
+import { RaceImportWizard } from "./RaceImportWizard";
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -157,7 +158,17 @@ function App() {
             "",
         ),
       );
-      setSnapshotId(String(rows(d.snapshots).at(-1)?.snapshot_id ?? ""));
+      setSnapshotId(
+        String(
+          rows(d.snapshots)
+            .sort(
+              (a, b) =>
+                Date.parse(String(a.captured_at)) -
+                Date.parse(String(b.captured_at)),
+            )
+            .at(-1)?.snapshot_id ?? "",
+        ),
+      );
       setModelId(String(ps.at(-1)?.model_version_id ?? ""));
       setCutoff(
         String(ps.at(-1)?.information_cutoff_at ?? new Date().toISOString()),
@@ -526,6 +537,11 @@ function App() {
                       {String(race.race_number)}R
                     </p>
                     <h1>{String(race.name)}</h1>
+                    {storage === "local" && snapshotId && (
+                      <button onClick={() => setTab("import")}>
+                        このsnapshotで入力パック
+                      </button>
+                    )}
                     <p>
                       {time(race.scheduled_start_at)} ·{" "}
                       {String(obj(detail.course).surface)}{" "}
@@ -1238,6 +1254,15 @@ function App() {
                     Sheets の出力を確認
                   </button>
                 </div>
+                {storage === "local" && (
+                  <RaceImportWizard
+                    api={api}
+                    busy={busy}
+                    action={action}
+                    onOpen={openRace}
+                    initialSnapshot={snapshotId}
+                  />
+                )}
                 <section className="panel">
                   <div className="section-heading">
                     <h2>JSON を貼り付ける</h2>

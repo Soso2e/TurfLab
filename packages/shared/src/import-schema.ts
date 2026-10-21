@@ -1,5 +1,9 @@
 const text = { type: "string", minLength: 1 };
-const probability = { type: "number", minimum: 0, maximum: 1 };
+const optionalProbability = {
+  type: ["number", "null"],
+  minimum: 0,
+  maximum: 1,
+};
 const nullableText = { type: ["string", "null"] };
 const time = { type: "string", format: "date-time" };
 const strings = { type: "array", items: text };
@@ -63,8 +67,8 @@ export const importSchema = object(
                 entry_id: text,
                 rank: { type: "integer", minimum: 1 },
                 score: { type: ["number", "null"] },
-                win_probability: probability,
-                top3_probability: probability,
+                win_probability: optionalProbability,
+                top3_probability: optionalProbability,
                 abilities: {
                   type: "object",
                   additionalProperties: { type: ["number", "null"] },
@@ -110,7 +114,7 @@ export const importSchema = object(
                 items: object(
                   {
                     pace: { enum: ["slow", "middle", "high"] },
-                    weight: probability,
+                    weight: optionalProbability,
                     analysis: text,
                     lineup: {
                       type: "array",
@@ -157,7 +161,7 @@ export const importSchema = object(
                   type: "array",
                   items: { type: "integer", minimum: 1 },
                 },
-                estimated_probability: probability,
+                estimated_probability: optionalProbability,
                 odds_snapshot_id: nullableText,
                 estimated_ev: { type: ["number", "null"] },
                 suggested_amount_yen: {
