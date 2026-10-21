@@ -26,6 +26,8 @@ Issue #30の手動Core実行を追加。6項目の固定スコア、全馬の3�
 
 Node.js 22以上。
 
+Windows実運用は [Windows / Tailscale / iPhone手順](docs/windows-tailscale-quickstart.md) を参照。`scripts/windows/Initialize.ps1` → `Start.ps1` でビルド済みWeb/APIを127.0.0.1:8787に起動し、固定DataHomeへ保存する。Tailscale Serveの共有は別操作。
+
 ```bash
 npm ci
 npm run check

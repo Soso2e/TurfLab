@@ -29,11 +29,13 @@ import {
   purchaseStats,
   recommendationStats,
   saveResult,
+  skipRace,
   settle,
   voidBet,
 } from "../workers/api/src/betting";
 import {
   dailyRun,
+  detail,
   ingestMaster,
   reanalysisPrompt,
 } from "../workers/api/src/workflow";
@@ -292,6 +294,28 @@ describe("本人購入と公式精算", () => {
     );
     await confirmBet(repo, bet("max", 1000), NOW);
     await expect(confirmBet(repo, bet("over"), NOW)).rejects.toThrow("1レース");
+  });
+  it("別操作IDでも同じ買い目の二重登録を拒否する", async () => {
+    await ready();
+    await confirmBet(repo, bet("first"), NOW);
+    await expect(confirmBet(repo, bet("double"), NOW)).rejects.toThrow(
+      "登録済み",
+    );
+    expect(await repo.list("virtual_bets")).toHaveLength(1);
+  });
+  it("見送りの理由とレース参照を保存し再読込できる", async () => {
+    await skipRace(
+      repo,
+      {
+        operation_id: "skip-1",
+        race_id: "example-race-01",
+        reason: "根拠不足",
+      },
+      NOW,
+    );
+    const skips = rows((await detail(repo, "example-race-01")).skips);
+    expect(skips).toHaveLength(1);
+    expect(obj(skips[0].evidence_json).reason).toBe("根拠不足");
   });
   it("同購入操作の再送を重複させない", async () => {
     await ready();

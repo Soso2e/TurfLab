@@ -28,6 +28,7 @@ export async function audit(
   before: Row | null,
   after: Row,
   entityId = operationId,
+  evidence?: Row,
 ): Promise<void> {
   const existing = await repo.get("audit_events", `${action}:${operationId}`);
   if (existing) {
@@ -50,6 +51,7 @@ export async function audit(
     before_hash: before ? await hash(before) : null,
     after_hash: await hash(after),
     event_at: now,
+    ...(evidence ? { evidence_json: evidence } : {}),
   });
 }
 export async function confirmBet(
@@ -143,6 +145,16 @@ export async function confirmBet(
     "JST1日5,000円の予算を超えます",
     409,
   );
+  requireCondition(
+    !bets.some(
+      (b) =>
+        b.race_id === raceId &&
+        b.ticket_type === type &&
+        canonical(b.selections_json) === canonical(selection),
+    ),
+    "同じ買い目は登録済みです。既存の仮想購入を変更してください",
+    409,
+  );
   const bet: Row = {
     schema_version: "0.2",
     created_at: now,
@@ -231,7 +243,17 @@ export async function skipRace(
     instant(now) < instant(race.scheduled_start_at),
     "発走後の見送り変更は禁止です",
   );
-  await audit(repo, op, "skip", "races", now, null, after);
+  await audit(
+    repo,
+    op,
+    "skip",
+    "races",
+    now,
+    null,
+    after,
+    str(race, "race_id"),
+    after,
+  );
   return get(repo, "audit_events", `skip:${op}`);
 }
 export async function voidBet(

@@ -8,6 +8,8 @@ ChatGPTの予定やプロンプトはこの変更で編集していない。9時
 
 ## ローカル起動
 
+Windows PCでの単一オリジン運用、固定保存先、起動/停止/ログ/バックアップ/復元、Tailscale ServeとiPhone接続は [Windows手順](windows-tailscale-quickstart.md) を優先する。以下のVite/Web分離起動は開発用。
+
 Node.js 22以上。初回に `npm ci`。
 
 ```bash
@@ -75,7 +77,7 @@ Webから新規正本26テーブルのJSONバックアップをダウンロー�
 
 `npm run check` で型・lint・ユニットテスト・Webビルド。`npm run benchmark` でローカルNodeの18頭×10,000回を計測する。
 
-`npm run test:runtime` はローカルAPI/Webが起動済みで、**空の検証用ストレージ**を対象にする。架空レースと購入を作るため、実Sheets接続では実行しない。ChromiumをインストールしたLinux環境でPC・スマホ画面を確認する。この作業では独立したリポジトリ外の検証用ストレージを使った。
+`scripts/windows/Test-Acceptance.ps1` は毎回新しい隔離DataHomeを作り、単一オリジンのAPI/Web、390pxのブラウザ操作、再認証、プロセス再起動、論理バックアップ/空環境への復元を検証する。`npm run test:runtime` 単体は空のlocalモードと `TURFLAB_SMOKE_ACK=isolated-empty-local-storage` を要求する。架空レースと購入を作るため、実Sheetsや通常運用ストレージでは実行しない。
 
 本番デプロイ、Googleサービスアカウント設定、新規タブ作成、既存ChatGPTタスクの変更は、この実装作業では実行していない。
 

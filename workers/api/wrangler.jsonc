@@ -6,12 +6,12 @@
     "directory": "../../dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api", "/api/*"]
   },
   "durable_objects": {
-    "bindings": [{ "name": "COORDINATOR", "class_name": "TurfCoordinator" }],
+    "bindings": [{ "name": "COORDINATOR", "class_name": "TurfCoordinator" }]
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TurfCoordinator"] }],
   "vars": { "STORAGE_MODE": "local", "AUTOMATION_ENABLED": "false" },
-  "triggers": { "crons": ["15 0 * * *"] },
+  "triggers": { "crons": ["15 0 * * *"] }
 }

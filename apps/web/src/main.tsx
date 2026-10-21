@@ -654,8 +654,9 @@ function App() {
                         {String(selected.model_version_id)} · snapshot{" "}
                         {String(selected.snapshot_id)}
                       </p>
+                      <h3>全馬評価と根拠</h3>
                       <div className="table-scroll">
-                        <table>
+                        <table className="horse-evaluations">
                           <thead>
                             <tr>
                               <th>順位</th>
@@ -673,7 +674,7 @@ function App() {
                               .sort((a, b) => Number(a.rank) - Number(b.rank))
                               .map((e) => (
                                 <tr key={String(e.evaluation_id)}>
-                                  <td>
+                                  <td data-label="順位・総合点">
                                     {Number(e.rank) === 1 ? "◎ " : ""}
                                     {String(e.rank)} ·{" "}
                                     {e.score == null
@@ -681,16 +682,26 @@ function App() {
                                       : Number(e.score).toFixed(2)}
                                     点
                                   </td>
-                                  <td>
+                                  <td data-label="馬番">
                                     {String(
                                       rows(detail.entries).find(
                                         (x) => x.entry_id === e.entry_id,
                                       )?.horse_number,
                                     )}
                                   </td>
-                                  <td>{pct(e.win_probability)}</td>
-                                  <td>{pct(e.top3_probability)}</td>
-                                  <td>
+                                  <td data-label="勝率">
+                                    {pct(e.win_probability)}
+                                  </td>
+                                  <td data-label="複勝圏">
+                                    {pct(e.top3_probability)}
+                                  </td>
+                                  <td data-label="評価根拠">
+                                    <p>
+                                      {String(
+                                        obj(e.evidence_json).rationale ??
+                                          "未取得",
+                                      )}
+                                    </p>
                                     <details>
                                       <summary>推定能力・根拠を見る</summary>
                                       <JsonView value={e.evidence_json} />
@@ -718,7 +729,38 @@ function App() {
                                 ? "seed " + s.seed + " / " + s.engine_version
                                 : "数値試行は実行していません"}
                             </p>
-                            <JsonView value={s.scenarios_json} />
+                            <h3>ペース3シナリオ</h3>
+                            {rows(s.scenarios_json).map((scenario) => (
+                              <article
+                                className="scenario-card"
+                                key={String(scenario.pace)}
+                              >
+                                <h3>
+                                  {(
+                                    {
+                                      slow: "スロー",
+                                      middle: "平均",
+                                      high: "ハイ",
+                                    } as Record<string, string>
+                                  )[String(scenario.pace)] ??
+                                    String(scenario.pace)}{" "}
+                                  · {pct(scenario.weight)}
+                                </h3>
+                                <p>{String(scenario.analysis)}</p>
+                                {rows(scenario.lineup ?? []).map((entry) => (
+                                  <p key={String(entry.entry_id)}>
+                                    馬番{" "}
+                                    {String(
+                                      rows(detail.entries).find(
+                                        (e) => e.entry_id === entry.entry_id,
+                                      )?.horse_number ?? "不明",
+                                    )}
+                                    ：{String(entry.position)} ·{" "}
+                                    {String(entry.advantage)}
+                                  </p>
+                                ))}
+                              </article>
+                            ))}
                             <details>
                               <summary>実行証跡・限界</summary>
                               <JsonView
@@ -858,6 +900,7 @@ function App() {
                 </section>
                 <section className="panel">
                   <h2>推奨と本人の仮想購入</h2>
+                  <h3>AI参考推奨買い目</h3>
                   <div className="table-scroll">
                     <table>
                       <thead>
@@ -893,6 +936,17 @@ function App() {
                   <p className="muted">
                     推奨は購入ではありません。本人が選んだ買い目だけを別に記録します。
                   </p>
+                  <h3>本人の仮想Bet</h3>
+                  <p>
+                    1R最大1,000円・JST当日最大5,000円・100円単位。発走後は購入・変更できません。実馬券は購入しません。
+                  </p>
+                  {rows(detail.skips ?? []).map((skip) => (
+                    <p key={String(skip.event_id)} className="muted">
+                      見送り記録：{time(skip.event_at)} ·{" "}
+                      {String(obj(skip.evidence_json).reason)}
+                      （保存済みの購入は別途取消してください）
+                    </p>
+                  ))}
                   {editingBet && (
                     <p role="status">
                       購入 {String(editingBet.bet_id)}{" "}
@@ -928,6 +982,7 @@ function App() {
                     <label>
                       馬番（ハイフン区切り）
                       <input
+                        inputMode="numeric"
                         value={selections}
                         onChange={(e) => {
                           setSelections(e.target.value);
@@ -941,6 +996,7 @@ function App() {
                       本人購入額
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={100}
                         max={1000}
                         step={100}
@@ -1006,7 +1062,7 @@ function App() {
                       {editingBet ? "変更を保存" : "仮想購入を確定"}
                     </button>
                     <button
-                      disabled={busy}
+                      disabled={busy || !canEditBet}
                       onClick={() =>
                         void action(async () => {
                           await api("/skip", {
@@ -1014,6 +1070,12 @@ function App() {
                             race_id: race.race_id,
                             reason: "本人判断で見送り",
                           });
+                          setDetail(
+                            await api(
+                              "/races/" +
+                                encodeURIComponent(String(race.race_id)),
+                            ),
+                          );
                           setNotice("見送りを記録しました");
                         })
                       }
@@ -1201,12 +1263,7 @@ function App() {
                         .filter(
                           ([v]) =>
                             verificationMode ||
-                            ![
-                              "pipeline",
-                              "pipelineBatch",
-                              "numeric",
-                              "backtest",
-                            ].includes(v),
+                            !["numeric", "backtest"].includes(v),
                         )
                         .map(([v, n]) => (
                           <option key={v} value={v}>
@@ -1226,7 +1283,7 @@ function App() {
                         setOutput(undefined);
                       }}
                     />
-                    検証用のCore・数値計算を表示する
+                    検証用の数値計算を表示する
                   </label>
                   <p>
                     予想・展開/数値シミュレーションはChatGPTが担当します。Webは結果を受け取り、本人Betを管理します。ChatGPT→Sheetsの自動受信は本番検証待ちです。

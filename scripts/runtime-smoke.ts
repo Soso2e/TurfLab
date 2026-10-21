@@ -9,7 +9,11 @@ import {
 import { chromium } from "@playwright/test";
 const outputDir = "test-results";
 await mkdir(outputDir, { recursive: true });
-const apiOrigin = "http://localhost:8787";
+const apiOrigin = "http://127.0.0.1:8787";
+if (process.env.TURFLAB_SMOKE_ACK !== "isolated-empty-local-storage")
+  throw new Error(
+    "Windows-Acceptance.ps1から隔離ストレージを指定して実行してください",
+  );
 const vars = await readFile("workers/api/.dev.vars", "utf8");
 const token = vars.match(/^API_TOKEN="(.+)"$/m)?.[1];
 if (!token) throw new Error("ローカル検証用API_TOKENが未設定です");
@@ -25,12 +29,34 @@ async function call(path: string, body?: unknown) {
   const data = (await r.json()) as Row;
   return { status: r.status, data };
 }
+for (const path of ["/api", "/api/status", "/api/races", "/api/not-found"]) {
+  for (const headers of [
+    new Headers(),
+    new Headers({ Authorization: "Bearer invalid" }),
+  ]) {
+    const denied = await fetch(apiOrigin + path, { headers });
+    if (denied.status !== 401)
+      throw new Error(path + ": 未認証アクセスを拒否できません");
+  }
+}
 const unauthorized = await fetch(apiOrigin + "/api/races");
-if (unauthorized.status !== 401)
-  throw new Error("未認証アクセスを拒否できません");
 const connection = await call("/status");
+for (const path of [
+  "/cdn-cgi/local/explorer/api",
+  "/cdn-cgi/local/explorer/api/workers/durable_objects/namespaces",
+]) {
+  const internal = await fetch(apiOrigin + path);
+  if (
+    internal.ok &&
+    !(internal.headers.get("content-type") ?? "").includes("text/html")
+  )
+    throw new Error("Wrangler管理APIが公開されています");
+}
 if (connection.data.storage_mode !== "local")
   throw new Error("実Sheets接続では検証用データを作成できません");
+const empty = await call("/backup");
+if (Object.values(obj(empty.data.counts)).some((count) => count !== 0))
+  throw new Error("検証には空の隔離ストレージが必要です");
 const { input, prediction, data } = await fixture();
 const current = new Date();
 const generated = new Date(current.getTime() - 120000).toISOString();
@@ -190,6 +216,23 @@ if (
 )
   throw new Error("同時変更の競合拒否に失敗");
 const edited = revisions.find((r) => r.status === 200)!.data;
+for (const [suffix, selections, amount] of [
+  ["unit", [1], 150],
+  ["horse", [99], 100],
+  ["budget", [1], 1000],
+  ["duplicate", [2], 100],
+] as const) {
+  const rejected = await call("/bets", {
+    operation_id: `runtime-reject-${runId}-${suffix}`,
+    race_id: raceId,
+    prediction_id: pid,
+    ticket_type: "place",
+    selections,
+    amount_yen: amount,
+  });
+  if (rejected.status < 400)
+    throw new Error("不正購入が成功しました: " + suffix);
+}
 const editPayload = {
   operation_id: edited.operation_id,
   expected_bet: successful,
@@ -323,7 +366,7 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push(e.message));
-await page.goto("http://localhost:5173");
+await page.goto(apiOrigin + "/races/direct-link-check");
 await page.getByLabel("本人用接続キー").fill(token);
 await page.getByRole("button", { name: "接続する" }).click();
 await page.getByRole("heading", { name: "本日のレース" }).waitFor();
@@ -374,10 +417,12 @@ await page.getByRole("heading", { name: "本人購入の成績" }).waitFor();
 await page.getByRole("heading", { name: "推奨買い目の参考収支" }).waitFor();
 await page.getByRole("button", { name: /データを取り込む/ }).click();
 if (
-  await page.getByLabel("入力種別").locator('option[value="pipeline"]').count()
+  !(await page
+    .getByLabel("入力種別")
+    .locator('option[value="pipeline"]')
+    .count())
 )
-  throw new Error("検証計算が通常導線に混在しています");
-await page.getByLabel("検証用のCore・数値計算を表示する").check();
+  throw new Error("Core手動取り込みが通常導線にありません");
 await page.getByLabel("入力種別").selectOption("pipeline");
 await page.getByLabel("取り込みJSON").fill(JSON.stringify(coreInputs[6]));
 await page
@@ -385,6 +430,26 @@ await page
   .click();
 await page.getByText("保存と読み返しを完了しました").waitFor();
 await page.getByText('"SKIPPED"', { exact: false }).waitFor();
+await page.getByRole("button", { name: /本日のレース/ }).click();
+await page.locator('input[type="date"]').fill(coreDate);
+await page
+  .getByRole("button", { name: new RegExp(`Core架空レース ${runId} 7`) })
+  .click();
+await page.getByRole("button", { name: "見送る", exact: true }).click();
+await page.getByText("見送り記録：", { exact: false }).waitFor();
+await page.getByRole("button", { name: /本日のレース/ }).click();
+await page
+  .getByRole("button", { name: new RegExp(`Core架空レース ${runId} 1`) })
+  .click();
+await page.getByRole("heading", { name: "全馬評価と根拠" }).waitFor();
+await page.getByRole("heading", { name: /スロー ·/ }).waitFor();
+await page.getByRole("heading", { name: /平均 ·/ }).waitFor();
+await page.getByRole("heading", { name: /ハイ ·/ }).waitFor();
+await page.screenshot({
+  path: `${outputDir}/turflab-mobile-core.png`,
+  fullPage: true,
+});
+await page.getByRole("button", { name: /データを取り込む/ }).click();
 await page.getByLabel("入力種別").selectOption("prediction");
 await page.getByLabel("取り込みJSON").fill("{");
 await page.getByRole("button", { name: "検証・プレビュー" }).click();
@@ -403,6 +468,23 @@ const overflow = await page.evaluate(
 );
 if (overflow) throw new Error("モバイルの横幅が画面を超えています");
 if (errors.length) throw new Error("ブラウザエラー: " + errors.join(";"));
+await page.reload();
+await page.getByLabel("本人用接続キー").fill(token);
+await page.getByRole("button", { name: "接続する" }).click();
+await page.getByRole("heading", { name: "本日のレース" }).waitFor();
+await page.locator('input[type="date"]').fill(date);
+await page
+  .getByRole("button", {
+    name: new RegExp("架空レース · ローカル動作確認 " + runId),
+  })
+  .click();
+const afterReload = await call(`/races/${raceId}`);
+const active = rows(afterReload.data.bets).filter(
+  (b) => b.status === "confirmed",
+);
+if (active.length !== 1 || active[0].amount_yen !== 400)
+  throw new Error("再読込後の本人購入が一致しません");
+await page.getByRole("heading", { name: "購入の変更履歴" }).waitFor();
 await browser.close();
 await writeFile(
   `${outputDir}/turflab-runtime-report.json`,
@@ -413,9 +495,14 @@ await writeFile(
       reference_budget_yen: coreDashboard.data.reference_budget_yen,
       core_score: 85,
       core_ui_skip: "complete",
+      personal_skip: "saved with race reference and reason",
+      invalid_bets:
+        "150yen, missing horse, race budget, duplicate ticket rejected",
       concurrent_purchase_statuses: concurrent.map((r) => r.status),
       concurrent_revision_statuses: revisions.map((r) => r.status),
       mobile_bet_edit: "400yen, one active bet, two linked revisions",
+      reload: "reauthenticated, same bet and history",
+      origin: apiOrigin,
       duplicate_retry: "same-bet",
       browser_errors: errors,
       mobile_horizontal_overflow: overflow,
