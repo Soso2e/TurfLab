@@ -78,6 +78,19 @@ export async function validatePrediction(
     (x) => x.race_id === race.race_id && x.status === "active",
   );
   const evaluations = rows(p.horse_evaluations);
+  const narrative = obj(p.simulation).mode === "narrative";
+  const unknownProbabilities = evaluations.every(
+    (e) => e.win_probability === null && e.top3_probability === null,
+  );
+  requireCondition(
+    (narrative && unknownProbabilities) ||
+      evaluations.every(
+        (e) =>
+          typeof e.win_probability === "number" &&
+          typeof e.top3_probability === "number",
+      ),
+    "確率は全馬の数値、または文章分析では全馬nullにしてください",
+  );
   const fixedEntries = rows(snapshot.entries_state_json);
   requireCondition(
     canonical(
@@ -95,15 +108,17 @@ export async function validatePrediction(
     "評価対象は全有効出走馬と一致する必要があります",
   );
   const sum = (key: string) => evaluations.reduce((v, x) => v + num(x, key), 0);
-  requireCondition(
-    Math.abs(sum("win_probability") - 1) <= 0.001,
-    "勝率合計は1です",
-  );
-  requireCondition(
-    Math.abs(sum("top3_probability") - Math.min(3, validEntries.length)) <=
-      0.001,
-    "複勝圏確率の合計が不正です",
-  );
+  if (!unknownProbabilities)
+    requireCondition(
+      Math.abs(sum("win_probability") - 1) <= 0.001,
+      "勝率合計は1です",
+    );
+  if (!unknownProbabilities)
+    requireCondition(
+      Math.abs(sum("top3_probability") - Math.min(3, validEntries.length)) <=
+        0.001,
+      "複勝圏確率の合計が不正です",
+    );
   requireCondition(
     new Set(evaluations.map((x) => x.rank)).size === evaluations.length &&
       evaluations.every((x) => num(x, "rank") <= evaluations.length),
@@ -141,7 +156,10 @@ export async function validatePrediction(
   }
   const scenarios = rows(sim.scenarios);
   requireCondition(
-    Math.abs(scenarios.reduce((s, x) => s + num(x, "weight"), 0) - 1) <= 0.001,
+    (narrative && scenarios.every((s) => s.weight === null)) ||
+      (scenarios.every((s) => typeof s.weight === "number") &&
+        Math.abs(scenarios.reduce((s, x) => s + num(x, "weight"), 0) - 1) <=
+          0.001),
     "シナリオ重み合計は1です",
   );
   if (sim.mode === "narrative")
@@ -172,6 +190,13 @@ export async function validatePrediction(
   const seen = new Set<string>();
   let total = 0;
   for (const r of recs) {
+    requireCondition(
+      typeof r.estimated_probability === "number" ||
+        (narrative &&
+          r.estimated_probability === null &&
+          r.estimated_ev == null),
+      "数値分析には推奨確率が必要です。確率未算出の期待値はnullです",
+    );
     const selection = ticket(
       str(r, "ticket_type"),
       r.selections,
@@ -199,10 +224,12 @@ export async function validatePrediction(
         instant(odds.captured_at) <= instant(cutoff),
         "オッズ取得が締切後です",
       );
-      const ev = num(r, "estimated_probability") * num(odds, "odds");
       if (r.estimated_ev != null)
         requireCondition(
-          Math.abs(num(r, "estimated_ev") - ev) < 0.001,
+          Math.abs(
+            num(r, "estimated_ev") -
+              num(r, "estimated_probability") * num(odds, "odds"),
+          ) < 0.001,
           "オッズ期待値が一致しません",
         );
     } else

@@ -33,6 +33,12 @@ import {
 import { adopt, lockPrediction, preview, saveImport } from "./imports";
 import { prepareRace, runBatch, runRace, safeFailure } from "./race-pipeline";
 import {
+  previewMaster,
+  confirmMaster,
+  inputPack,
+  convertAnswer,
+} from "./race-wizard";
+import {
   audit,
   confirmBet,
   reviseBet,
@@ -161,6 +167,17 @@ export async function route(
       decodeURIComponent(path.split("/")[2]),
     );
   if (!input) throw new DomainError("APIが見つかりません", 404);
+  if (path.startsWith("/race-import/")) {
+    requireCondition(
+      !sheets,
+      "取込ウィザードはlocal保存専用です。既存Sheetsには書き込みません",
+    );
+    if (path === "/race-import/preview") return previewMaster(repo, input, now);
+    if (path === "/race-import/confirm") return confirmMaster(repo, input, now);
+    if (path === "/race-import/pack")
+      return inputPack(repo, str(input, "snapshot_id"), now);
+    if (path === "/race-import/convert") return convertAnswer(repo, input, now);
+  }
   if (path === "/data/import") return ingestMaster(repo, input, now);
   if (path === "/imports/validate") return preview(repo, input, now);
   if (path === "/imports") return saveImport(repo, input, now);
