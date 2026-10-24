@@ -34,6 +34,16 @@ jobs:
       - name: Race import wizard, 390px, personal Bet and restart
         shell: powershell
         run: npm run test:wizard
+      - name: One-click launcher local-only and repeated launch
+        shell: powershell
+        run: |
+          $dataHome = Join-Path $env:RUNNER_TEMP 'TurfLab-launcher'
+          try {
+            ./scripts/windows/Start-All.ps1 -DataHome $dataHome -SkipTailscale -NoBrowser
+            ./scripts/windows/Start-All.ps1 -DataHome $dataHome -SkipTailscale -NoBrowser
+          } finally {
+            ./scripts/windows/Stop.ps1 -DataHome $dataHome
+          }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

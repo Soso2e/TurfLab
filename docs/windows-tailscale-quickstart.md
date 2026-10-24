@@ -2,6 +2,24 @@
 
 Node.js 22以上、Windows PowerShell 5.1以上。Reactのビルド成果物と既存Workers APIを **http://127.0.0.1:8787** で提供し、既存SQLite-backed Durable Objectのownerを使う。新しいDBや有料AI APIは不要。実馬券購入機能はない。
 
+## いちばん簡単：ダブルクリックで一括起動
+
+リポジトリ直下の **`Start-TurfLab.bat`** をダブルクリック。`scripts/windows/Start-All.ps1` が必要に応じて `Initialize.ps1` を実行し、その後 `Start.ps1` → `Tailscale.ps1` → `Test-Tailscale.ps1` を順に実行する。PCの `http://127.0.0.1:8787` を開き、Tailscaleの**実際に表示されたHTTPS URL**をコンソールに残す。確認後キーを押すとウィンドウが閉じるが、サーバーとServe設定は残る。
+
+事前にNode.js 22以上とWindows/iPhoneの両方にTailscaleをインストールし、同じtailnetにサインインする。初回は `npm ci`・チェック・ビルドのため時間がかかる。Tailscaleのログイン・HTTPS許可は本人の操作が必要。Tailscaleの設定に失敗してもローカルサーバーは稼働し、失敗を表示する。Funnelやルーターのポート開放はしない。既存の別サービスの443/8443共有は上書きしない。
+
+PowerShellから直接実行する場合：
+
+```powershell
+.\scripts\windows\Start-All.ps1
+# ローカルだけ起動（Tailscaleなし）
+.\scripts\windows\Start-All.ps1 -SkipTailscale
+# CIなどブラウザ不要の検証。既存データとは別の保存先
+.\scripts\windows\Start-All.ps1 -SkipTailscale -NoBrowser -DataHome "$env:LOCALAPPDATA\TurfLab-test"
+```
+
+**注意：** 起動済みのサーバーは自動停止・自動更新しない。ソース更新は `Backup.ps1` → `Stop.ps1` → `git pull --ff-only` → 再起動の順で行う。`state` を削除しない。iPhone Safariの実機接続・実レース1Rの受入・Sheets自動同期は別途確認が必要。
+
 ## 初回と毎日の起動
 
 初回手順後の1R手動運用は末尾「公式出馬表から1Rを確定する」を参照。
