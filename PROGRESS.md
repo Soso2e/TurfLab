@@ -15,7 +15,8 @@
 - 制限: 既存Test-Acceptance.ps1は8787の通常サーバー稼働を検出して安全停止し、今回の全スクリプト受入は未実行。通常サーバーを停止せず別ポートの新旧隔離試験を実施。Windows OS再起動/停電/実iPhoneは未確認。既存Common.ps1はPowerShell 7の日付自動変換でPID比較が失敗するため通常操作はWindows PowerShell 5.1で実行した。
 - 調査: BRAINの関連ファイル名/Projects/Decisions/Prompts/Actionsの絞込検索ではTurfLab固有の該当なし。OpenAI公式資料は定時タスクのplugin利用を案内するが、ローカルautomation設定に既存朝9時タスクは見つからず、対象環境/実行証拠は取得できていない。ユーザーに環境/タスク名を照会中。GitHub定時書込みは成功/不可とも未断定。Drive/既存Sheetsを条件付き代替案として文書化。
 - 未確認/TODO: 発走前の本人確認済み実1Rと実ChatGPT回答、朝9時タスクから試験branchへの新規書込み→隔離読返し、iPhone実機、Windows OS再起動。JRA-VANのSDKは確認したが外部AI/GitHub送信の許諾を未認定。NAR公式CSVは馬/騎手の一意IDなし。出馬表自動取得は別条件、無断スクレイピング/新契約なし。
-- 次: PRレビュー。mainへ自動マージしない。本人確認済み出馬表/外部ID/出典/時点と定時タスク環境がそろってから実受入する。手順は docs/github-prediction-bridge.md、ChatGPT指示は docs/prompts/github-prediction-bridge.md。
+- 完了: 実装 `e81f9c8` を日本語コミットでPushし、[Draft PR #38](https://github.com/Soso2e/TurfLab/pull/38) を作成。実装コミットの [CI](https://github.com/Soso2e/TurfLab/actions/runs/40485802185) はUbuntu check・Windows Node 22の初期化/142テスト/既存390px・再起動・復元/ウィザード/一括起動・再起動要求の全ジョブ成功。最新HEADはPR Checksを参照。自動マージなし。
+- 次: PR #38レビュー。mainへ自動マージしない。本人確認済み出馬表/外部ID/出典/時点と定時タスク環境がそろってから実受入する。手順は docs/github-prediction-bridge.md、ChatGPT指示は docs/prompts/github-prediction-bridge.md。
 
 ## 現在の状態
 
@@ -70,3 +71,4 @@
 | 2026-10-21-01 | 最新mainからIssue #36を実装。公式出馬表draft/照合/ID/snapshot、AIパック/回答変換、null確率整合、既存Coreロック/実読返し、DO途中失敗復旧、390px本人Bet/再起動を隔離検証。長いIDの横はみ出しを検出し修正、再試験成功 | 動作確認済み | `race-wizard`共有/API/UI、Core検証/生成Schema、テスト/Windows CI、受渡し/Windows手順/プロンプト | PR/CI、本人の発走前実1R・iPhone受入。既存Sheets/Notion/実スケジュールは変更なし |
 | 2026-10-21-02 | `1e42f6b`をPushしPR #37を作成。実装コミットのUbuntu/Windows Node 22 CI（既存復元/モバイルと新ウィザード/再起動を含む）成功。PRに未検証・手動出典確認・再開手順を明記。開始時と同じ8787の稼働PIDを確認 | 動作確認済み | `PROGRESS.md`、PR #37 | mainは未マージ。実データ1R・iPhone Safari/別端末の本人受入 |
 | 2026-10-27-01 | GitHub Prediction Bridge Phase 1・2を実装。非公開データrepo・固定pack・既存Core保存/読返し・5分同期/履歴/復旧・142テスト・Windows実GitHub/390px隔離受入。通常Worker起動前後の業務hash一致、tailnet確認。Phase 3の定時権限/許諾データ候補を調査 | 動作確認済み | Bridge共有/API/Worker/Web/Windows/テスト/README/同期手順/ChatGPT指示 | PRレビュー、実1R/実ChatGPT定時書込み/iPhone/OS再起動。既存10/26の未コミット進捗はローカル保持 |
+| 2026-10-27-02 | 実装e81f9c8をPushしDraft PR #38を作成。実装コミットのUbuntu/Windows CIが全成功。通常同期Workerはmain/5分で稼働、通常Web/API・tailnet維持 | 動作確認済み | PROGRESS.md、PR #38 | 実1R/既存朝9時タスク/iPhone/OS再起動の本人受入、レビュー。mainへ自動マージしない |
