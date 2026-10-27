@@ -747,7 +747,10 @@ export async function convertAnswer(
     race_id: obj(pack.race).race_id,
     model_version_id: pack.model_version_id,
     snapshot_id: pack.snapshot_id,
-    kind: "morning",
+    kind: input.kind === "final" ? "final" : "morning",
+    ...(input.kind === "final"
+      ? { supersedes_prediction_id: input.supersedes_prediction_id }
+      : {}),
     information_cutoff_at: pack.information_cutoff_at,
     evidence,
     rationale: `${answer.rationale}\n主想定: ${answer.main_pace} / ${answer.main_pace_reason}`,
@@ -797,6 +800,9 @@ export async function convertAnswer(
     pipeline_id: `wizard-core:${operationId}`,
     generated_at: answer.generated_at,
     prediction,
+    ...(input.kind === "final"
+      ? { final_changes: input.final_changes ?? [] }
+      : {}),
   };
   const core = await prepareRace(repo, pipeline, now);
   const warnings = await validatePrediction(

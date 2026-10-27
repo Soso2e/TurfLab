@@ -794,3 +794,12 @@ button:focus-visible {
     display: none;
   }
 }
+/* Long immutable IDs and file paths must fit phone screens. */
+.sync-status {
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border, #777);
+  border-radius: 12px;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

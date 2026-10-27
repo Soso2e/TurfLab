@@ -1,5 +1,7 @@
 # Windows / Tailscale / iPhone クイックスタート
 
+GitHub予想受信を設定するとStart-All/Start-TurfLab.batから同期Workerも起動する。[設定・認証・受信仕様](github-prediction-bridge.md) を参照。保存先・8787・tailnet 8443・本人認証は従来と同じ。設定がなければ従来のWeb/APIのみ起動する。
+
 Node.js 22以上、Windows PowerShell 5.1以上。Reactのビルド成果物と既存Workers APIを **http://127.0.0.1:8787** で提供し、既存SQLite-backed Durable Objectのownerを使う。新しいDBや有料AI APIは不要。実馬券購入機能はない。
 
 ## いちばん簡単：ダブルクリックで一括起動

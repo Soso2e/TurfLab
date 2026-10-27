@@ -4,6 +4,8 @@ ChatGPTによる競馬分析・展開シミュレーションを記録し、全�
 
 ## 現在の状態
 
+GitHub Prediction Bridge（Phase 1・2）: 非公開 `Soso2e/TurfLab-data` へ固定入力パックを出力し、予想JSONをWindows Workerが受信して既存Coreで検証・確定・読み返す。5分同期・手動同期・履歴・再起動復旧を実装。本人Betは別操作。セットアップと受入境界は [GitHub同期手順](docs/github-prediction-bridge.md) を参照。実レース1R・既存ChatGPT朝9時タスクのGitHub書込みは未検証。出馬表は引き続き本人確認付き手動登録。
+
 React / TypeScript / ViteのWebとCloudflare Workers API、Sheets Repository、予想取込・採用固定、仮想購入・訂正精算、数値シミュレーション、受信同期、評価を実装した。型・lint・テスト・ビルドとローカルWorkers/PC/スマホ操作を確認済み。
 
 本番接続は未設定。既存Sheetsを読み取り調査し、原本を変更せず旧タブ用の閲覧と新規TL_*用の保存基盤を用意した。Google認証・新規タブ・既存ChatGPT出力連携など、完了していない受入条件は [Issue別の実装状況](docs/implementation-status.md) に記録している。GitHub issueは閉じていない。

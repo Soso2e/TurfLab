@@ -288,6 +288,21 @@ export function RaceImportWizard({
             >
               入力パックをダウンロード
             </button>
+            <button
+              disabled={busy}
+              onClick={() =>
+                void action(async () => {
+                  await api("/github-bridge/export", {
+                    snapshot_id: pack.snapshot_id,
+                  });
+                  alert(
+                    "GitHub出力を要求しました。ホームの同期状態で結果を確認してください。",
+                  );
+                })
+              }
+            >
+              非公開GitHubへ入力パックを出力
+            </button>
           </div>
           <details>
             <summary>入力パック・回答Schema</summary>
