@@ -40,6 +40,8 @@ WorkerはWindowsログオン後、Start-Allで起動する。PC再起動後の�
 
 ## 1Rの受け渡し
 
+朝タスクの置換用本文は [prompts/chatgpt-daily.md](../prompts/chatgpt-daily.md)、入力準備・本人Bet・翌日精算までの全体は [日次運用フロー](daily-operation-flow.md) を正本とする。GitHub同期だけでは分析根拠の準備や結果の自動精算は完了しない。
+
 1. 公式/利用許諾済みの出馬表を既存ウィザードで手動登録する。全頭・取消・外部ID・出典・時点を本人が確認する。不足はdraftで停止する。
 2. 入力パックの「非公開GitHubへ入力パックを出力」を押す。ホームの同期状態で成功/失敗を確認する。Workerが既存 `/race-import/pack` から最新固定パックを取得する。
 3. ChatGPTに対象packファイルを渡す。外側の `prediction_template` のID/hash/締切/モデルをそのまま使い、`answer` を `pack.answer_schema` に従って埋める。新規保存先は外側の `prediction_path`。JSONの外にMarkdownを付けない。

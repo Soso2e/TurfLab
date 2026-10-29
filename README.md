@@ -4,6 +4,8 @@ ChatGPTによる競馬分析・展開シミュレーションを記録し、全�
 
 ## 現在の状態
 
+毎朝09:00タスクの指示は [置換用本文](prompts/chatgpt-daily.md)、出馬表準備から翌日精算までの担当・実装済み/未実装・受入条件は [日次運用フロー](docs/daily-operation-flow.md) を参照。通常ChatGPTの実タスク設定は、リポジトリ編集では変更されない。
+
 GitHub Prediction Bridge（Phase 1・2）: 非公開 `Soso2e/TurfLab-data` へ固定入力パックを出力し、予想JSONをWindows Workerが受信して既存Coreで検証・確定・読み返す。5分同期・手動同期・履歴・再起動復旧を実装。本人Betは別操作。セットアップと受入境界は [GitHub同期手順](docs/github-prediction-bridge.md) を参照。実レース1R・既存ChatGPT朝9時タスクのGitHub書込みは未検証。出馬表は引き続き本人確認付き手動登録。
 
 React / TypeScript / ViteのWebとCloudflare Workers API、Sheets Repository、予想取込・採用固定、仮想購入・訂正精算、数値シミュレーション、受信同期、評価を実装した。型・lint・テスト・ビルドとローカルWorkers/PC/スマホ操作を確認済み。

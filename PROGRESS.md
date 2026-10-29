@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-最終更新: 2026-10-28
+最終更新: 2026-10-29
 
 現在フェーズ: GitHub Prediction Bridge Phase 1・2 実装・隔離受入済み / 実1R・朝9時タスク・iPhone受入待ち
 
@@ -17,6 +17,7 @@
 - 未確認/TODO: 発走前の本人確認済み実1Rと実ChatGPT回答、朝9時タスクから試験branchへの新規書込み→隔離読返し、iPhone実機、Windows OS再起動。JRA-VANのSDKは確認したが外部AI/GitHub送信の許諾を未認定。NAR公式CSVは馬/騎手の一意IDなし。出馬表自動取得は別条件、無断スクレイピング/新契約なし。
 - 完了: 実装 `e81f9c8` を日本語コミットでPushし、[Draft PR #38](https://github.com/Soso2e/TurfLab/pull/38) を作成。実装コミットの [CI](https://github.com/Soso2e/TurfLab/actions/runs/40485802185) はUbuntu check・Windows Node 22の初期化/142テスト/既存390px・再起動・復元/ウィザード/一括起動・再起動要求の全ジョブ成功。最新HEADはPR Checksを参照。自動マージなし。
 - 2026-10-28追記: 本人回答により朝9時タスクは通常ChatGPT（Web/スマホ）。利用可能ブラウザーはChatGPTログイン画面のため既存タスク/権限/履歴へ未接続。Work/Codex/ghの成功を転用せず、タスク名・指示文の確認と試験ブランチへの1回の定時書込→commit読返しが必要。能力試験用の指示を同期手順へ追加。既存タスクと通常データは変更なし。
+- 2026-10-29追記: 本人提示の既存朝タスク全文を現行Bridge/Coreと突合。prompts/chatgpt-daily.mdを置換用v2へ改訂し、旧Sheets書込許可・オッズ買い目使用・任意ID/JSON追加を除去。固定pack/根拠/cutoffを前提に、answer手動貼付とWrapper保存、旧Sheets限定集計とTurfLab採用/本人Bet、結果保存と精算を分離。docs/daily-operation-flow.mdへ全体図/実装状態/優先順を追加。実タスク設定/業務データ/認証/運用プロセスは変更なし。
 - 次: PR #38レビュー。mainへ自動マージしない。本人確認済み出馬表/外部ID/出典/時点と定時タスク環境がそろってから実受入する。手順は docs/github-prediction-bridge.md、ChatGPT指示は docs/prompts/github-prediction-bridge.md。
 
 ## 現在の状態
@@ -74,3 +75,4 @@
 | 2026-10-27-01 | GitHub Prediction Bridge Phase 1・2を実装。非公開データrepo・固定pack・既存Core保存/読返し・5分同期/履歴/復旧・142テスト・Windows実GitHub/390px隔離受入。通常Worker起動前後の業務hash一致、tailnet確認。Phase 3の定時権限/許諾データ候補を調査 | 動作確認済み | Bridge共有/API/Worker/Web/Windows/テスト/README/同期手順/ChatGPT指示 | PRレビュー、実1R/実ChatGPT定時書込み/iPhone/OS再起動。既存10/26の未コミット進捗はローカル保持 |
 | 2026-10-27-02 | 実装e81f9c8をPushしDraft PR #38を作成。実装コミットのUbuntu/Windows CIが全成功。通常同期Workerはmain/5分で稼働、通常Web/API・tailnet維持 | 動作確認済み | PROGRESS.md、PR #38 | 実1R/既存朝9時タスク/iPhone/OS再起動の本人受入、レビュー。mainへ自動マージしない |
 | 2026-10-28-01 | 朝9時タスクの対象を通常ChatGPT（Web/スマホ）と本人確認。公式情報・接続機能・ブラウザーを調査し、ログイン未接続により既存タスクの実行検証不可と確認。試験専用branchへの定時書込能力テスト指示を文書化 | 調査完了 | docs/github-prediction-bridge.md、PROGRESS.md | タスク名/保存済み指示文、通常ChatGPTでの1回の定時書込実証。不可ならDrive/Sheetsも同様に権限検証 |
+| 2026-10-29-01 | 既存朝9時タスクを監査し、全文置換案と準備→予想→本人採用/Bet→公式精算→翌朝振返りの全体フローを作成。packの分析根拠不足、定時GitHub未実証、結果/日次記録の自動受渡し未実装を明記。Schema/変換/結果処理と突合、Markdown整形・ローカルリンク・git diff検査成功 | 調査完了 | prompts/chatgpt-daily.md、docs/prompts/github-prediction-bridge.md、docs/daily-operation-flow.md、同期手順、README、PROGRESS | 実タスク本文置換、通常ChatGPTの定時能力試験、根拠を固定する入力拡張/実1R受入。文書のみ変更のためコード試験は再実行なし |

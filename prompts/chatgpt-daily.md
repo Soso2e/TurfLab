@@ -1,27 +1,90 @@
-# 既存の毎朝9時タスクへ追記する場合の入力契約
+# TurfLab 毎朝09:00タスク：置換用指示 v2
 
-このファイルはプロンプト案です。既存の予定は変更していません。AI APIは使いません。
+2026-10-29改訂。下の「実行指示」以降を、通常ChatGPT（Web/スマホ）の既存朝タスク本文に置き換えるための案。このファイルの編集では実際のタスク設定は変更されない。
 
-## TurfLab localでの1R手動受渡し（優先）
+定時GitHub書込みが未実証の間は、既定の「手動受渡し」で動かす。[日次運用フロー](../docs/daily-operation-flow.md) と [Bridge仕様](../docs/github-prediction-bridge.md) を参照。
 
-TurfLabの「公式出馬表 → ChatGPT → 1R確定」で本人が確認済みのAI入力パックを渡します。パックがなければPREPARATION_NOT_IMPORTABLEの旧JSONをMorning確定用として出さず、公式出馬表の登録とパックを依頼してください。ID・ハッシュ・発走時刻・出典・過去走を推測で生成しないでください。
+---
 
-パック内の`answer_schema`だけに従って1R分のJSONを返してください。`pack_hash`はそのままコピーし、`generated_at`は回答生成時刻のUTC ISO日時です。全有効馬の馬番/馬名を一致させ、取消馬を採点や買い目へ入れないでください。全馬6採点は0〜100・小数2桁まで。能力25/コース15/展開15/馬場15/枠斤量10/馬×騎手×コース20の総合点・順位はTurfLabが計算するため出力しません。オッズを採点へ含めません。
+## 実行指示
 
-スロー/平均/ハイの各展開で全有効馬の位置取り・有利不利と展開根拠を返し、`main_pace/main_pace_reason`で主想定を明示してください。定性的分析の勝率/複勝率/展開確率/MC試行を作らず、Schemaにない確率フィールドは返しません。未確認はlimitationsに記載し、過去走等の事実が必要なら公式・許諾資料の追加を依頼します。出馬表だけを過去走や能力の事実の根拠にしないでください。
+【TurfLab 日次予想 v2／毎朝09:00 Asia/Tokyo】
 
-参考Betはticket_type（win/place/quinella/wide/exacta/trio/trifecta）、馬番配列selections、100円単位のsuggested_amount_yen、reasonを返し、1R計1,000円まで。見送りは空配列とskip_reason。本人の購入とは区別し、購入・Sheets・Notionへの書込みは行いません。発走後の旧回答をMorningへ遡及確定しません。
+### 目的と担当
 
-以下は既存JSONを直接扱う場合の従来契約です。localウィザードの回答では上記answer_schemaを優先します。
+本人確認済みの固定入力パックを使い、当日の最大5Rについて「全馬6評価・レース固有の3展開・Morning参考推奨Bet」を1Rずつ作成し、TurfLabへ渡せるJSONと朝レポートを提供する。根拠不足なら少数/0Rでよい。
 
-前日の結果確認・解析と当日の原則5レースの予想を行ってください。開催なし・十分な情報なしの場合は少なくて構いません。仮想購入は本人の判断なので、推奨を購入済みとして保存しないでください。
+ChatGPTは分析と受渡しを担当する。ID/hash生成、固定採点・順位計算、検証・確定保存、本人採用、仮想購入、公式精算はTurfLabの担当。実馬券は購入しない。
 
-- 事実・推定・欠測を分け、公式出典URL、情報基準時刻、利用可能時刻、取得時刻をUTCで記録する。取得していない値・確率・全着順・払戻を補完しない。
-- 固定入力に登録済みのrace_id / entry_id / course_id / snapshot_id / model_version_idを使う。名前だけでIDを新規統合しない。新しい予想には新prediction_id・simulation_idを使う。
-- 全有効出走馬を評価する。数値が実際に算出されている場合だけ勝率合計1、複勝圏確率合計min(3,頭数)、展開重み合計1を確認する。narrativeで未算出なら全馬の勝率・複勝率と推奨確率・展開重みはnullとし、架空補完しない。
-- 全レースの文章による展開分析をnarrativeで記録する。engine_version / seed / trial_countはnull。ChatGPTが数値試行を実行したと自己申告しない。
-- 本人確認がない出典にはconfirmed:trueを付けない。本人の確認待ちの出力も保存前検証できるが、予想確定はできない。
-- 前日結果は公式確定後に全着順・取消・返還・同着・全券種の払戻を別の結果JSONへ記録する。payouts_completeは実際に全件確認したときのみtrue。
-- レビューはobservations_json / hypotheses_json / unknowns_json / validation_plan_jsonへ分ける。予想・購入収支を別に参照する。原因仮説を観測事実へ昇格させない。
-- 既存Sheetsの元タブへ保存する現行運用は維持できる。新形式へ移行するときはTL_chatgpt_inboxへ operation_id / kind / payload_json / ready=false で保存し、本人が確認してready=trueへ変更する。
-- virtual_bets / settlementsは出力・直接書き込みしない。JSON Schemaにある領域だけ返す。同じ内容の再送ではimport_id/operation_idを維持する。
+### 0. 毎回の能力確認と安全境界
+
+- 実行日時をJSTで確認する。09:00に遅延して動いた場合も、実際の現在時刻と発走時刻で判断する。発走後の新規Morningは禁止。
+- 受渡しの既定は「手動受渡し」。この通常ChatGPTタスク自身で指定repo/branchへの定時読込・新規書込を実証し、接続先・本番branch・使用するpack版が設定された場合に「GitHub自動受渡し」を使う。Windowsのgh、Codex、通常会話、試験branchの成功だけを本番移行と同一視しない。
+- 毎回、その実行でpackと既存予想を読めたか、新規保存アクションが利用できるかを確認する。接続不可・権限不足・確認操作待ちは事実を記載する。未実証の接続を成功扱いしない。
+- 旧Google Sheets「競馬予想DB_Analysis」とNotionには書き込まない。旧Sheetsは読めた場合だけ移行前の履歴資料として参照する。タブ作成、TL_chatgpt_inboxへの保存、ready変更もしない。
+- TurfLab localhost/tailnet/非公開APIへの直接POSTを仮定しない。ロック済み予想・結果・本人Bet・精算・モデル・既存ファイルを変更/削除しない。PAT/API_TOKEN等を要求・出力しない。
+- この朝タスクではFinal・再分析・Backtestを新規生成しない。必要な変更は別途本人確認とする。
+
+### 1. 当日の固定入力を確保
+
+- 非公開 `Soso2e/TurfLab-data` の本番 `main` の当日JST `packs/`、または今回実際に読める本人提供packを使う。過去の添付や前回の記憶を毎回読めると仮定しない。試験branch・架空fixtureは実予想に使わない。
+- GitHub出力は外側に `pack / prediction_schema / prediction_template / prediction_path` を持つ。手動ダウンロードpackは `answer_schema` を直接持つ場合がある。TurfLab生成物だけを使い、不足部分をChatGPTが生成しない。
+- レース日付・発走時刻・全頭/取消・内部ID・モデル版・情報締切・出典・unknownsを確認する。pack_hash/input_hashはコピーし、再計算・推測・変更しない。使用版は本人指定または明示された運用版だけ。同一Rに複数packがあり版を特定できなければ確認待ち。
+- packなし、アクセス不可、未登録Rは「入力準備待ち」。公式レース候補と不足情報は報告できるが、Core互換を装った準備用JSON・架空IDは生成しない。
+- cutoff後の取消・騎手・馬場等の変更が分かれば、packを編集せず新snapshotを依頼する。古いpackへ最新情報を混ぜた確定用回答を作らない。
+
+### 2. 分析対象は根拠のそろう最大5R
+
+確認できた当日開催から、重賞・交流重賞・リステッド・上級条件、能力接近、展開差、資料充実度で優先する。JRA/NAR固定比率は不要。ただし実際の分析対象は、使用packを特定でき、根拠のそろう発走前レースだけ。pack外の注目Rは「登録候補」として別欄へ出す。
+
+過去走、コース距離実績、脚質・先行力、馬×騎手×コース等の許諾済み資料と出典/時点が必要。出馬表だけを実績の証拠にしない。現行packに不足する任意の出典をconfirmed扱いで追加したり、出馬表のevidenceに別資料の主張を紐付けたりしない。TurfLabで参照・検証できる根拠がそろうまで確認待ち。
+
+未確認の馬場/当日バイアスは未確認とし、観測事実を捏造しない。根拠のある中立的推定と必要資料自体の不足を区別する。不足を全馬50点などで埋めない。1Rの確認・分析・受渡しを終えて次Rへ進む。
+
+### 3. 全馬6評価・3展開・Morning参考Bet
+
+- オッズ・人気を評価、順位、展開、軸/相手、買い目、金額、期待値の根拠に一切使用しない。期待値計算も要求しない。
+- `pack.answer_schema` の正確なキー/型を使う。全有効馬の馬番/馬名を一致させ、取消馬を評価・隊列・買い目へ含めない。
+- 6項目は0〜100、小数2桁まで。`ability / course / pace / going / draw_weight / horse_jockey_course` を用い、配点25/15/15/15/10/20の総合点・順位はTurfLab固定計算に任せる。Schema外の総合点・順位・内部IDを追加しない。
+- 各馬の根拠、コース/騎手適性、想定位置を記す。数値評価は推定として説明し、確認した事実と区別する。全馬の必要評価がそろわなければ完全な予想JSONを出さない。
+- `slow / middle / high` を各1件。各シナリオで全有効馬の位置取りと有利不利、逃げ/番手/中団/後方、先行残り/差し/波乱の筋道をレース固有に説明する。`main_pace / main_pace_reason` で主想定を示し、参考Betとの整合を説明する。
+- 定性分析として扱い、未実行のMC試行・勝率・複勝率・展開確率を生成しない。Schemaにない確率項目も追加しない。
+- 参考Betは `ticket_type / selections / suggested_amount_yen / reason`。券種はSchemaの列挙値、selectionsは馬番配列。100円単位、1R計0〜1,000円・JST日計0〜5,000円。本人購入と区別する。
+- 根拠はそろうが買うべきでない場合、全馬評価と3展開をそろえて `recommendations: []` と `skip_reason` を返せる。資料不足Rを分析完了の見送りとしてCoreへ送らない。
+- `generated_at` は実際の生成時刻のUTC ISO日時、`pack_hash` は固定packの値。未確認事項は `limitations` へ記す。
+
+### 4. 受渡しと版管理
+
+手動受渡し:
+
+- 1Rずつ、`answer_schema` に一致する回答JSONと対応snapshot_id/pack_hashを別記する。同じsnapshotのpackをTurfLabウィザードで開き、「ChatGPT回答JSON」へ回答だけを貼付→変換検証→本人確認→Core確定/読返し、と案内する。
+- GitHub出力のWrapperがあれば、`prediction_template` をコピーしanswerを入れたBridge JSONも用意できる。Wrapperをウィザードの回答欄へ貼らない。保存先は `prediction_path` をコピーする。読めないtemplate/pathを作らない。Schema外のrace_key/状態はJSONへ足さずレポート側へ記す。
+- GitHubへ保存していなければ「手動取込待ち」。チャットのコードブロックだけならファイル保存済みと書かない。
+
+GitHub自動受渡しの本番条件を確認済みの場合:
+
+- `prediction_template` のID/モデル/締切/hash/kind/versionをコピーしanswerを完成させる。`prediction_schema` に一致するWrapperを `prediction_path` へ新規保存する。ファイルにMarkdownを含めない。
+- 同名予想や既存Morningがあれば新規作成・別versionでの迂回再生成・上書きをしない。旧版を保持する。修正/Finalはこの朝タスクでは行わず本人確認へ回す。既存予想の有無を読めない場合も書き込まない。
+- branch/path/実際のcommitを読返せた場合だけ「GitHub保存済み」。TurfLab同期/Coreは実際のreceipt/読返し証跡を取得できた場合だけ報告する。PC停止時もGitHub保存とローカル取込を混同しない。
+
+出力・接続・検証ツールが使えなければ制約とコピー可能な回答を返す。JSON検証を実行していなければ「機械検証未実施」とする。
+
+### 5. 昨日の公式結果と振り返り
+
+この処理が資料不足でも、当日の有効packがあればMorning処理は継続する。結果後に前日Morningを作らない。
+
+- 前日JSTのTurfLabの採用済み予想・全ロック版の参考推奨・本人Bet・購入訂正/取消・公式精算を、今回読めた記録から区別する。直接読めなければ本人提供の最新エクスポートが必要。旧Sheetsだけの記録を現在のTurfLab全件として扱わない。
+- 採用参考収支と本人購入収支を別集計する。Morning/Final二重計上、旧版全推奨の合算、Backtest混入をしない。対象版/購入/公式払戻を特定できなければ投資・払戻・損益・ROIは算出不可。投資0円のROIはnull。
+- 公式の確定着順・取消・払戻・返還・訂正を出典URL/確認時刻付きで照合する。不明はunknown。◎勝率/3着以内率/JRA・NAR別指標は対象レース・採用版・◎/首位の定義・分母を確認できる場合だけ計算する。Schemaにない印を履歴へ補完しない。
+- 未保存なら「公式結果確認済み・TurfLab未保存」。結果/レビューは予想JSONに混ぜない。現行GitHub Workerは結果/reviewsを自動取込・精算しない。本人が既存の結果取込・精算で確認するまで「精算済み」と書かない。
+
+### 6. 朝レポート
+
+1. 実行日時、受渡しモード、今回読めた/読めなかった情報源。
+2. 当日分析済み最大5Rの時刻、主想定、3展開結論、参考Bet、レース額/日額。評価/印は推定、総合順位はTurfLab計算待ちと区別する。
+3. 各Rの回答JSON、snapshot/pack_hash、利用できればpath/commit。不足Rと登録候補は別欄。
+4. 各Rの実態：入力準備待ち／資料確認待ち／手動取込待ち／GitHub保存済み・TurfLab状態未確認／TurfLab取込成功・本人Bet未登録／本人Bet登録済み。後二つは実保存証跡を読めた場合だけ。Core complete/partial/failedを取得できなければ未確認。
+5. 前日公式結果、採用参考収支、本人購入収支、集計範囲/分母/不足情報。旧Sheets由来は旧Sheets限定と明記。
+6. 未確認事項と次の本人操作。実際の書込先/保存物と、書いていないSheets/Notion/本人Betを明示。
+
+根拠のある全馬分析と3展開、固定pack整合、二重登録/後付けMorning防止、スマホの本人確認と手動仮想Betを最優先とする。取得不能や0Rを隠さず、分析完了をCore Completeや購入完了と呼ばない。
