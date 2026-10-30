@@ -9,6 +9,7 @@ import {
 } from "../../../packages/shared/src/domain";
 import "./style.css";
 import { RaceImportWizard } from "./RaceImportWizard";
+import { GitHubSyncStatus } from "./GitHubSyncStatus";
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -345,6 +346,9 @@ function App() {
             )}
             {tab === "today" && (
               <>
+                {storage === "local" && (
+                  <GitHubSyncStatus api={api} refresh={reload} />
+                )}
                 <div className="page-heading">
                   <div>
                     <p className="eyebrow">DAILY OVERVIEW</p>

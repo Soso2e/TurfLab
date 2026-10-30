@@ -50,6 +50,7 @@ import {
   voidBet,
 } from "./betting";
 import { adoptModel, analytics, backtest, saveReview } from "./analytics";
+import { bridgeConvert } from "./github-bridge";
 import {
   dashboard,
   dailyRun,
@@ -177,6 +178,10 @@ export async function route(
     if (path === "/race-import/pack")
       return inputPack(repo, str(input, "snapshot_id"), now);
     if (path === "/race-import/convert") return convertAnswer(repo, input, now);
+  }
+  if (path === "/github-bridge/convert") {
+    requireCondition(!sheets, "GitHub Bridgeはlocal保存専用です");
+    return bridgeConvert(repo, input, now);
   }
   if (path === "/data/import") return ingestMaster(repo, input, now);
   if (path === "/imports/validate") return preview(repo, input, now);
@@ -361,6 +366,67 @@ export class TurfCoordinator {
       if (!(await authenticated(request, this.env.API_TOKEN)))
         return response({ error: "本人用認証が必要です" }, 401);
       try {
+        const bridgePath = new URL(request.url).pathname;
+        if (
+          [
+            "/api/github-bridge/status",
+            "/api/github-bridge/control",
+            "/api/github-bridge/sync",
+            "/api/github-bridge/export",
+            "/api/github-bridge/report",
+          ].includes(bridgePath)
+        ) {
+          requireCondition(
+            this.env.STORAGE_MODE === "local",
+            "GitHub Bridgeはlocal保存専用です",
+          );
+          const commands =
+            (await this.state.storage.get<Row[]>("github-commands")) ?? [];
+          const status = (await this.state.storage.get<Row>(
+            "github-status",
+          )) ?? { configured: false, records: [] };
+          if (request.method === "GET" && bridgePath.endsWith("/status"))
+            return response({ ...status, pending_commands: commands.length });
+          if (request.method === "GET" && bridgePath.endsWith("/control"))
+            return response({ commands });
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const input = await readBody(request);
+          if (bridgePath.endsWith("/report")) {
+            const report = obj(input.status);
+            requireCondition(
+              Array.isArray(report.records) && report.records.length <= 100,
+              "同期履歴は100件以内です",
+            );
+            await this.state.storage.put("github-status", report);
+            const ack = Array.isArray(input.ack) ? input.ack : [];
+            await this.state.storage.put(
+              "github-commands",
+              commands.filter((c) => !ack.includes(c.id!)),
+            );
+            return response({ status: "saved" });
+          }
+          const kind = bridgePath.endsWith("/export") ? "export" : "sync";
+          const snapshot = kind === "export" ? str(input, "snapshot_id") : "";
+          if (
+            !commands.some((c) => c.kind === kind && c.snapshot_id === snapshot)
+          ) {
+            requireCondition(
+              commands.length < 50,
+              "同期要求が多すぎます。Workerを確認してください",
+              409,
+            );
+            commands.push({
+              id: crypto.randomUUID(),
+              kind,
+              snapshot_id: snapshot,
+            });
+            await this.state.storage.put("github-commands", commands);
+          }
+          return response({
+            status: "queued",
+            message: "同期Workerへ要求しました",
+          });
+        }
         if (
           request.method === "GET" &&
           new URL(request.url).pathname === "/api/pipeline/diagnostics"

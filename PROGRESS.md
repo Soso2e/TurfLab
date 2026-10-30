@@ -1,8 +1,24 @@
 # PROGRESS.md
 
-最終更新: 2026-10-21
+最終更新: 2026-10-29
 
-現在フェーズ: Issue #36 実装・隔離受入済み / PR #37レビュー・実データ1R・iPhone受入待ち
+現在フェーズ: GitHub Prediction Bridge Phase 1・2 実装・隔離受入済み / 実1R・朝9時タスク・iPhone受入待ち
+
+## GitHub Prediction Bridge（2026-10-27）
+
+- 現在: 最新origin/main `70a57a9`（PR #37統合済み）から `feat/github-prediction-bridge`。Phase 1・2は実装・隔離受入済み、本人確認済み実1R・既存ChatGPT定時タスク・iPhoneの受入は未完了。
+- 完了: 非公開 `Soso2e/TurfLab-data` を既存gh認証で作成。固定packの新規出力、Schema/ID/日付/hash/モデル/締切/出典検証、既存変換→Core→locked読返し。Finalは実変更と新snapshotを照合して旧Morningを保持。本人Betは自動生成しない。再分析は別版のまま確認待ち。
+- 完了: 5分ポーリング、Web手動同期/出力要求、永続receipt/cache/履歴、最大5R/日、個別失敗継続、重複/競合/破損拒否、バックオフ、同一pipelineによる再起動復旧、Windows一括起動/停止、390pxホーム同期状態を実装。通常DO/認証/8787/8443/購入上限を再利用。
+- 検証: npm run check（型・lint・142テスト・ビルド）成功。同期15テストは1R/5R混在/6R制限/Final/オッズ根拠拒否/通信断/認証/再起動を含む。npm run test:wizardは既存DO/390px/本人Bet/再起動成功。
+- 検証: npm run test:bridgeで非公開GitHubの試験専用ブランチとtemp DataHome/8792を使い、実pack出力→fixture回答受信→Core保存/読返し、Windows Worker起動/停止/残存lock復旧、実GitHub認証失敗/復旧、再起動hash一致、390pxホーム/レース詳細、JSエラー/横はみ出しなしを確認。実ChatGPT生成をfixtureで代替した証拠ではない。証跡はGit対象外test-results。
+- 検証: 通常DataHomeに秘密を含まないmain接続設定を追加しWorker稼働。前後の業務バックアップhash一致、通常環境へのfixture混入なし。Start-All -HttpsPort 8443 -NoBrowserで既存PID 60212を再利用しWeb/API認証・HTTPS・Explorer無効・既存443維持を確認。PIDは変動するので再確認する。
+- 制限: 既存Test-Acceptance.ps1は8787の通常サーバー稼働を検出して安全停止し、今回の全スクリプト受入は未実行。通常サーバーを停止せず別ポートの新旧隔離試験を実施。Windows OS再起動/停電/実iPhoneは未確認。既存Common.ps1はPowerShell 7の日付自動変換でPID比較が失敗するため通常操作はWindows PowerShell 5.1で実行した。
+- 調査: BRAINの関連ファイル名/Projects/Decisions/Prompts/Actionsの絞込検索ではTurfLab固有の該当なし。OpenAI公式資料は定時タスクのplugin利用を案内するが、ローカルautomation設定に既存朝9時タスクは見つからず、対象環境/実行証拠は取得できていない。ユーザーに環境/タスク名を照会中。GitHub定時書込みは成功/不可とも未断定。Drive/既存Sheetsを条件付き代替案として文書化。
+- 未確認/TODO: 発走前の本人確認済み実1Rと実ChatGPT回答、朝9時タスクから試験branchへの新規書込み→隔離読返し、iPhone実機、Windows OS再起動。JRA-VANのSDKは確認したが外部AI/GitHub送信の許諾を未認定。NAR公式CSVは馬/騎手の一意IDなし。出馬表自動取得は別条件、無断スクレイピング/新契約なし。
+- 完了: 実装 `e81f9c8` を日本語コミットでPushし、[Draft PR #38](https://github.com/Soso2e/TurfLab/pull/38) を作成。実装コミットの [CI](https://github.com/Soso2e/TurfLab/actions/runs/40485802185) はUbuntu check・Windows Node 22の初期化/142テスト/既存390px・再起動・復元/ウィザード/一括起動・再起動要求の全ジョブ成功。最新HEADはPR Checksを参照。自動マージなし。
+- 2026-10-28追記: 本人回答により朝9時タスクは通常ChatGPT（Web/スマホ）。利用可能ブラウザーはChatGPTログイン画面のため既存タスク/権限/履歴へ未接続。Work/Codex/ghの成功を転用せず、タスク名・指示文の確認と試験ブランチへの1回の定時書込→commit読返しが必要。能力試験用の指示を同期手順へ追加。既存タスクと通常データは変更なし。
+- 2026-10-29追記: 本人提示の既存朝タスク全文を現行Bridge/Coreと突合。prompts/chatgpt-daily.mdを置換用v2へ改訂し、旧Sheets書込許可・オッズ買い目使用・任意ID/JSON追加を除去。固定pack/根拠/cutoffを前提に、answer手動貼付とWrapper保存、旧Sheets限定集計とTurfLab採用/本人Bet、結果保存と精算を分離。docs/daily-operation-flow.mdへ全体図/実装状態/優先順を追加。実タスク設定/業務データ/認証/運用プロセスは変更なし。
+- 次: PR #38レビュー。mainへ自動マージしない。本人確認済み出馬表/外部ID/出典/時点と定時タスク環境がそろってから実受入する。手順は docs/github-prediction-bridge.md、ChatGPT指示は docs/prompts/github-prediction-bridge.md。
 
 ## 現在の状態
 
@@ -56,3 +72,7 @@
 | 2026-10-20-02 | 実装をコミット/PushしてPR #35を作成。実装コミットのUbuntu/Windows Node 22 CI成功、実Serveの停止/再開とHTTPS二重認証を確認。通常DataHomeは試験データなしで起動・共有中 | 動作確認済み | `PROGRESS.md`, Windows手順書 | iPhone実機、実データ1R、Sheets別受入。mainは未マージ |
 | 2026-10-21-01 | 最新mainからIssue #36を実装。公式出馬表draft/照合/ID/snapshot、AIパック/回答変換、null確率整合、既存Coreロック/実読返し、DO途中失敗復旧、390px本人Bet/再起動を隔離検証。長いIDの横はみ出しを検出し修正、再試験成功 | 動作確認済み | `race-wizard`共有/API/UI、Core検証/生成Schema、テスト/Windows CI、受渡し/Windows手順/プロンプト | PR/CI、本人の発走前実1R・iPhone受入。既存Sheets/Notion/実スケジュールは変更なし |
 | 2026-10-21-02 | `1e42f6b`をPushしPR #37を作成。実装コミットのUbuntu/Windows Node 22 CI（既存復元/モバイルと新ウィザード/再起動を含む）成功。PRに未検証・手動出典確認・再開手順を明記。開始時と同じ8787の稼働PIDを確認 | 動作確認済み | `PROGRESS.md`、PR #37 | mainは未マージ。実データ1R・iPhone Safari/別端末の本人受入 |
+| 2026-10-27-01 | GitHub Prediction Bridge Phase 1・2を実装。非公開データrepo・固定pack・既存Core保存/読返し・5分同期/履歴/復旧・142テスト・Windows実GitHub/390px隔離受入。通常Worker起動前後の業務hash一致、tailnet確認。Phase 3の定時権限/許諾データ候補を調査 | 動作確認済み | Bridge共有/API/Worker/Web/Windows/テスト/README/同期手順/ChatGPT指示 | PRレビュー、実1R/実ChatGPT定時書込み/iPhone/OS再起動。既存10/26の未コミット進捗はローカル保持 |
+| 2026-10-27-02 | 実装e81f9c8をPushしDraft PR #38を作成。実装コミットのUbuntu/Windows CIが全成功。通常同期Workerはmain/5分で稼働、通常Web/API・tailnet維持 | 動作確認済み | PROGRESS.md、PR #38 | 実1R/既存朝9時タスク/iPhone/OS再起動の本人受入、レビュー。mainへ自動マージしない |
+| 2026-10-28-01 | 朝9時タスクの対象を通常ChatGPT（Web/スマホ）と本人確認。公式情報・接続機能・ブラウザーを調査し、ログイン未接続により既存タスクの実行検証不可と確認。試験専用branchへの定時書込能力テスト指示を文書化 | 調査完了 | docs/github-prediction-bridge.md、PROGRESS.md | タスク名/保存済み指示文、通常ChatGPTでの1回の定時書込実証。不可ならDrive/Sheetsも同様に権限検証 |
+| 2026-10-29-01 | 既存朝9時タスクを監査し、全文置換案と準備→予想→本人採用/Bet→公式精算→翌朝振返りの全体フローを作成。packの分析根拠不足、定時GitHub未実証、結果/日次記録の自動受渡し未実装を明記。Schema/変換/結果処理と突合、Markdown整形・ローカルリンク・git diff検査成功 | 調査完了 | prompts/chatgpt-daily.md、docs/prompts/github-prediction-bridge.md、docs/daily-operation-flow.md、同期手順、README、PROGRESS | 実タスク本文置換、通常ChatGPTの定時能力試験、根拠を固定する入力拡張/実1R受入。文書のみ変更のためコード試験は再実行なし |

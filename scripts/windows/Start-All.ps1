@@ -39,6 +39,7 @@ if ($status.storage_mode -ne 'local') {
     throw 'The responding TurfLab instance is not in local storage mode.'
 }
 Write-Output "[TurfLab] Local Web/API ready: $localUrl"
+& (Join-Path $PSScriptRoot 'Start-GitHubSync.ps1') -DataHome $runtimeHome
 Write-Output "[TurfLab] Persistent data: $(Join-Path $runtimeHome 'state')"
 Write-Output '[TurfLab] Personal login key: workers/api/.dev.vars (never share it).'
 

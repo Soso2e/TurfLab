@@ -1,5 +1,7 @@
 # ChatGPT JSON受け渡し仕様 v0.2
 
+非公開GitHubを使う固定パック出力・予想受信は [GitHub Prediction Bridge](github-prediction-bridge.md) を参照。既存answer_schemaの外側にID・版・入力hashを含むWrapperを付け、既存変換/Coreを使用する。受信による本人Betの自動生成はしない。
+
 ## 公式出馬表ウィザード（Issue #36）
 
 local運用は「データを取り込む」先頭のウィザードを使用する。内部IDやハッシュをChatGPTに作らせない。
