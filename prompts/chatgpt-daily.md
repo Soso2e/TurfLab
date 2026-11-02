@@ -91,3 +91,12 @@ GitHub自動受渡しの本番条件を確認済みの場合:
 6. 未確認事項と次の本人操作。実際の書込先/保存物と、書いていないSheets/Notion/本人Betを明示。
 
 根拠のある全馬分析と3展開、固定pack整合、二重登録/後付けMorning防止、スマホの本人確認と手動仮想Betを最優先とする。取得不能や0Rを隠さず、分析完了をCore Completeや購入完了と呼ばない。pack未準備を理由に調査を止めず、ただし暫定分析を登録済みMorningに昇格させない。
+
+
+### 7. 毎日のGitHub自動記録（追加運用・正式Coreとは別）
+
+- 上記レポートを作成したら、非公開 `Soso2e/TurfLab-data` の本番mainへ **新規** `daily/YYYY-MM-DD/morning-reference-v1.json` を保存できるか、その実行時のGitHub接続/書込アクションで確認する。利用可能で無人保存が許可される場合だけ保存し、commit/pathを読返す。同名が存在する場合は上書きせず保存済み内容を確認し、別名の多重予想は作らない。認証情報を要求・出力しない。
+- このファイルは `schema_version: "1", report_type: "chatgpt_daily_reference", date_jst, generated_at, source_urls, races, previous_day_review, limitations, core_importable: false` を持つ純JSON。各 `races` に実レース日付/場/番号/出走時刻、確認済みの馬名と馬番、評価根拠・欠測・3展開・参考Betと金額・出典を含める。特定できない値はnull/欠測にし、IDやhashを捏造しない。前日結果は正式Coreと参考事後検算を区別する。全頭評価が不完全でも準備記録として残してよい。
+- 予想データ `predictions/` への正式Core互換JSON保存とは**別物**。朝の分析結果を保存しても `TurfLab取込済み` や `学習済み` と呼ばない。
+- `state/YYYY-MM-DD/daily-v1.json` が存在すればそれはWindows Workerが取得したCoreの読取専用記録。前日の本人Bet/公式結果/採用/レビューはこの記録を第一資料とし、不在なら未取得と明記。前日の `daily/` の参考記録から自己の予想と結果の差分を確認する。別スレッドを無条件に参照できるとは仮定しない。
+- GitHubの本番書込を利用できない場合、従来どおり朝レポート/コピー可能なJSONを返し、`GitHub未保存` を明記する。この失敗はレポートや翌日の定時実行を停止する理由にしない。

@@ -58,3 +58,6 @@ npm run dev
 [システム設計](docs/architecture-v0.2.md) · [機能要件](docs/requirements.md) · [論理DB](docs/data-model.md) · [JSON仕様](docs/chatgpt-import.md) · [架空JSON](docs/examples/chatgpt-import-v0.2.json) · [ロードマップ](docs/roadmap.md) · [数値モデル仮説](docs/simulation-model.md) · [D1移行計画](docs/d1-migration.md)。設計時の未実装記述より最新の実装状況・運用手順を参照する。
 
 コミットは `feat: 予想取り込みを実装` のように接頭辞付き・日本語とする。
+
+
+日次の参照分析記録と前日Coreデータの自動引継ぎは [日次運用フロー](docs/daily-operation-flow.md) を参照。Windows Workerが稼働中の場合、08:00 JST以降にread-onlyの日次スナップショットを非公開データrepoへ出力する。朝9時タスクによる参考分析のGitHub保存は接続権限次第であり、定時書込は未実証。

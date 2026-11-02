@@ -43,6 +43,9 @@ interface State {
   branch: string;
   files: Record<string, Receipt>;
   exports: Record<string, string>;
+  daily_exports?: Record<string, string>;
+  daily_export_next_attempt?: string;
+  last_daily_export?: Row;
   last_export?: Row;
   last_sync: string | null;
   last_error: string | null;
@@ -84,6 +87,7 @@ export class PredictionBridge {
         throw new BridgeError(
           "同期状態とリポジトリ設定が不一致です。状態ファイルを保全して確認してください",
         );
+      this.state.daily_exports ??= {};
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
       this.state = {
@@ -92,6 +96,7 @@ export class PredictionBridge {
         branch: this.config.branch,
         files: {},
         exports: {},
+        daily_exports: {},
         last_sync: null,
         last_error: null,
         failures: 0,
@@ -121,6 +126,7 @@ export class PredictionBridge {
     return {
       configured: true,
       last_export: this.state.last_export ?? null,
+      last_daily_export: this.state.last_daily_export ?? null,
       repository: this.config.repository,
       last_sync: this.state.last_sync,
       last_error: this.state.last_error,
@@ -137,6 +143,45 @@ export class PredictionBridge {
         .slice(0, 100),
       worker_seen_at: this.io.now().toISOString(),
     };
+  }
+  // Run once after 08:00 JST, and only from this authenticated Windows Worker.
+  // This never changes a Core row and never overwrites GitHub content.
+  async exportDailyStateIfDue() {
+    const current = this.io.now();
+    const day = jst(current);
+    if (new Date(current.getTime() + 9 * 3600000).getUTCHours() < 8) return;
+    this.state.daily_exports ??= {};
+    if (this.state.daily_exports[day]) return;
+    if (this.state.daily_export_next_attempt &&
+      Date.parse(this.state.daily_export_next_attempt) > current.getTime()) return;
+    try {
+      await this.io.list(); // gh.verify/private validation is enforced by the Worker.
+      const snapshot = await this.io.api("/daily-state");
+      if (snapshot.report_type !== "turfLab_daily_state" || snapshot.report_date_jst !== day)
+        throw new BridgeError("日次exportの日付/形式が一致しません");
+      const content = JSON.stringify(snapshot, null, 2);
+      if (Buffer.byteLength(content) > 262144)
+        throw new BridgeError("日次状態が256KiBを超えています。安全のため出力しません");
+      const filename = `state/${day}/daily-v1.json`;
+      await this.io.put(filename, content);
+      this.state.daily_exports[day] = filename;
+      this.state.daily_export_next_attempt = undefined;
+      this.state.last_daily_export = {
+        path: filename,
+        at: current.toISOString(),
+        status: "success",
+        reason: "Core日次状態をGitHubへ読み取り専用エクスポートしました",
+      };
+    } catch (e) {
+      this.state.daily_export_next_attempt = new Date(current.getTime() + 30 * 60000).toISOString();
+      this.state.last_daily_export = {
+        at: current.toISOString(), status: "failed",
+        reason: e instanceof BridgeError ? e.message : "日次状態出力に失敗しました",
+      };
+      await this.save();
+      throw e;
+    }
+    await this.save();
   }
   async exportPack(snapshot: string) {
     const pack = await this.io.api("/race-import/pack", {

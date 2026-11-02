@@ -119,6 +119,11 @@ try {
         }
       }
       await bridge.sync();
+      try {
+        await bridge.exportDailyStateIfDue();
+      } catch {
+        // Export is independent of prediction ingestion; next attempt is rate-limited.
+      }
       await api("/github-bridge/report", {
         status: {
           ...bridge.status(),
