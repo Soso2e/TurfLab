@@ -10,8 +10,8 @@ function Get-TurfHome([string]$DataHome) {
 function Get-TurfToken {
     $vars = Join-Path $RepoRoot 'workers/api/.dev.vars'
     if (-not (Test-Path -LiteralPath $vars)) { throw 'Run Initialize.ps1 first.' }
-    $match = [regex]::Match([IO.File]::ReadAllText($vars), '(?m)^API_TOKEN="([A-Za-z0-9_-]{24,})"\r?$')
-    if (-not $match.Success) { throw 'API_TOKEN must be a quoted random key (24+ letters/digits/_/-).' }
+    $match = [regex]::Match([IO.File]::ReadAllText($vars), '(?m)^API_TOKEN="([0-9]{8}|[A-Za-z0-9_-]{24,})"\r?$')
+    if (-not $match.Success) { throw 'API_TOKEN must be eight digits or a quoted random key (24+ letters/digits/_/-).' }
     return $match.Groups[1].Value
 }
 function Get-TurfProcess([string]$HomePath) {

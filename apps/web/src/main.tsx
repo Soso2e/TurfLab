@@ -71,7 +71,7 @@ function Evidence({ row }: { row: Row }) {
   );
 }
 function App() {
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
   const [tokenInput, setTokenInput] = useState("");
   const [tab, setTab] = useState("today");
   const [date, setDate] = useState(today());
@@ -110,6 +110,7 @@ function App() {
       body: body ? JSON.stringify(body) : undefined,
     });
     const v = (await r.json()) as Row;
+    if (r.status === 401) { localStorage.removeItem("turflab-token"); setToken(""); }
     if (!r.ok) throw new Error(String(v.error ?? "接続に失敗しました"));
     return v;
   }
@@ -307,13 +308,18 @@ function App() {
               根拠から、振り返る。
             </h1>
             <p>
-              本人用の接続キーでログインしてください。キーはこの画面のメモリ内で保持します。
+              本人用の接続キーでログインしてください。この端末でログインを維持します。
             </p>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                setToken(tokenInput);
-                setTokenInput("");
+                void fetch('/api/status', { headers: { Authorization: `Bearer ${tokenInput}` } }).then((r) => {
+                  if (!r.ok) throw new Error('接続キーを確認してください');
+                  localStorage.setItem('turflab-token', tokenInput);
+                  setToken(tokenInput);
+                  setTokenInput('');
+                  setError('');
+                }).catch(() => setError('接続キーまたは通信を確認してください'));
               }}
             >
               <label>
@@ -322,12 +328,13 @@ function App() {
                   type="password"
                   value={tokenInput}
                   onChange={(e) => setTokenInput(e.target.value)}
-                  minLength={24}
+                  minLength={8}
                   required
                   autoComplete="off"
                 />
               </label>
               <button className="primary">接続する →</button>
+              {error && <p role="alert">{error}</p>}
             </form>
             <small>初回設定はリポジトリの運用手順に記載しています。</small>
           </section>
@@ -1638,6 +1645,7 @@ function App() {
                   </p>
                   <button
                     onClick={() => {
+                      localStorage.removeItem("turflab-token");
                       setToken("");
                       setData(undefined);
                       setDetail(undefined);

@@ -46,7 +46,7 @@ cd 'C:\#Project\Server\TurfLab'
 .\scripts\windows\Stop.ps1
 ```
 
-`workers/api/.dev.vars` の `API_TOKEN="..."` が本人キー。Initializeは32バイトの乱数から生成し、既存ファイルは上書きしない。既存キーは24文字以上の英数字・`_`・`-`を二重引用符で囲む。キーをエディタで開き、Windows/iPhoneのログインに入力する。キーをGit・URL・画面共有・ログへ貼らない。Webはメモリだけに保持するので再読込後は再認証する。
+`workers/api/.dev.vars` の `API_TOKEN="..."` が本人キー。Initializeは32バイトの乱数から生成し、既存ファイルは上書きしない。既存キーは8桁の数字または24文字以上の英数字・`_`・`-`を二重引用符で囲む。キーをエディタで開き、Windows/iPhoneのログインに入力する。キーをGit・URL・画面共有・ログへ貼らない。認証成功後、Webはキーをブラウザ内に保存し、ログアウトまたは認証失敗時に削除する。共有端末ではログアウトする。
 
 `npm run check` と `npm run build` は `#` を含むWindowsパスでも実行可能。Vite/Vitest実行中だけ空いているドライブ文字をsubstで割り当て、正常終了後に解除する。ドライブ文字が空いていない場合は `#` を含まない場所にクローンする。Vite開発サーバーはtailnet公開に使用しない。
 

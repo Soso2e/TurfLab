@@ -24,7 +24,7 @@ if (
 )
   throw new Error("interval_secondsは60〜3600です");
 const vars = await readFile(path.join(home, ".dev.vars"), "utf8");
-const token = vars.match(/^API_TOKEN="([A-Za-z0-9_-]{24,})"\r?$/m)?.[1];
+const token = vars.match(/^API_TOKEN="([0-9]{8}|[A-Za-z0-9_-]{24,})"\r?$/m)?.[1];
 if (!token) throw new Error("DataHomeのAPI認証設定を確認してください");
 const origin = process.env.TURFLAB_BRIDGE_API_ORIGIN ?? "http://127.0.0.1:8787";
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin))
