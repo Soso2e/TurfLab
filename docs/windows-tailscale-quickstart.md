@@ -2,6 +2,12 @@
 
 GitHub予想受信を設定するとStart-All/Start-TurfLab.batから同期Workerも起動する。[設定・認証・受信仕様](github-prediction-bridge.md) を参照。保存先・8787・tailnet 8443・本人認証は従来と同じ。設定がなければ従来のWeb/APIのみ起動する。
 
+## ログオン時の自動起動
+
+Windows PowerShell 5.1 で `scripts/windows/Install-Autostart.ps1` を実行すると、現在のユーザーのログオン時に `TurfLab-Logon` が起動する。同名タスクは上書きしない。既存サーバーと同期Workerを再利用し、Tailscaleの接続待ちなどは30秒間隔で最大6回試す。タスク引数にキーは含めず、ログは `%LOCALAPPDATA%\TurfLab\logs\logon-start.log` に残る。起動元のworktreeを移動・削除するとタスクが動かなくなるため、移動前に解除して再登録する。
+
+`scripts/windows/Status-Autostart.ps1` で前回終了コードを確認し、`Start-ScheduledTask -TaskName TurfLab-Logon` で手動試行できる。`scripts/windows/Remove-Autostart.ps1` はタスクのみ解除し、稼働中サービスやデータは保持する。実際のOS再起動・ログオン後に状態、ログ、HTTPS、同期を確認すること。ログオン前やPCのスリープ中は動かない。常時運用にはWindowsの電源設定で必要に応じてスリープを無効にする（消費電力が増えるため本人が選択）。
+
 Node.js 22以上、Windows PowerShell 5.1以上。Reactのビルド成果物と既存Workers APIを **http://127.0.0.1:8787** で提供し、既存SQLite-backed Durable Objectのownerを使う。新しいDBや有料AI APIは不要。実馬券購入機能はない。
 
 ## いちばん簡単：ダブルクリックで一括起動
