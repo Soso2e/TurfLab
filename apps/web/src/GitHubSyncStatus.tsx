@@ -68,6 +68,9 @@ export function GitHubSyncStatus({
         )}
       </p>
       {state?.last_error && <p role="alert">{String(state.last_error)}</p>}
+      {state?.last_daily_export && (
+        <p>翌朝引継ぎ: {String(obj(state.last_daily_export).reason)} · {String(obj(state.last_daily_export).path ?? "未保存")}</p>
+      )}
       {state?.last_export && (
         <p>
           入力パック出力: {String(obj(state.last_export).reason)} ·{" "}

@@ -51,6 +51,7 @@ import {
 } from "./betting";
 import { adoptModel, analytics, backtest, saveReview } from "./analytics";
 import { bridgeConvert } from "./github-bridge";
+import { dailyStateExport } from "./daily-export";
 import {
   dashboard,
   dailyRun,
@@ -156,6 +157,10 @@ export async function route(
       recommendations: await recommendationStats(repo),
       adopted_reference: await recommendationStats(repo, true),
     };
+  if (method === "GET" && path === "/daily-state") {
+    requireCondition(!sheets, "日次GitHubエクスポートはlocal保存専用です");
+    return dailyStateExport(repo, now);
+  }
   if (method === "GET" && path === "/backup") return backup(repo);
   if (method === "GET" && path === "/integrity") return integrityReport(repo);
   if (method === "GET" && path === "/legacy") {
