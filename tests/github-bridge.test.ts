@@ -306,3 +306,24 @@ describe("GitHub Prediction Bridge (isolated only)", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("scheduled daily Core snapshot", () => {
+  it("08:00 JST以降だけ一度出力し、再起動でも二重作成しない", async () => {
+    const s = await setup();
+    s.setNow("2026-10-26T22:50:00.000Z"); // 07:50 JST
+    await s.bridge.exportDailyStateIfDue();
+    expect([...s.files.keys()].some((p) => p.startsWith("state/"))).toBe(false);
+    s.setNow("2026-10-27T00:00:00.000Z"); // 09:00 JST
+    await s.bridge.exportDailyStateIfDue();
+    const name = "state/2026-10-27/daily-v1.json";
+    const contents = s.files.get(name)?.content;
+    expect(contents).toBeTruthy();
+    expect(JSON.parse(contents!).report_type).toBe("turfLab_daily_state");
+    expect(s.bridge.status().last_daily_export).toHaveProperty("status", "success");
+    await s.bridge.exportDailyStateIfDue();
+    const restarted = new PredictionBridge(s.home, s.config, s.io);
+    await restarted.init();
+    await restarted.exportDailyStateIfDue();
+    expect(s.files.get(name)?.content).toBe(contents);
+  });
+});
