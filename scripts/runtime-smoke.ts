@@ -469,9 +469,9 @@ const overflow = await page.evaluate(
 if (overflow) throw new Error("モバイルの横幅が画面を超えています");
 if (errors.length) throw new Error("ブラウザエラー: " + errors.join(";"));
 await page.reload();
-await page.getByLabel("本人用接続キー").fill(token);
-await page.getByRole("button", { name: "接続する" }).click();
 await page.getByRole("heading", { name: "本日のレース" }).waitFor();
+if (await page.getByLabel("本人用接続キー").count())
+  throw new Error("再読込後にログインが維持されていません");
 await page.locator('input[type="date"]').fill(date);
 await page
   .getByRole("button", {

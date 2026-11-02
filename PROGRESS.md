@@ -1,5 +1,10 @@
 # PROGRESS.md
 
+## 2026-11-02 接続キーとログイン維持
+
+- 指定された8桁キーをWindows実機に設定し、既存stateをハッシュ照合バックアップ後に再起動。HTTPSの未認証401と認証済みAPI、GitHub同期Workerの起動を確認。
+- 認証成功後にブラウザへキーを保存し、再読込後もログイン維持。ログアウトまたは401で削除。Windows Edgeでログインと再読込を確認。iPhone Safariは未確認。8桁キーは従来のランダムキーより推測されやすい。tailnet限定を維持する。
+
 ## 2026-11-02 Issue #41 実機作業
 
 - 最新main `29dc3c8` から別worktreeを作成。元worktreeの未コミット変更を保持。停止中state 24ファイルをコピーしSHA-256照合、最新版を既存stateと認証キーで起動。
@@ -85,3 +90,4 @@
 | 2026-10-28-01 | 朝9時タスクの対象を通常ChatGPT（Web/スマホ）と本人確認。公式情報・接続機能・ブラウザーを調査し、ログイン未接続により既存タスクの実行検証不可と確認。試験専用branchへの定時書込能力テスト指示を文書化 | 調査完了 | docs/github-prediction-bridge.md、PROGRESS.md | タスク名/保存済み指示文、通常ChatGPTでの1回の定時書込実証。不可ならDrive/Sheetsも同様に権限検証 |
 | 2026-10-29-01 | 既存朝9時タスクを監査し、全文置換案と準備→予想→本人採用/Bet→公式精算→翌朝振返りの全体フローを作成。packの分析根拠不足、定時GitHub未実証、結果/日次記録の自動受渡し未実装を明記。Schema/変換/結果処理と突合、Markdown整形・ローカルリンク・git diff検査成功 | 調査完了 | prompts/chatgpt-daily.md、docs/prompts/github-prediction-bridge.md、docs/daily-operation-flow.md、同期手順、README、PROGRESS | 実タスク本文置換、通常ChatGPTの定時能力試験、根拠を固定する入力拡張/実1R受入。文書のみ変更のためコード試験は再実行なし |
 | 2026-11-02-01 | 最新mainの別worktreeでstateをハッシュ照合バックアップしWindowsサービスを起動。ログオン自動起動を実装・登録し手動実行、144テスト・実GitHub隔離試験・HTTPS認証を確認 | 動作確認済み | Windows自動起動スクリプト、手順書、PROGRESS | OS再起動/iPhone/実1R、検索照合・結果・学習の未実装部分 |
+| 2026-11-02-02 | 本人指定の8桁キーとブラウザのログイン維持を実装。stateバックアップ後に再起動しHTTPS認証とEdge再読込を確認 | 動作確認済み | Web、API、Windows認証、同期Worker、PROGRESS | iPhone Safariでログイン・再読込・ログアウト確認 |

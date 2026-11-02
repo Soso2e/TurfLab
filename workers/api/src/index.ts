@@ -83,7 +83,7 @@ async function authenticated(
   request: Request,
   token: string,
 ): Promise<boolean> {
-  if (!token || token.length < 24) return false;
+  if (!token || !(/^[0-9]{8}$/.test(token) || token.length >= 24)) return false;
   const provided =
     request.headers.get("Authorization")?.replace(/^Bearer /, "") ?? "";
   const [a, b] = await Promise.all([hash(provided), hash(token)]);
