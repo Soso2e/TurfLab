@@ -119,3 +119,11 @@ GitHub自動受渡しの本番条件を確認済みの場合:
 - 勝手に公式データの全量複製やスクレイピングをしない。公式Webページを閲覧して必要な観測値を出典とともに整理し、許諾範囲を確認する。NAR公式CSVがあることはその内容の私的リポジトリへの再配布許諾を意味しない。
 - Windows Workerはこの参考レポートを既存Coreと照合し、**既登録・全馬一致・正式snapshot検証成功**のレースのみ `packs/` に新規出力する。ChatGPTは照合未完了をCore登録成功と扱わない。
 - 参考レポート保存後に当日の正式packが存在するかを可能なら再確認する。新規packがなければ無理にMorningへ進まず、翌回の固定pack処理に任せる。欠測は想像で埋めない。
+
+### 9. 前日の公式結果を正式Coreへ渡せる場合の結果JSON
+
+- 昨日分の確定結果を調べる際、非公開GitHub `state/` と `packs/` に実在する**登録済みCore race_id**を優先する。IDを確認できなければ通常の参考振り返りだけを行い、正式結果ファイルは作成しない。
+- 出典のNAR/JRA公式ページで、全登録馬の完走/取消/競走中止/失格を確認し、同着を含む**全着順**、全払戻券種・組合せ・100円当たり払戻・返還を確認できる場合だけ、[公式結果Bridge仕様](https://github.com/Soso2e/TurfLab/blob/main/docs/github-result-bridge.md) に完全に準拠する純JSONを新規保存する。3着までの一部結果、1券種の払戻だけでは不許可。
+- 保存先は `results/YYYY-MM-DD/<race-key>-official-vN.json`。race-keyは既存packにあるCore race_idを共有仕様 `raceKey` で変換。revisionは既存正式結果を読み、上書きせずv1→v2で更新。訂正版には実際の `supersedes_result_id` が必要。独自の馬・騎手IDやpack hashを創作しない。
+- 値は `bridge_version:"1"`、`source_verification:"official_page_checked"`、`source_checked_at`、`race_date_jst`、`payouts_complete:true`、`result`、`payouts`。各結果に公式HTTPS URL/取得時刻/公表時刻/競走状態を付与。公表時刻が公式から特定できない場合に架空時刻を与えない。Coreが必要な内部result_id/payout_idは未指定でよい。
+- GitHub保存後はcommitと内容を読返し、成功した場合だけ報告。Core自動取込・精算はWindows Workerのreceiptを読めたときだけ成功扱い。登録された仮想Bet以外は購入/精算しない。データ許諾・出典が不十分なら参考レビューにとどめる。
