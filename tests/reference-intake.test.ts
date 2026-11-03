@@ -52,8 +52,7 @@ describe("ChatGPT reference -> verified Core reconciliation", () => {
     expect(rows(ok.races)[0].status).toBe("pack_ready");
     expect(rows(ok.races)[0].snapshot_id).toBe(saved.snapshot_id);
     expect(await repo.list("race_entries")).toEqual(before);
-    rows(obj(reportData.document).races)[0].horses &&
-      (rows(rows(obj(reportData.document).races)[0].horses)[0].jockey="他人");
+    rows(rows(obj(reportData.document).races)[0].horses)[0].jockey = "別の騎手";
     const mismatch=await reconcileReference(repo,reportData,NOW);
     expect(rows(mismatch.races)[0].status).toBe("needs_entry_review");
     expect(await repo.list("race_entries")).toEqual(before);
