@@ -127,3 +127,8 @@ GitHub Workerが9時の参考分析受信後に `packs/` を生成できるよ�
 ## 正式結果ファイルからのCore精算経路
 
 非公開 `results/YYYY-MM-DD/<race-key>-official-vN.json` に公式の全着順/全出走馬状態/払戻と出典時刻が揃っているときだけ、Windows Workerが既存Coreの `saveResult` と `settle` を同一永続ジャーナルで実行する。正式Coreレース未登録、未公表、未確認・途中結果では止める。訂正はv2以降・`supersedes_result_id` で新規ファイル。AI参考提案の事後検算とは区別。詳細は [GitHub Official Result Bridge](github-result-bridge.md)。公式Web本文の独立検証・取得自動化は現時点で未実装。
+
+
+## 実測順位の長期評価（確率不要）
+
+GET `/api/analytics/ranks` / `/api/stats.rank_metrics` と日次stateに、採用済みlocked予想と最新公式結果だけから top1の勝率・3着内率・予想top3と実着順top3の一致率を継続記録する。欠測・取消・未採用は分母から除き理由も返す。競馬場/距離/馬場/モデル/管轄のグループ別と直近30/90Rを比較するが、**自動学習や重み更新ではない**。最終モデル採用は別途30R以上の未使用検証と本人承認が必要。
