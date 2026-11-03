@@ -52,6 +52,7 @@ import {
 import { adoptModel, analytics, backtest, saveReview } from "./analytics";
 import { bridgeConvert } from "./github-bridge";
 import { dailyStateExport } from "./daily-export";
+import { reconcileReference } from "./reference-intake";
 import {
   dashboard,
   dailyRun,
@@ -183,6 +184,10 @@ export async function route(
     if (path === "/race-import/pack")
       return inputPack(repo, str(input, "snapshot_id"), now);
     if (path === "/race-import/convert") return convertAnswer(repo, input, now);
+  }
+  if (path === "/github-bridge/reference-preview") {
+    requireCondition(!sheets, "参考分析の照合はlocal保存専用です");
+    return reconcileReference(repo, input, now);
   }
   if (path === "/github-bridge/convert") {
     requireCondition(!sheets, "GitHub Bridgeはlocal保存専用です");

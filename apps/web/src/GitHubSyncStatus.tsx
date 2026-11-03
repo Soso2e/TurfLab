@@ -68,6 +68,17 @@ export function GitHubSyncStatus({
         )}
       </p>
       {state?.last_error && <p role="alert">{String(state.last_error)}</p>}
+      {state?.last_reference && (
+        <section aria-label="ChatGPT参考分析のDB照合">
+          <p>参考分析の照合: {String(obj(state.last_reference).reason)}</p>
+          {rows(obj(state.last_reference).races ?? []).map((r) => (
+            <p key={String(r.race_key_human)}>
+              {String(r.race_key_human)} · {String(r.status)} · 
+              {Array.isArray(r.issues) ? r.issues.join(" / ") : ""}
+            </p>
+          ))}
+        </section>
+      )}
       {state?.last_daily_export && (
         <p>翌朝引継ぎ: {String(obj(state.last_daily_export).reason)} · {String(obj(state.last_daily_export).path ?? "未保存")}</p>
       )}

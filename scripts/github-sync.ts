@@ -120,6 +120,11 @@ try {
       }
       await bridge.sync();
       try {
+        await bridge.syncReferences();
+      } catch {
+        // Reference-only ingestion cannot block formal predictions or daily state.
+      }
+      try {
         await bridge.exportDailyStateIfDue();
       } catch {
         // Export is independent of prediction ingestion; next attempt is rate-limited.

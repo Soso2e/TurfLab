@@ -95,3 +95,15 @@ Drive JSON/既存Sheets受信は次の候補だが、同じ通常ChatGPTの定�
 Windows GitHub Workerは08:00 JST以降、ログイン中かつ稼働している場合に1日1回、認証済みローカルCoreのGET `/api/daily-state` を読み、`state/YYYY-MM-DD/daily-v1.json` に前日と当日レースの確定予想/評価/参考推奨/本人Bet/公式結果/精算/レビューを**区別して**新規保存する。空データなら空と明記。生成後に結果が確定しても既存ファイルは更新されないため、新たな採用・精算を最新と断定しない。出力時点・範囲とDB実態に注意。GitHubへ予想ファイルがあってもPCが停止中ならCore確定は進まない。
 
 現行実装では公式出馬表・過去走の許諾データの自動準備、結果の自動保存/精算、モデル重みの自動最適化は未実装。別スレッド自動巡回を必須入力とせず、GitHubの前日ログとCore状態を正本として継続学習・レビューする。モデルの自動本番採用は行わず、期間分割・十分な標本と本人承認を維持する。
+
+## 2026-11-03 Reference Intake / 自動照合
+
+Windows GitHub Workerは、当日 `daily/YYYY-MM-DD/morning-reference-v1.json` を取得し、
+認証付き `POST /api/github-bridge/reference-preview` で既存Coreのrace/track/entry/horse/jockeyと
+照合する（読み取り専用）。結果はWorker永続receiptとWeb「ChatGPT同期状態」に表示する。
+
+- 同日・同場・同番号に加え、**既存DBの安定IDを使った全馬の馬番・馬名・騎手・斤量/枠**が一致すること。名前だけから新しいIDを作らない。
+- 公式出典URL・開催日・発走時刻、出走取消/騎手変更の確認、最新snapshotのハッシュ/時点を検証。
+- 既存の本人確認済みCore snapshotが有効な場合のみpackを**新規** `packs/` に自動出力。未登録・不足・不一致は `needs_registration`、`needs_entry_review`、`needs_snapshot` として保存し、正式予想は作らない。
+- 発走後は `past_start`。後付けMorning、Coreの本人Bet登録、データの上書きは行わない。
+- 元の参考JSONと、その照合ログ/packは別物。照合は公式レースデータの初回登録の代替にはならない。新規外部ID・枠情報・利用条件が欠ける日は引き続きウィザードで本人確認が必要。

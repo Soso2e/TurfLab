@@ -37,6 +37,14 @@ interface Receipt {
   pipeline?: Row;
   prediction_id?: string;
 }
+interface ReferenceReceipt {
+  sha: string;
+  checked_at: string;
+  status: "waiting" | "complete" | "failed";
+  reason: string;
+  races: Row[];
+  conflict_sha?: string;
+}
 interface State {
   version: 1;
   repository: string;
@@ -47,6 +55,9 @@ interface State {
   daily_export_next_attempt?: string;
   last_daily_export?: Row;
   last_export?: Row;
+  reference_files?: Record<string, ReferenceReceipt>;
+  last_reference_sync?: string;
+  last_reference?: Row;
   last_sync: string | null;
   last_error: string | null;
   failures: number;
@@ -88,6 +99,7 @@ export class PredictionBridge {
           "同期状態とリポジトリ設定が不一致です。状態ファイルを保全して確認してください",
         );
       this.state.daily_exports ??= {};
+      this.state.reference_files ??= {};
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
       this.state = {
@@ -97,6 +109,7 @@ export class PredictionBridge {
         files: {},
         exports: {},
         daily_exports: {},
+        reference_files: {},
         last_sync: null,
         last_error: null,
         failures: 0,
@@ -127,6 +140,11 @@ export class PredictionBridge {
       configured: true,
       last_export: this.state.last_export ?? null,
       last_daily_export: this.state.last_daily_export ?? null,
+      last_reference: this.state.last_reference ?? null,
+      reference_records: Object.entries(this.state.reference_files ?? {}).map(([path, r]) => ({
+        path, status: r.conflict_sha ? "failed" : r.status,
+        reason: r.reason, checked_at: r.checked_at, races: r.races,
+      })).slice(-12),
       repository: this.config.repository,
       last_sync: this.state.last_sync,
       last_error: this.state.last_error,
@@ -181,6 +199,68 @@ export class PredictionBridge {
       await this.save();
       throw e;
     }
+    await this.save();
+  }
+  // Receives ChatGPT's immutable reference JSON and compares it with Core's
+  // existing, verified identity records. It never registers unknown identities.
+  async syncReferences(force = false) {
+    const now = this.io.now();
+    if (!force && this.state.last_reference_sync &&
+      now.getTime() - Date.parse(this.state.last_reference_sync) < (this.config.interval_seconds ?? 300) * 1000)
+      return;
+    const files = await this.io.list();
+    const today = jst(now);
+    const pattern = /^daily\/\d{4}-\d{2}-\d{2}\/morning-reference-v1\.json$/;
+    this.state.reference_files ??= {};
+    for (const file of files.filter((f) => pattern.test(f.path) &&
+      f.path.split("/")[1] === today)) {
+      const prior = this.state.reference_files[file.path];
+      if (prior && prior.sha !== file.sha) {
+        prior.conflict_sha = file.sha;
+        prior.reason = "参考分析の同名ファイルが変更されました。別名の版管理が必要です";
+        await this.save();
+        continue;
+      }
+      if (prior?.status === "complete" || prior?.status === "failed") continue;
+      const report: ReferenceReceipt = prior ?? {
+        sha: file.sha, checked_at: now.toISOString(), status: "waiting",
+        reason: "DB照合待ち", races: [],
+      };
+      try {
+        const content = await this.io.read(file);
+        if (Buffer.byteLength(content) > 262144)
+          throw new BridgeError("参考JSONは256KiB以内です");
+        const document = obj(JSON.parse(content));
+        const response = await this.io.api("/github-bridge/reference-preview", {
+          path: file.path, document,
+        });
+        report.races = rows(response.races);
+        // These packs are generated only from existing already-verified Core
+        // snapshots; a reference report can never register an unknown horse.
+        for (const race of report.races.filter((r) => r.status === "pack_ready")) {
+          try {
+            await this.exportPack(str(race, "snapshot_id"));
+          } catch {
+            race.status = "needs_snapshot";
+            race.issues = ["固定packのGitHub出力に失敗。次回再試行します"];
+          }
+        }
+        report.status = report.races.every((r) => r.status === "pack_ready" || r.status === "past_start")
+          ? "complete" : "waiting";
+        report.reason = `参考${report.races.length}R照合、pack出力可能${report.races.filter((r) => r.status === "pack_ready").length}R、未登録・確認待ち${report.races.filter((r) => r.status !== "pack_ready" && r.status !== "past_start").length}R`;
+      } catch (e) {
+        report.reason = e instanceof Error ? e.message.slice(0, 300) : "参考JSONの解析に失敗";
+        report.status = e instanceof SyntaxError ? "failed" : "waiting";
+      }
+      report.checked_at = now.toISOString();
+      this.state.reference_files[file.path] = report;
+      this.state.last_reference = {
+        path: file.path, status: report.status, reason: report.reason,
+        checked_at: report.checked_at, races: report.races,
+      };
+      await this.save();
+    }
+    this.state.last_reference_sync = now.toISOString();
     await this.save();
   }
   async exportPack(snapshot: string) {
