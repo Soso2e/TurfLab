@@ -9,6 +9,7 @@ export function GitHubSyncStatus({
   refresh: () => Promise<void>;
 }) {
   const [state, setState] = useState<Row>();
+  const [reference, setReference] = useState<Row>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const latest = useRef({ api, refresh });
@@ -21,6 +22,10 @@ export function GitHubSyncStatus({
         const value = await latest.current.api("/github-bridge/status");
         if (!active) return;
         setState(value);
+        try {
+          const mirror = await latest.current.api("/github-bridge/reference-report");
+          if (active && mirror.status !== "empty") setReference(mirror);
+        } catch { /* A missing reference archive must not break sync status. */ }
         if (last !== undefined && last !== value.last_sync)
           await latest.current.refresh();
         last = value.last_sync;
@@ -89,6 +94,38 @@ export function GitHubSyncStatus({
             obj(state.last_export).path ?? obj(state.last_export).snapshot_id,
           )}
         </p>
+      )}
+      {reference && (
+        <details>
+          <summary>ChatGPT朝9時の参考予想を見る（Core未取込も表示）</summary>
+          <p>保存日: {String(reference.date_jst)} · Core正式予想とは別管理</p>
+          {rows(obj(reference.document).races ?? []).map((r) => (
+            <section key={String(r.race_key_human)} className="reference-daily-race">
+              <h3>{String(r.track)} {String(r.race_number)}R · {String(r.race_name)}</h3>
+              <p>発走予定: {time(r.scheduled_start_at_jst)} · 状態: {String(r.status ?? "参考分析")}</p>
+              <p>出走馬 {rows(r.horses ?? []).length}頭 · 参考額 {String(r.total_reference_yen ?? 0)}円</p>
+              <p>参考評価上位: {JSON.stringify(r.selections_summary ?? {})}</p>
+              <details>
+                <summary>全馬評価と3展開・参考Bet</summary>
+                {rows(r.horses ?? []).map((h) => (
+                  <p key={String(h.horse_number)}>
+                    {String(h.horse_number)} {String(h.horse_name)} ·
+                    {String(h.jockey ?? "騎手未確認")} ·
+                    {JSON.stringify(h.estimated_components ?? {})}
+                  </p>
+                ))}
+                {rows(r.scenarios ?? []).map((s, i) => (
+                  <p key={i}>{String(s.pace)}: {String(s.narrative ?? s.analysis ?? "")}</p>
+                ))}
+                {rows(r.reference_bets ?? []).map((b, i) => (
+                  <p key={i}>{String(b.ticket_type)} {JSON.stringify(b.selections)} ·
+                    {String(b.suggested_amount_yen ?? b.amount_yen ?? 0)}円</p>
+                ))}
+              </details>
+            </section>
+          ))}
+          <p>検索由来の参考分析であり、登録/正式予想/本人仮想Bet/精算を意味しません。</p>
+        </details>
       )}
       {error && <p role="status">{error}</p>}
       <button

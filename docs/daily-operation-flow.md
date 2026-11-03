@@ -107,3 +107,8 @@ Windows GitHub Workerは、当日 `daily/YYYY-MM-DD/morning-reference-v1.json` �
 - 既存の本人確認済みCore snapshotが有効な場合のみpackを**新規** `packs/` に自動出力。未登録・不足・不一致は `needs_registration`、`needs_entry_review`、`needs_snapshot` として保存し、正式予想は作らない。
 - 発走後は `past_start`。後付けMorning、Coreの本人Bet登録、データの上書きは行わない。
 - 元の参考JSONと、その照合ログ/packは別物。照合は公式レースデータの初回登録の代替にはならない。新規外部ID・枠情報・利用条件が欠ける日は引き続きウィザードで本人確認が必要。
+
+
+### 朝の参考JSONのWeb閲覧
+
+GitHub Workerが `daily/YYYY-MM-DD/morning-reference-v1.json` を照合すると、認証済みowner DOの専用メタデータ `github-reference` に**同日SHA固定の最新参考レポート**をミラーし、`GET /api/github-bridge/reference-report` からWebの同期欄で全馬・展開・参考Betを閲覧可能にする。正式Coreに登録されていないレースも表示するが、Coreとは別扱い。読取は本人Bearer認証、同日上書き拒否。最新日付への置換のみで過去分の履歴は非公開GitHubのimmutable `daily/` に保持する。外部サイトHTMLや認証キーは保存しない。
