@@ -40,3 +40,5 @@ The intake checks the event date, original Core race ID, sequential revision, of
 **Trust boundary:** the official URL and `source_verification` text are provided by the connected ChatGPT/GitHub writer. Core validates structure and consistency, but does **not independently fetch the official webpage** or prove completeness of the payout feed. Producers MUST inspect the official document at the claimed time, and missing or partial data must be kept as reference review rather than exported to `results/`. This is not permission to scrape or redistribute official CSVs.
 
 The current 09:00 ChatGPT daily report's `previous_day_review` has only top placings and partial ticket payouts, so it is **not** an accepted result file. The official full-results producer and its unattended acceptance remain unproven.
+
+For a new result the producer may omit `result.result_id` and each payout's `payout_id`: the authenticated Core intake derives stable deterministic internal IDs. Revision corrections still need the actual `supersedes_result_id` read from existing Core state, and the file path uses the stable Core race ID from a verified pack.
