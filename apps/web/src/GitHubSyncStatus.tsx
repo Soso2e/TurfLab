@@ -73,6 +73,9 @@ export function GitHubSyncStatus({
         )}
       </p>
       {state?.last_error && <p role="alert">{String(state.last_error)}</p>}
+      {state?.last_result && (
+        <p>公式結果同期: {String(obj(state.last_result).status)} · {String(obj(state.last_result).reason)} · 未処理 {String(state.results_waiting ?? 0)}件</p>
+      )}
       {state?.last_reference && (
         <section aria-label="ChatGPT参考分析のDB照合">
           <p>参考分析の照合: {String(obj(state.last_reference).reason)}</p>

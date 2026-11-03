@@ -125,6 +125,11 @@ try {
         // Reference-only ingestion cannot block formal predictions or daily state.
       }
       try {
+        await bridge.syncOfficialResults();
+      } catch {
+        // Result transport must not block reference/pack/prediction processing.
+      }
+      try {
         await bridge.exportDailyStateIfDue();
       } catch {
         // Export is independent of prediction ingestion; next attempt is rate-limited.

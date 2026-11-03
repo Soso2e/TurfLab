@@ -122,3 +122,8 @@ GitHub Workerが9時の参考分析受信後に `packs/` を生成できるよ�
 ### 既存ChatGPTタスクの時間別処理（2026-11-03登録）
 
 新規タスク作成は上限により失敗したため、既存9時タスク1件をJST 09:00/10:00/12:00に更新した（RRULEは既存Automationに保存成功）。9時は従来の当日選定・参考分析とdaily保存、10時と12時はGitHubの新規packがあったレースだけ後追い正式Morningを作る。同日dailyファイルを再保存しない。定期実行そのものとCore受入は翌日以降別途確認が必要。通知/使用量は実行ごとに発生し得る。
+
+
+## 正式結果ファイルからのCore精算経路
+
+非公開 `results/YYYY-MM-DD/<race-key>-official-vN.json` に公式の全着順/全出走馬状態/払戻と出典時刻が揃っているときだけ、Windows Workerが既存Coreの `saveResult` と `settle` を同一永続ジャーナルで実行する。正式Coreレース未登録、未公表、未確認・途中結果では止める。訂正はv2以降・`supersedes_result_id` で新規ファイル。AI参考提案の事後検算とは区別。詳細は [GitHub Official Result Bridge](github-result-bridge.md)。公式Web本文の独立検証・取得自動化は現時点で未実装。
