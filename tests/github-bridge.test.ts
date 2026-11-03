@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -325,5 +325,43 @@ describe("scheduled daily Core snapshot", () => {
     await restarted.init();
     await restarted.exportDailyStateIfDue();
     expect(s.files.get(name)?.content).toBe(contents);
+  });
+});
+
+
+describe("immutable daily state revisions", () => {
+  it("does not rewrite v1; exports v2 when a locked prediction arrives after 08:00", async () => {
+    const s = await setup();
+    s.setNow("2026-10-27T01:00:00.000Z");
+    await s.bridge.exportDailyStateIfDue();
+    const first = s.files.get("state/2026-10-27/daily-v1.json")?.content;
+    expect(first).toBeTruthy();
+    await s.bridge.sync(true); // Creates a valid locked prediction from the fixture.
+    s.setNow("2026-10-27T01:16:00.000Z");
+    await s.bridge.exportDailyStateIfDue();
+    const second = s.files.get("state/2026-10-27/daily-v2.json")?.content;
+    expect(second).toBeTruthy();
+    expect(JSON.parse(second!).counts.locked_predictions).toBe(1);
+    expect(s.files.get("state/2026-10-27/daily-v1.json")?.content).toBe(first);
+    s.setNow("2026-10-27T01:32:00.000Z");
+    const restarted = new PredictionBridge(s.home, s.config, s.io);
+    await restarted.init();
+    await restarted.exportDailyStateIfDue();
+    expect([...s.files.keys()].filter((p) => p.startsWith("state/"))).toHaveLength(2);
+  });
+  it("restores the last exported version from GitHub when local version metadata is absent", async () => {
+    const s = await setup();
+    s.setNow("2026-10-27T00:00:00.000Z");
+    await s.bridge.exportDailyStateIfDue();
+    const statePath = path.join(s.home, "state.json");
+    const state = JSON.parse(await readFile(statePath, "utf8"));
+    delete state.daily_export_hashes;
+    delete state.daily_export_versions;
+    await writeFile(statePath, JSON.stringify(state));
+    s.setNow("2026-10-27T00:16:00.000Z");
+    const restarted = new PredictionBridge(s.home, s.config, s.io);
+    await restarted.init();
+    await restarted.exportDailyStateIfDue();
+    expect([...s.files.keys()].filter((p) => p.startsWith("state/"))).toHaveLength(1);
   });
 });

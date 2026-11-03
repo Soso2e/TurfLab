@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { obj, rows, str, type Row } from "../packages/shared/src/domain";
+import { canonical, obj, rows, str, type Row } from "../packages/shared/src/domain";
 import { bridgeSchema, raceKey } from "../packages/shared/src/github-bridge";
 
 const exec = promisify(execFile);
@@ -60,6 +60,8 @@ interface State {
   files: Record<string, Receipt>;
   exports: Record<string, string>;
   daily_exports?: Record<string, string>;
+  daily_export_hashes?: Record<string, string>;
+  daily_export_versions?: Record<string, number>;
   daily_export_next_attempt?: string;
   last_daily_export?: Row;
   last_export?: Row;
@@ -110,6 +112,8 @@ export class PredictionBridge {
           "同期状態とリポジトリ設定が不一致です。状態ファイルを保全して確認してください",
         );
       this.state.daily_exports ??= {};
+      this.state.daily_export_hashes ??= {};
+      this.state.daily_export_versions ??= {};
       this.state.reference_files ??= {};
       this.state.official_results ??= {};
     } catch (e) {
@@ -121,6 +125,8 @@ export class PredictionBridge {
         files: {},
         exports: {},
         daily_exports: {},
+        daily_export_hashes: {},
+        daily_export_versions: {},
         reference_files: {},
         official_results: {},
         last_sync: null,
@@ -178,33 +184,70 @@ export class PredictionBridge {
       worker_seen_at: this.io.now().toISOString(),
     };
   }
-  // Run once after 08:00 JST, and only from this authenticated Windows Worker.
-  // This never changes a Core row and never overwrites GitHub content.
+  // Reconcile against the highest immutable state version in GitHub.
+  // A result/settlement committed after 08:00 JST must not disappear from the
+  // next scheduled ChatGPT run just because the v1 snapshot already existed.
   async exportDailyStateIfDue() {
     const current = this.io.now();
     const day = jst(current);
     if (new Date(current.getTime() + 9 * 3600000).getUTCHours() < 8) return;
     this.state.daily_exports ??= {};
-    if (this.state.daily_exports[day]) return;
+    this.state.daily_export_hashes ??= {};
+    this.state.daily_export_versions ??= {};
     if (this.state.daily_export_next_attempt &&
       Date.parse(this.state.daily_export_next_attempt) > current.getTime()) return;
     try {
-      await this.io.list(); // gh.verify/private validation is enforced by the Worker.
+      const files = await this.io.list(); // Caller re-verifies private repo on every list.
+      const prefix = `state/${day}/daily-v`;
+      const remote = files.flatMap((f) => {
+        if (!f.path.startsWith(prefix)) return [];
+        const match = /^state\/\d{4}-\d{2}-\d{2}\/daily-v([1-9]\d*)\.json$/.exec(f.path);
+        return match ? [{ file: f, version: Number(match[1]) }] : [];
+      }).sort((a, b) => b.version - a.version)[0];
+      const localVersion = this.state.daily_export_versions[day] ?? 0;
+      if (remote && (remote.version > localVersion || !this.state.daily_export_hashes[day])) {
+        const content = await this.io.read(remote.file);
+        if (Buffer.byteLength(content) > 262144)
+          throw new BridgeError("既存GitHub日次状態が256KiB超過です");
+        const saved = obj(JSON.parse(content));
+        if (saved.report_type !== "turfLab_daily_state" || saved.report_date_jst !== day)
+          throw new BridgeError("既存日次状態の形式/日付が不正です");
+        this.state.daily_exports[day] = remote.file.path;
+        this.state.daily_export_hashes[day] = digest(canonical({
+          ...saved, generated_at: null,
+        }));
+        this.state.daily_export_versions[day] = remote.version;
+        await this.save();
+      }
+      if (remote && remote.version < localVersion)
+        throw new BridgeError("ローカル日次版よりGitHubが古いです。状態を確認してください");
       const snapshot = await this.io.api("/daily-state");
       if (snapshot.report_type !== "turfLab_daily_state" || snapshot.report_date_jst !== day)
-        throw new BridgeError("日次exportの日付/形式が一致しません");
+        throw new BridgeError("日次状態の日付/形式が一致しません");
+      const hashValue = digest(canonical({ ...snapshot, generated_at: null }));
+      if (hashValue === this.state.daily_export_hashes[day]) {
+        this.state.daily_export_next_attempt = new Date(current.getTime() + 15 * 60000).toISOString();
+        await this.save();
+        return;
+      }
+      const version = (this.state.daily_export_versions[day] ?? 0) + 1;
+      if (version > 24)
+        throw new BridgeError("日次状態の版数が24を超えました。保存先とデータ変化を確認してください");
       const content = JSON.stringify(snapshot, null, 2);
       if (Buffer.byteLength(content) > 262144)
         throw new BridgeError("日次状態が256KiBを超えています。安全のため出力しません");
-      const filename = `state/${day}/daily-v1.json`;
+      const filename = `state/${day}/daily-v${version}.json`;
       await this.io.put(filename, content);
       this.state.daily_exports[day] = filename;
-      this.state.daily_export_next_attempt = undefined;
+      this.state.daily_export_hashes[day] = hashValue;
+      this.state.daily_export_versions[day] = version;
+      this.state.daily_export_next_attempt = new Date(current.getTime() + 15 * 60000).toISOString();
       this.state.last_daily_export = {
         path: filename,
         at: current.toISOString(),
+        version,
         status: "success",
-        reason: "Core日次状態をGitHubへ読み取り専用エクスポートしました",
+        reason: "変更されたCore日次状態をGitHubに追加保存しました（旧版は保持）",
       };
     } catch (e) {
       this.state.daily_export_next_attempt = new Date(current.getTime() + 30 * 60000).toISOString();

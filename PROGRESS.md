@@ -1,5 +1,10 @@
 # PROGRESS.md
 
+## 2026-11-03 Core state versioned exports
+
+- 08:00のstate v1後に取り込んだ正式予想・公式結果・精算が翌朝のChatGPTの資料へ反映されるよう、15分ごとの変更検出とGitHub追記vNを導入（旧版保持、最大24版、キャッシュ/再起動復旧）。朝タスクは最大vNを読む。実Windows状態での受入は未確認。
+
+
 ## 2026-11-03 rank performance metrics
 
 - 採用済みlocked予想と最新の公式確定結果で、勝率/3着内率/予想top3適合率を確率不要で集計する `/api/analytics/ranks` と、条件別・直近30/90Rを追加。自動モデル重み変更はしない。データ0Rなら比率null。
