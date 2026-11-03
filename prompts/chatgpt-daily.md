@@ -8,6 +8,17 @@
 
 ## 実行指示
 
+【実行時間別の処理】
+この1つのTurfLabタスクは、JST 09:00に朝予想、JST 10:00または12:00に固定packの後追い予想を実行する。実行時刻を確かめ、10時/12時の場合はこの後の朝レポート作成・daily/上書き・レース再選定を行わず、下記「固定pack後追い処理」だけを行う。
+
+【固定pack後追い処理】
+1. 非公開GitHub `Soso2e/TurfLab-data` の本番mainで、当日 `packs/YYYY-MM-DD/` と `predictions/YYYY-MM-DD/` を実際に読む。0packなら新規作成なしで終了。接続不可なら失敗と明記。
+2. 朝9時の `daily/YYYY-MM-DD/morning-reference-v1.json` で選定したレースのうち、現時点で発走前・全頭の最新固定packが利用可能・Morning未作成のレースを最大5R扱う。既存の同日Morningは上書きも再生成もしない。
+3. 各packの `prediction_template`、`answer_schema`、`prediction_path` をそのままコピーし、客観的根拠のある全馬6評価、slow/middle/high全頭隊列、主想定・参考Betを埋める。オッズ・人気を予想/買い目/金額の根拠にしない。参考Betは1R最大1000円、JST1日最大5000円。6評価を埋める根拠がない場合は見送り、架空のID/hash/出典を作らない。
+4. JSON Schemaの全項目が満たせた場合だけ `prediction_path` へ新規GitHub保存、commit/path/読返しを確認して報告。Core受信・locked・本人購入はWorkerの実証がない限り成功と呼ばない。実Betを行わない。
+5. packなし・正式予想の追加なしの日は通知不要。追加や障害があればレース数と根拠/未完理由を簡潔に示す。
+
+【JST 09:00朝予想処理】
 【TurfLab 日次予想 v2／毎朝09:00 Asia/Tokyo】
 
 ### 目的と担当
@@ -100,3 +111,11 @@ GitHub自動受渡しの本番条件を確認済みの場合:
 - 予想データ `predictions/` への正式Core互換JSON保存とは**別物**。朝の分析結果を保存しても `TurfLab取込済み` や `学習済み` と呼ばない。
 - `state/YYYY-MM-DD/daily-v1.json` が存在すればそれはWindows Workerが取得したCoreの読取専用記録。前日の本人Bet/公式結果/採用/レビューはこの記録を第一資料とし、不在なら未取得と明記。前日の `daily/` の参考記録から自己の予想と結果の差分を確認する。別スレッドを無条件に参照できるとは仮定しない。
 - GitHubの本番書込を利用できない場合、従来どおり朝レポート/コピー可能なJSONを返し、`GitHub未保存` を明記する。この失敗はレポートや翌日の定時実行を停止する理由にしない。
+
+### 8. GitHub参考JSONの照合精度を上げるための必須付帯情報
+
+- 当日の非公開GitHub `daily/YYYY-MM-DD/morning-reference-v1.json` を新規保存するとき、各レースに `race_key_human`（JST日付|競馬場|R）、`official_entry_source`（そのレースの公式出馬表HTTPS URL）、`scheduled_start_at_jst`、`entry_count_observed`、`withdrawals_verified_as_of_generation`（公式出馬表で取消・騎手変更をその時点まで全頭確認した場合だけtrue、未確認ならfalse）、`evaluations_complete` を含める。レポート全体に `source_checked_at`（実際に確認したISO時刻、`generated_at`以下）を加える。
+- `horses` は全頭に `horse_number`、`horse_name`、`jockey`、公式で確認できた `weight_kg`、`draw_number`、出走 `status`（active/scratched/cancelledを確認できた時のみ）を記録する。馬・騎手の公式 `horse_external_id` / `jockey_external_id` は実際に識別できた場合のみ転記し、名前や馬番から捏造・推定しない。出典・確認時刻・不明値を保持する。未確認の項目はnull、確認フラグはfalseにする。
+- 勝手に公式データの全量複製やスクレイピングをしない。公式Webページを閲覧して必要な観測値を出典とともに整理し、許諾範囲を確認する。NAR公式CSVがあることはその内容の私的リポジトリへの再配布許諾を意味しない。
+- Windows Workerはこの参考レポートを既存Coreと照合し、**既登録・全馬一致・正式snapshot検証成功**のレースのみ `packs/` に新規出力する。ChatGPTは照合未完了をCore登録成功と扱わない。
+- 参考レポート保存後に当日の正式packが存在するかを可能なら再確認する。新規packがなければ無理にMorningへ進まず、翌回の固定pack処理に任せる。欠測は想像で埋めない。
