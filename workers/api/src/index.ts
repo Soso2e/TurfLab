@@ -34,6 +34,7 @@ import { adopt, lockPrediction, preview, saveImport } from "./imports";
 import { prepareRace, runBatch, runRace, safeFailure } from "./race-pipeline";
 import {
   previewMaster,
+  reviewIdentityCandidates,
   confirmMaster,
   inputPack,
   convertAnswer,
@@ -185,6 +186,8 @@ export async function route(
       !sheets,
       "取込ウィザードはlocal保存専用です。既存Sheetsには書き込みません",
     );
+    if (path === "/race-import/identity-candidates")
+      return reviewIdentityCandidates(repo, input);
     if (path === "/race-import/preview") return previewMaster(repo, input, now);
     if (path === "/race-import/confirm") return confirmMaster(repo, input, now);
     if (path === "/race-import/pack")
@@ -412,18 +415,32 @@ export class TurfCoordinator {
             return response({ commands });
           if (bridgePath.endsWith("/reference-report")) {
             if (request.method === "GET")
-              return response((await this.state.storage.get<Row>("github-reference")) ??
-                { status: "empty" });
+              return response(
+                (await this.state.storage.get<Row>("github-reference")) ?? {
+                  status: "empty",
+                },
+              );
             requireCondition(request.method === "POST", "POSTが必要です", 405);
-            const incoming = validateReferenceMirror(await readBody(request), new Date().toISOString());
-            const existing = await this.state.storage.get<Row>("github-reference");
+            const incoming = validateReferenceMirror(
+              await readBody(request),
+              new Date().toISOString(),
+            );
+            const existing =
+              await this.state.storage.get<Row>("github-reference");
             if (existing?.path === incoming.path) {
-              requireCondition(existing.sha === incoming.sha,
-                "同日の参考JSONが変更されています。既存参照を保持します", 409);
+              requireCondition(
+                existing.sha === incoming.sha,
+                "同日の参考JSONが変更されています。既存参照を保持します",
+                409,
+              );
               return response({ status: "already_saved", path: existing.path });
             }
-            requireCondition(!existing || String(incoming.date_jst) > String(existing.date_jst),
-              "過去の参考レポートで最新を置き換えられません", 409);
+            requireCondition(
+              !existing ||
+                String(incoming.date_jst) > String(existing.date_jst),
+              "過去の参考レポートで最新を置き換えられません",
+              409,
+            );
             await this.state.storage.put("github-reference", incoming);
             return response({ status: "saved", path: incoming.path });
           }

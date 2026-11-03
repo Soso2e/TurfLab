@@ -14,6 +14,7 @@ import {
 } from "../packages/shared/src/race-wizard";
 import {
   previewMaster,
+  reviewIdentityCandidates,
   confirmMaster,
   inputPack,
   convertAnswer,
@@ -538,5 +539,46 @@ describe("NAR CSVローカル取込", () => {
         number: 1,
       }),
     ).toThrow();
+  });
+});
+
+describe("既存IDの確認候補", () => {
+  it("候補は同名のみ表示し、曖昧でも自動確定・DB更新しない", async () => {
+    const c = await setup();
+    const h = (await c.repo.list("horses"))[0];
+    await c.repo.put("horses", {
+      ...h,
+      horse_id: "fixture-duplicate",
+      evidence_json: { external_id: "fixture-other" },
+    });
+    const before = (await backup(c.repo)).hash;
+    const input = {
+      entries: [
+        {
+          horse_number: 1,
+          horse_name: h.horse_name,
+          jockey_name: "存在しない",
+        },
+      ],
+    };
+    const result = await reviewIdentityCandidates(c.repo, input);
+    expect(result.status).toBe("review_required");
+    const entry = rows(result.entries)[0];
+    expect(rows(entry.horse_candidates)).toHaveLength(2);
+    expect(rows(entry.jockey_candidates)).toHaveLength(0);
+    expect(input.entries[0]).not.toHaveProperty("horse_external_id");
+    expect((await backup(c.repo)).hash).toBe(before);
+  });
+  it("未入力名や大量の出走馬を拒否または候補なしとする", async () => {
+    const repo = new MemoryRepository();
+    expect(
+      rows((await reviewIdentityCandidates(repo, { entries: [{}] })).entries)[0]
+        .horse_candidates,
+    ).toEqual([]);
+    await expect(
+      reviewIdentityCandidates(repo, {
+        entries: Array.from({ length: 19 }, () => ({})),
+      }),
+    ).rejects.toThrow();
   });
 });
