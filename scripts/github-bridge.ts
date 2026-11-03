@@ -222,7 +222,7 @@ export class PredictionBridge {
         continue;
       }
       if (prior?.status === "complete" || prior?.status === "failed") continue;
-      let report: ReferenceReceipt = prior ?? {
+      const report: ReferenceReceipt = prior ?? {
         sha: file.sha, checked_at: now.toISOString(), status: "waiting",
         reason: "DB照合待ち", races: [],
       };
