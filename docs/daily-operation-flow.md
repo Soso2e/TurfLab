@@ -112,3 +112,8 @@ Windows GitHub Workerは、当日 `daily/YYYY-MM-DD/morning-reference-v1.json` �
 ### 朝の参考JSONのWeb閲覧
 
 GitHub Workerが `daily/YYYY-MM-DD/morning-reference-v1.json` を照合すると、認証済みowner DOの専用メタデータ `github-reference` に**同日SHA固定の最新参考レポート**をミラーし、`GET /api/github-bridge/reference-report` からWebの同期欄で全馬・展開・参考Betを閲覧可能にする。正式Coreに登録されていないレースも表示するが、Coreとは別扱い。読取は本人Bearer認証、同日上書き拒否。最新日付への置換のみで過去分の履歴は非公開GitHubのimmutable `daily/` に保持する。外部サイトHTMLや認証キーは保存しない。
+
+
+## 朝の後追い正式pack処理
+
+GitHub Workerが9時の参考分析受信後に `packs/` を生成できるようになったため、必要なら別の定時タスクで同日発走前の固定packだけを読み、完全なCore互換 `predictions/` を新規作成する。実際のChatGPTスケジュールを登録したかどうかは運用ログで確認。pack無しの日は空振りが正常であり、正式予想を偽装しない。参照プロンプト：[chatgpt-pack-finalize.md](../prompts/chatgpt-pack-finalize.md)。
