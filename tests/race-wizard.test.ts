@@ -8,7 +8,10 @@ import {
   type Row,
 } from "../packages/shared/src/domain";
 import { backup, MemoryRepository } from "../packages/shared/src/repository";
-import { parseEntriesCSV } from "../packages/shared/src/race-wizard";
+import {
+  parseEntriesCSV,
+  parseNarEntriesCSV,
+} from "../packages/shared/src/race-wizard";
 import {
   previewMaster,
   confirmMaster,
@@ -457,5 +460,83 @@ describe("手動CSV", () => {
   it("未知列・列数不一致・閉じない引用符を拒否", () => {
     for (const s of ["x\na", `${header}\nh1,x`, `${header}\n"unterminated`])
       expect(() => parseEntriesCSV(s)).toThrow();
+  });
+});
+
+describe("NAR CSVローカル取込", () => {
+  const csv =
+    "競馬場,競走年月日,レース番号,枠番,馬番,馬名,騎手名,負担重量\r\n" +
+    [1, 2, 3]
+      .map(
+        (n) =>
+          `架空ウィザード競馬場,20261021,1,${n},${n},架空馬${n},架空騎手${n},55`,
+      )
+      .join("\r\n") +
+    "\r\n別場,20261021,1,1,1,別馬,別騎手,55\r\n";
+  it("未照合IDと取消状態ではdraft、確認済みfixtureではCore lockedまで", async () => {
+    const draft = wizardDraft();
+    const entries = parseNarEntriesCSV(csv, {
+      date: "2026-10-21",
+      track: "架空ウィザード競馬場",
+      number: 1,
+    });
+    expect(entries).toHaveLength(3);
+    expect(entries[0]).toMatchObject({
+      horse_external_id: "",
+      jockey_external_id: "",
+      status: "",
+    });
+    draft.entries = entries;
+    const repo = new MemoryRepository();
+    expect((await previewMaster(repo, wizardRequest(draft), NOW)).status).toBe(
+      "draft",
+    );
+    const verified = rows(wizardDraft().entries);
+    entries.forEach((entry, i) =>
+      Object.assign(entry, {
+        horse_external_id: verified[i].horse_external_id,
+        jockey_external_id: verified[i].jockey_external_id,
+        status: verified[i].status,
+      }),
+    );
+    const request = wizardRequest(draft);
+    const preview = await previewMaster(repo, request, NOW);
+    expect(preview.status, JSON.stringify(preview)).toBe("ready");
+    const saved = await confirmMaster(
+      repo,
+      { ...request, preview_hash: preview.preview_hash, confirmed: true },
+      NOW,
+    );
+    const pack = await inputPack(repo, String(saved.snapshot_id), NOW);
+    const converted = await convertAnswer(
+      repo,
+      {
+        snapshot_id: saved.snapshot_id,
+        operation_id: "nar-fixture-answer",
+        answer: wizardAnswer(pack),
+      },
+      NOW,
+    );
+    expect((await runRace(repo, obj(converted.pipeline), NOW)).status).toBe(
+      "complete",
+    );
+    expect((await repo.list("predictions"))[0].status).toBe("locked");
+    expect(await repo.list("virtual_bets")).toHaveLength(0);
+  });
+  it("別レース・列欠落を拒否", () => {
+    expect(() =>
+      parseNarEntriesCSV(csv, {
+        date: "2026-10-21",
+        track: "存在しない",
+        number: 1,
+      }),
+    ).toThrow();
+    expect(() =>
+      parseNarEntriesCSV("競馬場,馬名\na,b", {
+        date: "2026-10-21",
+        track: "a",
+        number: 1,
+      }),
+    ).toThrow();
   });
 });
