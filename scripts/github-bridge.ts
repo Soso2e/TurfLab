@@ -294,11 +294,10 @@ export class PredictionBridge {
     this.state.official_results ??= {};
     const files = await this.io.list();
     const pattern = /^results\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_-]+-official-v[1-9]\d*\.json$/;
-    const pending = files.filter((f) => pattern.test(f.path) &&
-      this.state.official_results![f.path]?.status !== "complete" &&
-      this.state.official_results![f.path]?.status !== "failed")
-      .sort((a, b) => a.path.localeCompare(b.path)).slice(0, 40);
-    for (const file of pending) {
+    const candidates = files.filter((f) => pattern.test(f.path))
+      .sort((a, b) => a.path.localeCompare(b.path));
+    let processed = 0;
+    for (const file of candidates) {
       let record = this.state.official_results[file.path];
       if (record?.sha && record.sha !== file.sha) {
         record.conflict_sha = file.sha;
@@ -307,6 +306,8 @@ export class PredictionBridge {
         await this.save();
         continue;
       }
+      if (record?.status === "complete" || record?.status === "failed") continue;
+      if (++processed > 40) break;
       record ??= { sha: file.sha, status: "waiting", checked_at: now.toISOString(),
         reason: "Core検証待ち" };
       try {
