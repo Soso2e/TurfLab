@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { obj, rows, type Row } from "../../../packages/shared/src/domain";
 import {
   parseEntriesCSV,
+  parseNarEntriesCSV,
   raceDraftTemplate,
 } from "../../../packages/shared/src/race-wizard";
 
@@ -111,12 +112,49 @@ export function RaceImportWizard({
             }}
           />
         </label>
+        <label className="file-button">
+          NAR出馬表CSVを読み込む
+          <input
+            type="file"
+            accept=".csv,text/csv"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f)
+                void action(async () => {
+                  if (f.size > 5242880) throw new Error("入力は5MiB以内です");
+                  const d = obj(JSON.parse(draft));
+                  const r = obj(d.race),
+                    t = obj(d.track);
+                  const bytes = await f.arrayBuffer();
+                  // NAR files are Shift_JIS; decoding errors must not silently change names.
+                  let text: string;
+                  try {
+                    text = new TextDecoder("utf-8", { fatal: true }).decode(
+                      bytes,
+                    );
+                  } catch {
+                    text = new TextDecoder("shift_jis", { fatal: true }).decode(
+                      bytes,
+                    );
+                  }
+                  d.entries = parseNarEntriesCSV(text, {
+                    date: String(r.race_date_jst ?? ""),
+                    track: String(t.name ?? ""),
+                    number: Number(r.race_number),
+                  });
+                  changeDraft(json(d));
+                  setOperation(crypto.randomUUID());
+                });
+            }}
+          />
+        </label>
         <button onClick={() => download("race-draft.json", draft)}>
           draftをダウンロード
         </button>
       </div>
       <small>
-        CSVはentriesだけを置換します。列:{" "}
+        NAR
+        CSVはdraftの開催日・場・番号で1Rを選択します。馬・騎手IDと出走状態は空欄のままです。別途公式情報と照合してください。CSVはentriesだけを置換します。列:{" "}
         {Object.keys(raceDraftTemplate.entries[0]).join(", ")}
       </small>
       <label>

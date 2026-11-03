@@ -13,9 +13,20 @@ if (Test-Path -LiteralPath $manifest) {
     $record = Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
     $live = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$record.pid)"
     if ($live) {
-        if ($live.CommandLine -ne $record.command_line -or $live.CreationDate.ToUniversalTime() -ne ([datetime]$record.created_at).ToUniversalTime()) { throw 'GitHub worker PID identity mismatch. No process was stopped.' }
-        Write-Output '[TurfLab] GitHub sync worker is already running.'
-        return
+        if ($live.CommandLine -eq $record.command_line -and $live.CreationDate.ToUniversalTime() -eq ([datetime]$record.created_at).ToUniversalTime()) {
+            Write-Output '[TurfLab] GitHub sync worker is already running.'
+            return
+        }
+        # Only a later creation time proves the old process is gone. Never stop the reused PID.
+        if ($live.CreationDate.ToUniversalTime() -le ([datetime]$record.created_at).ToUniversalTime()) { throw 'GitHub worker PID identity mismatch. No process was stopped.' }
+        $lock = Join-Path $bridgeDir 'worker.lock'
+        if (-not (Test-Path -LiteralPath $lock) -or (Get-Content -LiteralPath $lock -Raw).Trim() -ne [string]$record.pid) { throw 'Stale worker lock does not match its manifest. No files were changed.' }
+        $again = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$record.pid)"
+        if (-not $again -or $again.CreationDate.ToUniversalTime() -ne $live.CreationDate.ToUniversalTime() -or (Get-Content -LiteralPath $lock -Raw).Trim() -ne [string]$record.pid) { throw 'Worker identity changed during inspection. No files were changed.' }
+        $suffix = '.stale-' + [guid]::NewGuid().ToString('N')
+        Move-Item -LiteralPath $lock -Destination ($lock + $suffix)
+        Move-Item -LiteralPath $manifest -Destination ($manifest + $suffix)
+        Write-Output '[TurfLab] Archived stale worker identity; unrelated process retained.'
     }
 }
 $null = New-Item -ItemType Directory -Force -Path (Join-Path $runtimeHome 'logs')

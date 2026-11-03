@@ -126,3 +126,12 @@
 | 2026-10-29-01 | 既存朝9時タスクを監査し、全文置換案と準備→予想→本人採用/Bet→公式精算→翌朝振返りの全体フローを作成。packの分析根拠不足、定時GitHub未実証、結果/日次記録の自動受渡し未実装を明記。Schema/変換/結果処理と突合、Markdown整形・ローカルリンク・git diff検査成功 | 調査完了 | prompts/chatgpt-daily.md、docs/prompts/github-prediction-bridge.md、docs/daily-operation-flow.md、同期手順、README、PROGRESS | 実タスク本文置換、通常ChatGPTの定時能力試験、根拠を固定する入力拡張/実1R受入。文書のみ変更のためコード試験は再実行なし |
 | 2026-11-02-01 | 最新mainの別worktreeでstateをハッシュ照合バックアップしWindowsサービスを起動。ログオン自動起動を実装・登録し手動実行、144テスト・実GitHub隔離試験・HTTPS認証を確認 | 動作確認済み | Windows自動起動スクリプト、手順書、PROGRESS | OS再起動/iPhone/実1R、検索照合・結果・学習の未実装部分 |
 | 2026-11-02-02 | 本人指定の8桁キーとブラウザのログイン維持を実装。stateバックアップ後に再起動しHTTPS認証とEdge再読込を確認 | 動作確認済み | Web、API、Windows認証、同期Worker、PROGRESS | iPhone Safariでログイン・再読込・ログアウト確認 |
+
+## 2026-11-04 ローカル出馬表入力とWorker復旧
+
+- 実装済み・未確認: 既存WizardにNAR形式出馬表CSVのローカル読込を追加。draftに入力済みの開催日・場・番号で1Rを選び、馬/騎手外部IDと出走状態は空欄にして本人の出典照合を必須とする。公式CSV実ファイル・個体の自動DB照合は未検証・未実装。レース/コース等のメタデータ、出典・時刻・頭数も本人が入力する。
+- 動作確認済み: 架空CSVで未照合はdraft、fixtureの確認済みIDと取消状態入力後にCore登録→pack→架空回答→locked保存をMemoryRepositoryで確認。160テスト・型・lint・build、既存隔離Wizardブラウザ/Core/再起動試験が成功。実レースや実ChatGPT回答ではない。
+- 実装済み・隔離確認: Worker起動時、manifestのPIDが後から生成された別プロセスに再利用され、lockも旧PIDに一致する場合に限り旧記録を退避。別プロセスは停止しない。隔離環境で再利用を模擬し2記録退避と別プロセス存続を確認。実運用へ未適用。
+- 未完了: 許諾済み実CSVを使った列・文字コード検証、公式個体IDの一意照合、発走前実1R・正式予想・結果精算、Windows OS再起動とiPhone。
+
+| 2026-11-04-02 | NAR形式CSVをWizard draftへ変換し未確認ID/状態を空欄で保持。架空CSVからCore lockedまで隔離検証。PID再利用時の旧Worker記録退避を実装・隔離確認 | 実装済み・未確認 | `packages/shared/src/race-wizard.ts`, `apps/web/src/RaceImportWizard.tsx`, `scripts/windows/Start-GitHubSync.ps1`, `tests/race-wizard.test.ts`, `PROGRESS.md` | 実CSV・個体照合・発走前実1Rと実運用適用 |

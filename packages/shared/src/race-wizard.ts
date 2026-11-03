@@ -41,9 +41,7 @@ export const raceDraftTemplate = {
 };
 
 // RFC4180 quoting, CRLF and BOM; metadata stays in the separate JSON form.
-export function parseEntriesCSV(
-  text: string,
-): Record<string, string | number>[] {
+function csvRecords(text: string): string[][] {
   const records: string[][] = [];
   let record: string[] = [],
     cell = "",
@@ -78,6 +76,13 @@ export function parseEntriesCSV(
     }
   }
   if (quoted) throw new Error("CSVの引用符が閉じていません");
+  return records;
+}
+
+export function parseEntriesCSV(
+  text: string,
+): Record<string, string | number>[] {
+  const records = csvRecords(text);
   const headers = records.shift();
   const expected = Object.keys(raceDraftTemplate.entries[0]);
   if (
@@ -100,6 +105,61 @@ export function parseEntriesCSV(
       ]),
     );
   });
+}
+
+// NAR horselist files contain multiple races and no stable horse/jockey IDs.
+// This is a draft only: the operator must independently verify identities and status.
+export function parseNarEntriesCSV(
+  text: string,
+  race: { date: string; track: string; number: number },
+): Record<string, string | number>[] {
+  const records = csvRecords(text);
+  const headers = records.shift();
+  const required = [
+    "競馬場",
+    "競走年月日",
+    "レース番号",
+    "枠番",
+    "馬番",
+    "馬名",
+    "騎手名",
+    "負担重量",
+  ];
+  if (
+    !headers ||
+    new Set(headers).size !== headers.length ||
+    !required.every((key) => headers.includes(key))
+  )
+    throw new Error("NAR出馬表CSVの必要な列がありません");
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(race.date) ||
+    !race.track.trim() ||
+    !Number.isInteger(race.number) ||
+    race.number < 1
+  )
+    throw new Error("draftの開催日・競馬場・レース番号を先に入力してください");
+  const get = (row: string[], key: string) => row[headers.indexOf(key)].trim();
+  const selected = records.filter((row) => {
+    if (row.length !== headers.length)
+      throw new Error("CSVの列数が一致しません");
+    return (
+      get(row, "競走年月日") === race.date.replaceAll("-", "") &&
+      get(row, "競馬場").normalize("NFKC") ===
+        race.track.trim().normalize("NFKC") &&
+      get(row, "レース番号") === String(race.number)
+    );
+  });
+  if (!selected.length) throw new Error("指定レースの出馬表がありません");
+  return selected.map((row) => ({
+    horse_external_id: "",
+    horse_name: get(row, "馬名"),
+    jockey_external_id: "",
+    jockey_name: get(row, "騎手名"),
+    horse_number: Number(get(row, "馬番")),
+    draw_number: Number(get(row, "枠番")),
+    carried_weight_kg: Number(get(row, "負担重量")),
+    status: "",
+  }));
 }
 
 export const aiAnswerSchema = {
