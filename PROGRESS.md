@@ -1,5 +1,10 @@
 # PROGRESS.md
 
+## 2026-11-03 rank performance metrics
+
+- 採用済みlocked予想と最新の公式確定結果で、勝率/3着内率/予想top3適合率を確率不要で集計する `/api/analytics/ranks` と、条件別・直近30/90Rを追加。自動モデル重み変更はしない。データ0Rなら比率null。
+
+
 ## 2026-11-03 公式結果の条件付きGitHub→Core経路
 
 - private GitHub `results/` をWorkerが監視、正式出典URLと全出走馬/全払戻を持つ完全な公式結果ファイルだけを既存Core saveResult+settleで取り込み、再読込・版管理。現在のChatGPT朝レポートは着順/払戻の一部のみのためそのまま自動精算しない。独立ソース本文検証/完全な結果ファイルの自動作成は未実装。

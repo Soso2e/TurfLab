@@ -1,5 +1,6 @@
 import type { Repository } from "../../../packages/shared/src/repository";
 import type { Row } from "../../../packages/shared/src/domain";
+import { rankPerformance } from "./rank-analytics";
 
 // Read-only snapshot for the next ChatGPT scheduled analysis.
 // Only two JST dates are included; no secrets, tokens, raw audits or odds.
@@ -77,6 +78,7 @@ export async function dailyStateExport(repo: Repository, now: string): Promise<R
     generated_at: now,
     included_dates_jst: [yesterday, today],
     origin: "authenticated_turflab_core_read_only",
+    ranking_metrics: await rankPerformance(repo),
     counts: { races: races.length, official_results: resultsCount, locked_predictions: records.reduce((n, r) => n + r.predictions.length, 0) },
     races: records,
     limitations: [

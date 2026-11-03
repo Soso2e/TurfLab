@@ -55,6 +55,7 @@ import { dailyStateExport } from "./daily-export";
 import { reconcileReference } from "./reference-intake";
 import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
+import { rankPerformance } from "./rank-analytics";
 import {
   dashboard,
   dailyRun,
@@ -159,7 +160,10 @@ export async function route(
       predictions: await analytics(repo),
       recommendations: await recommendationStats(repo),
       adopted_reference: await recommendationStats(repo, true),
+      rank_metrics: await rankPerformance(repo),
     };
+  if (method === "GET" && path === "/analytics/ranks")
+    return rankPerformance(repo);
   if (method === "GET" && path === "/daily-state") {
     requireCondition(!sheets, "日次GitHubエクスポートはlocal保存専用です");
     return dailyStateExport(repo, now);
