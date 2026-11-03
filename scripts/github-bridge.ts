@@ -45,6 +45,14 @@ interface ReferenceReceipt {
   races: Row[];
   conflict_sha?: string;
 }
+interface ResultReceipt {
+  sha: string;
+  status: "complete" | "waiting" | "failed";
+  checked_at: string;
+  reason: string;
+  result_id?: string;
+  conflict_sha?: string;
+}
 interface State {
   version: 1;
   repository: string;
@@ -58,6 +66,9 @@ interface State {
   reference_files?: Record<string, ReferenceReceipt>;
   last_reference_sync?: string;
   last_reference?: Row;
+  official_results?: Record<string, ResultReceipt>;
+  last_result_sync?: string;
+  last_result?: Row;
   last_sync: string | null;
   last_error: string | null;
   failures: number;
@@ -100,6 +111,7 @@ export class PredictionBridge {
         );
       this.state.daily_exports ??= {};
       this.state.reference_files ??= {};
+      this.state.official_results ??= {};
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
       this.state = {
@@ -110,6 +122,7 @@ export class PredictionBridge {
         exports: {},
         daily_exports: {},
         reference_files: {},
+        official_results: {},
         last_sync: null,
         last_error: null,
         failures: 0,
@@ -141,6 +154,9 @@ export class PredictionBridge {
       last_export: this.state.last_export ?? null,
       last_daily_export: this.state.last_daily_export ?? null,
       last_reference: this.state.last_reference ?? null,
+      last_result: this.state.last_result ?? null,
+      results_waiting: Object.values(this.state.official_results ?? {}).filter((r) => r.status === "waiting").length,
+      results_complete: Object.values(this.state.official_results ?? {}).filter((r) => r.status === "complete").length,
       reference_records: Object.entries(this.state.reference_files ?? {}).map(([path, r]) => ({
         path, status: r.conflict_sha ? "failed" : r.status,
         reason: r.reason, checked_at: r.checked_at, races: r.races,
@@ -266,6 +282,62 @@ export class PredictionBridge {
       await this.save();
     }
     this.state.last_reference_sync = now.toISOString();
+    await this.save();
+  }
+  // Official results are separate immutable files. They never trigger a new
+  // Morning or a real bet; Core settles only already-confirmed virtual bets.
+  async syncOfficialResults(force = false) {
+    const now = this.io.now();
+    if (!force && this.state.last_result_sync &&
+      now.getTime() - Date.parse(this.state.last_result_sync) < (this.config.interval_seconds ?? 300) * 1000)
+      return;
+    this.state.official_results ??= {};
+    const files = await this.io.list();
+    const pattern = /^results\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_-]+-official-v[1-9]\d*\.json$/;
+    const pending = files.filter((f) => pattern.test(f.path) &&
+      this.state.official_results![f.path]?.status !== "complete" &&
+      this.state.official_results![f.path]?.status !== "failed")
+      .sort((a, b) => a.path.localeCompare(b.path)).slice(0, 40);
+    for (const file of pending) {
+      let record = this.state.official_results[file.path];
+      if (record?.sha && record.sha !== file.sha) {
+        record.conflict_sha = file.sha;
+        record.reason = "同じ結果JSONの上書きを拒否。訂正は別版へ";
+        record.status = "failed";
+        await this.save();
+        continue;
+      }
+      record ??= { sha: file.sha, status: "waiting", checked_at: now.toISOString(),
+        reason: "Core検証待ち" };
+      try {
+        const content = await this.io.read(file);
+        if (Buffer.byteLength(content) > 262144)
+          throw new BridgeError("公式結果JSONは256KiB以内です");
+        const document = obj(JSON.parse(content));
+        const result = await this.io.api("/github-bridge/official-result", {
+          path: file.path, document,
+        });
+        const detail = await this.io.api(`/races/${encodeURIComponent(str(result, "race_id"))}`);
+        if (!rows(detail.results).some((r) => r.result_id === result.result_id))
+          throw new BridgeError("公式結果のCore読返し不一致", true);
+        record.status = "complete";
+        record.reason = "最新公式結果をCoreに保存し、既存の本人仮想Betを精算";
+        record.result_id = str(result, "result_id");
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "公式結果検証に失敗";
+        record.status = /参照がありません|未登録|一時|接続できません|not found/i.test(msg)
+          ? "waiting" : "failed";
+        record.reason = msg.slice(0, 300);
+      }
+      record.checked_at = now.toISOString();
+      this.state.official_results[file.path] = record;
+      this.state.last_result = {
+        path: file.path, status: record.status, reason: record.reason,
+        checked_at: record.checked_at, result_id: record.result_id ?? null,
+      };
+      await this.save();
+    }
+    this.state.last_result_sync = now.toISOString();
     await this.save();
   }
   async exportPack(snapshot: string) {
