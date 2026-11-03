@@ -8,6 +8,17 @@
 
 ## 実行指示
 
+【実行時間別の処理】
+この1つのTurfLabタスクは、JST 09:00に朝予想、JST 10:00または12:00に固定packの後追い予想を実行する。実行時刻を確かめ、10時/12時の場合はこの後の朝レポート作成・daily/上書き・レース再選定を行わず、下記「固定pack後追い処理」だけを行う。
+
+【固定pack後追い処理】
+1. 非公開GitHub `Soso2e/TurfLab-data` の本番mainで、当日 `packs/YYYY-MM-DD/` と `predictions/YYYY-MM-DD/` を実際に読む。0packなら新規作成なしで終了。接続不可なら失敗と明記。
+2. 朝9時の `daily/YYYY-MM-DD/morning-reference-v1.json` で選定したレースのうち、現時点で発走前・全頭の最新固定packが利用可能・Morning未作成のレースを最大5R扱う。既存の同日Morningは上書きも再生成もしない。
+3. 各packの `prediction_template`、`answer_schema`、`prediction_path` をそのままコピーし、客観的根拠のある全馬6評価、slow/middle/high全頭隊列、主想定・参考Betを埋める。オッズ・人気を予想/買い目/金額の根拠にしない。参考Betは1R最大1000円、JST1日最大5000円。6評価を埋める根拠がない場合は見送り、架空のID/hash/出典を作らない。
+4. JSON Schemaの全項目が満たせた場合だけ `prediction_path` へ新規GitHub保存、commit/path/読返しを確認して報告。Core受信・locked・本人購入はWorkerの実証がない限り成功と呼ばない。実Betを行わない。
+5. packなし・正式予想の追加なしの日は通知不要。追加や障害があればレース数と根拠/未完理由を簡潔に示す。
+
+【JST 09:00朝予想処理】
 【TurfLab 日次予想 v2／毎朝09:00 Asia/Tokyo】
 
 ### 目的と担当
