@@ -117,3 +117,8 @@ GitHub Workerが `daily/YYYY-MM-DD/morning-reference-v1.json` を照合すると
 ## 朝の後追い正式pack処理
 
 GitHub Workerが9時の参考分析受信後に `packs/` を生成できるようになったため、必要なら別の定時タスクで同日発走前の固定packだけを読み、完全なCore互換 `predictions/` を新規作成する。実際のChatGPTスケジュールを登録したかどうかは運用ログで確認。pack無しの日は空振りが正常であり、正式予想を偽装しない。参照プロンプト：[chatgpt-pack-finalize.md](../prompts/chatgpt-pack-finalize.md)。
+
+
+### 既存ChatGPTタスクの時間別処理（2026-11-03登録）
+
+新規タスク作成は上限により失敗したため、既存9時タスク1件をJST 09:00/10:00/12:00に更新した（RRULEは既存Automationに保存成功）。9時は従来の当日選定・参考分析とdaily保存、10時と12時はGitHubの新規packがあったレースだけ後追い正式Morningを作る。同日dailyファイルを再保存しない。定期実行そのものとCore受入は翌日以降別途確認が必要。通知/使用量は実行ごとに発生し得る。
