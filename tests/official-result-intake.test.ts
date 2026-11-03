@@ -31,6 +31,16 @@ describe("verified full official results -> Core",()=>{
     expect(second.result_id).toBe(first.result_id);
     expect(await repo.list("race_results")).toHaveLength(1);
   });
+  it("generates stable internal result/payout IDs when source supplies none", async()=>{
+    const {repo}=await fixture();
+    const packet=input();
+    delete obj(obj(packet.document).result).result_id;
+    const payoutRows=obj(packet.document).payouts as Record<string, unknown>[];
+    delete payoutRows[0].payout_id;
+    const saved=await importOfficialResult(repo,packet,now);
+    expect(String(saved.result_id)).toMatch(/^result:auto:/);
+    expect((await repo.list("payouts"))[0].payout_id).toMatch(/^payout:auto:/);
+  });
   it("requires full official source and rejects stale/fake status",async()=>{
     const repo=new MemoryRepository();
     const d=input();
