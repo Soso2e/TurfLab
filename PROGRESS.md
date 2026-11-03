@@ -1,5 +1,10 @@
 # PROGRESS.md
 
+## 2026-11-03 Issue #41 Reference Intake
+
+- ChatGPTのGitHub `daily/` の参考予想をWindows Workerで検出・永続receipt化し、既存Core登録済み全馬と読取専用で突合する処理を追加。照合一致で既存検証済snapshotのpackを自動出力。外部IDを参考JSONから推定して作成しない。未登録/取消/出典不足は確認待ちとしてWebへ表示。公式結果自動取得・精算とモデル改善は別段階。
+
+
 ## 2026-11-02 接続キーとログイン維持
 
 - 指定された8桁キーをWindows実機に設定し、既存stateをハッシュ照合バックアップ後に再起動。HTTPSの未認証401と認証済みAPI、GitHub同期Workerの起動を確認。
