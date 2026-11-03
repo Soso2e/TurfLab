@@ -53,6 +53,7 @@ import { adoptModel, analytics, backtest, saveReview } from "./analytics";
 import { bridgeConvert } from "./github-bridge";
 import { dailyStateExport } from "./daily-export";
 import { reconcileReference } from "./reference-intake";
+import { validateReferenceMirror } from "./reference-report";
 import {
   dashboard,
   dailyRun,
@@ -384,6 +385,7 @@ export class TurfCoordinator {
             "/api/github-bridge/sync",
             "/api/github-bridge/export",
             "/api/github-bridge/report",
+            "/api/github-bridge/reference-report",
           ].includes(bridgePath)
         ) {
           requireCondition(
@@ -399,6 +401,23 @@ export class TurfCoordinator {
             return response({ ...status, pending_commands: commands.length });
           if (request.method === "GET" && bridgePath.endsWith("/control"))
             return response({ commands });
+          if (bridgePath.endsWith("/reference-report")) {
+            if (request.method === "GET")
+              return response((await this.state.storage.get<Row>("github-reference")) ??
+                { status: "empty" });
+            requireCondition(request.method === "POST", "POSTが必要です", 405);
+            const incoming = validateReferenceMirror(await readBody(request), new Date().toISOString());
+            const existing = await this.state.storage.get<Row>("github-reference");
+            if (existing?.path === incoming.path) {
+              requireCondition(existing.sha === incoming.sha,
+                "同日の参考JSONが変更されています。既存参照を保持します", 409);
+              return response({ status: "already_saved", path: existing.path });
+            }
+            requireCondition(!existing || String(incoming.date_jst) > String(existing.date_jst),
+              "過去の参考レポートで最新を置き換えられません", 409);
+            await this.state.storage.put("github-reference", incoming);
+            return response({ status: "saved", path: incoming.path });
+          }
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);
           if (bridgePath.endsWith("/report")) {

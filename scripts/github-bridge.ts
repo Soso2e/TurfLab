@@ -234,6 +234,11 @@ export class PredictionBridge {
         const response = await this.io.api("/github-bridge/reference-preview", {
           path: file.path, document,
         });
+        // UI can display all reference races even when Core has zero matches.
+        // This mirror never creates Core predictions or owner bets.
+        await this.io.api("/github-bridge/reference-report", {
+          path: file.path, sha: file.sha, document,
+        });
         report.races = rows(response.races);
         // These packs are generated only from existing already-verified Core
         // snapshots; a reference report can never register an unknown horse.

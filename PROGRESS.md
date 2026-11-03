@@ -1,5 +1,10 @@
 # PROGRESS.md
 
+## 2026-11-03 Reference archive Web表示
+
+- 朝タスクの非公開GitHub参考JSONをDO専用の表示用ミラーへ保存する認証APIを追加し、正式Core0件の日でもWebのGitHub同期欄で全馬評価・3展開・参考Betを閲覧可能にする。本人仮想Betは自動発生しない。
+
+
 ## 2026-11-03 Issue #41 Reference Intake
 
 - ChatGPTのGitHub `daily/` の参考予想をWindows Workerで検出・永続receipt化し、既存Core登録済み全馬と読取専用で突合する処理を追加。照合一致で既存検証済snapshotのpackを自動出力。外部IDを参考JSONから推定して作成しない。未登録/取消/出典不足は確認待ちとしてWebへ表示。公式結果自動取得・精算とモデル改善は別段階。
