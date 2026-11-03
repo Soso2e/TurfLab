@@ -27,6 +27,59 @@ import { StagedRepository } from "./storage";
 import { prepareRace } from "./race-pipeline";
 import { validatePrediction } from "./imports";
 
+// Candidate lookup is deliberately read-only and never establishes identity by name.
+export async function reviewIdentityCandidates(
+  repo: Repository,
+  input: Row,
+): Promise<Row> {
+  const entries = rows(input.entries);
+  requireCondition(
+    entries.length > 0 && entries.length <= 18,
+    "出走馬は1〜18頭です",
+  );
+  const [horses, jockeys] = await Promise.all([
+    repo.list("horses"),
+    repo.list("jockeys"),
+  ]);
+  const name = (v: unknown) =>
+    typeof v === "string" ? v.normalize("NFKC").replace(/\s+/g, "").trim() : "";
+  const candidates = (items: Row[], field: string, value: unknown) => {
+    const key = name(value);
+    if (!key) return [];
+    return items
+      .filter((item) => name(item[field]) === key)
+      .slice(0, 20)
+      .map((item) => {
+        const evidence =
+          item.evidence_json &&
+          typeof item.evidence_json === "object" &&
+          !Array.isArray(item.evidence_json)
+            ? obj(item.evidence_json)
+            : {};
+        return {
+          name: item[field] ?? null,
+          external_id: evidence.external_id ?? null,
+          source: item.source ?? null,
+          source_url: item.source_url ?? null,
+          retrieved_at: item.retrieved_at ?? null,
+          birth_date: item.birth_date ?? null,
+          pedigree: item.pedigree_json ?? null,
+          affiliation: item.affiliation ?? null,
+        };
+      });
+  };
+  return {
+    status: "review_required",
+    entries: entries.map((e) => ({
+      horse_number: e.horse_number ?? null,
+      horse_name: e.horse_name ?? null,
+      jockey_name: e.jockey_name ?? null,
+      horse_candidates: candidates(horses, "horse_name", e.horse_name),
+      jockey_candidates: candidates(jockeys, "jockey_name", e.jockey_name),
+    })),
+  };
+}
+
 const ajv = new Ajv({ allErrors: true, strict: false });
 addFormats(ajv);
 const validateAnswer = ajv.compile(aiAnswerSchema);

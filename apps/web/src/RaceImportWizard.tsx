@@ -33,6 +33,7 @@ export function RaceImportWizard({
   const [draft, setDraft] = useState(json(raceDraftTemplate));
   const [operation, setOperation] = useState(crypto.randomUUID());
   const [basePreview, setBasePreview] = useState<Row>();
+  const [identityCandidates, setIdentityCandidates] = useState<Row>();
   const [baseConfirmed, setBaseConfirmed] = useState(false);
   const [snapshot, setSnapshot] = useState(initialSnapshot);
   const [pack, setPack] = useState<Row>();
@@ -44,6 +45,7 @@ export function RaceImportWizard({
   const changeDraft = (s: string) => {
     setDraft(s);
     setBasePreview(undefined);
+    setIdentityCandidates(undefined);
     setBaseConfirmed(false);
     setPack(undefined);
     setConverted(undefined);
@@ -167,6 +169,30 @@ export function RaceImportWizard({
           spellCheck={false}
         />
       </label>
+      <button
+        disabled={busy}
+        onClick={() =>
+          void action(async () => {
+            const d = obj(JSON.parse(draft));
+            setIdentityCandidates(
+              await api("/race-import/identity-candidates", {
+                entries: d.entries,
+              }),
+            );
+          })
+        }
+      >
+        既存DBの同名候補を見る
+      </button>
+      {identityCandidates && (
+        <div role="status">
+          <strong>要確認: 同名は同一人物・同一馬の証拠ではありません</strong>
+          <p>
+            公式個別ページ、馬の生年月日・血統、騎手の所属と出典を照合してください。候補は自動入力されません。
+          </p>
+          <pre className="json-view">{json(identityCandidates.entries)}</pre>
+        </div>
+      )}
       <button
         disabled={busy}
         onClick={() =>
