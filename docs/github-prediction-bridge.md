@@ -1,5 +1,7 @@
 # GitHub Prediction Bridge
 
+2026-11-04: 既定Workerは[参考JSONの名前登録](name-only-reference-intake.md)を使用する。公式ID照合付きWizardも維持。以下のstrict登録手順は任意経路として有効。
+
 Phase 1・2の実装。React / Workers API / owner Durable Object / 出馬表ウィザード / Coreを再利用する。本人Bet、採用固定、1R 1,000円・JST日5,000円の購入制約は既存処理を使う。予想の受信では本人Betを作らない。
 
 ## 接続先と初期設定

@@ -36,9 +36,9 @@ export async function dailyStateExport(repo: Repository, now: string): Promise<R
     const result = db.race_results.filter((r) => r.race_id === raceId).sort(byRevision)[0];
     const bets = db.virtual_bets.filter((b) => b.race_id === raceId);
     return {
-      race: pick(race, ["race_id", "race_date_jst", "race_number", "name", "jurisdiction", "scheduled_start_at", "status"]),
+      race: pick(race, ["race_id", "race_date_jst", "race_number", "name", "jurisdiction", "scheduled_start_at", "status", "source", "is_estimated", "evidence_json"]),
       entries: db.race_entries.filter((e) => e.race_id === raceId).map((e) => ({
-        ...pick(e, ["entry_id", "horse_number", "draw_number", "carried_weight_kg", "status"]),
+        ...pick(e, ["entry_id", "horse_id", "jockey_id", "horse_number", "draw_number", "carried_weight_kg", "status", "source", "evidence_json"]),
         horse_name: db.horses.find((h) => h.horse_id === e.horse_id)?.horse_name ?? null,
         jockey_name: db.jockeys.find((j) => j.jockey_id === e.jockey_id)?.jockey_name ?? null,
       })),

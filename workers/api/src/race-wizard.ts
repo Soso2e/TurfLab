@@ -696,7 +696,11 @@ export async function inputPack(
       jockey_name: jockey.jockey_name,
     });
   }
+  const soft =
+    snapshot.source === "chatgpt_reference" &&
+    obj(snapshot.evidence_json).identity_confidence === "name_only";
   const body: Row = {
+    ...(soft ? { provenance: snapshot.evidence_json } : {}),
     pack_version: "1",
     race,
     track,
@@ -718,9 +722,11 @@ export async function inputPack(
         valid_as_of: snapshot.valid_as_of!,
         available_at: snapshot.available_at!,
         retrieved_at: snapshot.retrieved_at!,
-        classification: "fact",
-        confirmed: true,
-        note: "本人が公式・利用許諾済み出馬表と照合。過去走の根拠ではありません",
+        classification: soft ? "estimate" : "fact",
+        confirmed: !soft,
+        note: soft
+          ? "ChatGPT参考値。名前一致のみ・公式未照合。同名馬の誤統合、全頭/取消の欠測リスクあり"
+          : "本人が公式・利用許諾済み出馬表と照合。過去走の根拠ではありません",
       },
     ],
     unknowns: obj(snapshot.evidence_json).unknowns!,

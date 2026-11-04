@@ -110,7 +110,12 @@ async function fixedData(repo: Repository, p: Row, now: string) {
       "carried_weight_kg",
     ])
       requireCondition(
-        saved[key] != null && canonical(saved[key]) === canonical(entry[key]),
+        (saved[key] != null ||
+          (snapshot.source === "chatgpt_reference" &&
+            obj(snapshot.evidence_json ?? {}).identity_confidence ===
+              "name_only" &&
+            ["draw_number", "carried_weight_kg"].includes(key))) &&
+          canonical(saved[key] ?? null) === canonical(entry[key] ?? null),
         `固定出走馬の${key}が不足または変更されています`,
       );
     asOf(entry, str(p, "information_cutoff_at"));

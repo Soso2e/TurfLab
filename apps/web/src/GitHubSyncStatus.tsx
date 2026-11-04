@@ -78,7 +78,7 @@ export function GitHubSyncStatus({
       )}
       {state?.last_reference && (
         <section aria-label="ChatGPT参考分析のDB照合">
-          <p>参考分析の照合: {String(obj(state.last_reference).reason)}</p>
+          <p>名前による自動登録（公式未照合）: {String(obj(state.last_reference).reason)}</p>
           {rows(obj(state.last_reference).races ?? []).map((r) => (
             <p key={String(r.race_key_human)}>
               {String(r.race_key_human)} · {String(r.status)} · 
@@ -127,7 +127,7 @@ export function GitHubSyncStatus({
               </details>
             </section>
           ))}
-          <p>検索由来の参考分析であり、登録/正式予想/本人仮想Bet/精算を意味しません。</p>
+          <p>名前一致でカタログへ自動登録します。同名馬・騎手の誤統合リスクがあり、公式IDとは別管理です。正式予想・本人仮想Bet・公式精算の状況は同期履歴で確認してください。</p>
         </details>
       )}
       {error && <p role="status">{error}</p>}
