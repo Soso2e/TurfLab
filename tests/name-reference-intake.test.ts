@@ -51,6 +51,22 @@ export function nameReference(): Row {
 }
 
 describe("name-only reference intake (isolated fixtures)", () => {
+  it("実朝JSONのrace_no/R表記を正規化し、名簿0頭でも参考履歴を保存する", async () => {
+    const repo = new MemoryRepository(),
+      source = nameReference();
+    const race = rows(obj(source.document).races)[0];
+    race.race_no = race.race_number!;
+    delete race.race_number;
+    race.race_key_human = `${race.race_key_human}R`;
+    race.horses = [];
+    const receipt = await importNameReference(repo, source, NOW);
+    expect(rows(receipt.races)[0].status).toBe("catalog_only");
+    expect(rows(receipt.races)[0].race_key_human).toBe(
+      "2026-11-04|架空競馬場|1",
+    );
+    expect(await repo.list("horses")).toHaveLength(0);
+    expect(await repo.list("import_operations")).toHaveLength(1);
+  });
   it("既存参考形式の完全6評価だけを正式answerへ投影し、null採点は補完しない", async () => {
     const repo = new MemoryRepository(),
       source = nameReference();

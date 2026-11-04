@@ -383,7 +383,7 @@ export class PredictionBridge {
           try {
             const output = await this.exportPack(str(race, "snapshot_id"));
             const source = rows(document.races).find(
-              (r) => r.race_key_human === race.race_key_human,
+              (r) => r.race_key_human === (race.source_race_key_human ?? race.race_key_human),
             );
             const answer =
               source &&

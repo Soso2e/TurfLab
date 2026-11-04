@@ -117,15 +117,20 @@ export async function importNameReference(
   const reports: Row[] = [],
     keys = new Set<string>();
   for (const reference of rows(document.races)) {
-    const trackName = normalizeName(reference.track),
-      number = reference.race_number;
+    const trackName = normalizeName(reference.track);
+    const reportedNumber = reference.race_number ?? reference.race_no;
+    const number =
+      typeof reportedNumber === "string" &&
+      /^(?:[1-9]|1[0-2])R?$/.test(reportedNumber)
+        ? Number(reportedNumber.replace(/R$/, ""))
+        : reportedNumber;
     const key = `${day}|${trackName}|${number}`;
     requireCondition(
       trackName &&
         Number.isInteger(number) &&
         Number(number) >= 1 &&
         Number(number) <= 12 &&
-        normalizeName(reference.race_key_human) === key &&
+        normalizeName(reference.race_key_human).replace(/R$/, "") === key &&
         !keys.has(key),
       "レースキーの不一致・重複です",
     );
@@ -134,7 +139,7 @@ export async function importNameReference(
       identityRisk,
       "出走取消・騎手変更・全頭完全性はChatGPT参照値。公式未照合",
     ];
-    const given = rows(reference.horses),
+    const given = rows(reference.horses ?? []),
       seen = new Set<number>();
     requireCondition(given.length <= 18, "出走馬は最大18頭です");
     const resolved: Row[] = [];
@@ -183,6 +188,7 @@ export async function importNameReference(
     }
     let result: Row = {
       race_key_human: key,
+      source_race_key_human: reference.race_key_human ?? key,
       status: "catalog_only",
       issues,
       observed_entries: given.length,
