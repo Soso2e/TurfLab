@@ -138,7 +138,20 @@ export async function validatePrediction(
       ["https:", "http:"].includes(u.protocol),
       "出典URLはHTTP(S)です",
     );
-    if (e.confirmed !== true || u.hostname.endsWith(".invalid"))
+    const permittedReference =
+      snapshot.source === "chatgpt_reference" &&
+      race.source === "chatgpt_reference" &&
+      obj(race.evidence_json ?? {}).official_identity_verified === false &&
+      obj(snapshot.evidence_json ?? {}).identity_confidence === "name_only" &&
+      obj(snapshot.evidence_json ?? {}).official_identity_verified === false &&
+      e.source === snapshot.source &&
+      e.source_url === snapshot.source_url &&
+      e.classification === "estimate" &&
+      e.confirmed === false;
+    if (
+      (!permittedReference && e.confirmed !== true) ||
+      u.hostname.endsWith(".invalid")
+    )
       warnings.push(`${e.evidence_id}: 出典の確認待ち`);
   }
   const sim = obj(p.simulation);

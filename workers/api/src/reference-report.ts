@@ -9,7 +9,7 @@ export function validateReferenceMirror(input: Row, now: string): Row {
   const date = str(document, "date_jst");
   const path = str(input, "path");
   requireCondition(/^\d{4}-\d{2}-\d{2}$/.test(date) &&
-    path === `daily/${date}/morning-reference-v1.json`,
+    new RegExp(`^daily/${date}/morning-reference-v[1-9]\\d*\\.json$`).test(path),
     "参考レポートの日付/パスが不一致です");
   const sha = str(input, "sha");
   requireCondition(/^[a-f0-9]{40}$/.test(sha), "GitHub Blob SHAが不正です");

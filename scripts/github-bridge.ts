@@ -3,8 +3,16 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { canonical, obj, rows, str, type Row } from "../packages/shared/src/domain";
+import {
+  canonical,
+  obj,
+  rows,
+  str,
+  type Row,
+} from "../packages/shared/src/domain";
 import { bridgeSchema, raceKey } from "../packages/shared/src/github-bridge";
+
+import { referenceAnswer } from "../packages/shared/src/reference-answer";
 
 const exec = promisify(execFile);
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -44,6 +52,7 @@ interface ReferenceReceipt {
   reason: string;
   races: Row[];
   conflict_sha?: string;
+  intake_mode?: "name_only";
 }
 interface ResultReceipt {
   sha: string;
@@ -161,12 +170,21 @@ export class PredictionBridge {
       last_daily_export: this.state.last_daily_export ?? null,
       last_reference: this.state.last_reference ?? null,
       last_result: this.state.last_result ?? null,
-      results_waiting: Object.values(this.state.official_results ?? {}).filter((r) => r.status === "waiting").length,
-      results_complete: Object.values(this.state.official_results ?? {}).filter((r) => r.status === "complete").length,
-      reference_records: Object.entries(this.state.reference_files ?? {}).map(([path, r]) => ({
-        path, status: r.conflict_sha ? "failed" : r.status,
-        reason: r.reason, checked_at: r.checked_at, races: r.races,
-      })).slice(-12),
+      results_waiting: Object.values(this.state.official_results ?? {}).filter(
+        (r) => r.status === "waiting",
+      ).length,
+      results_complete: Object.values(this.state.official_results ?? {}).filter(
+        (r) => r.status === "complete",
+      ).length,
+      reference_records: Object.entries(this.state.reference_files ?? {})
+        .map(([path, r]) => ({
+          path,
+          status: r.conflict_sha ? "failed" : r.status,
+          reason: r.reason,
+          checked_at: r.checked_at,
+          races: r.races,
+        }))
+        .slice(-12),
       repository: this.config.repository,
       last_sync: this.state.last_sync,
       last_error: this.state.last_error,
@@ -194,133 +212,241 @@ export class PredictionBridge {
     this.state.daily_exports ??= {};
     this.state.daily_export_hashes ??= {};
     this.state.daily_export_versions ??= {};
-    if (this.state.daily_export_next_attempt &&
-      Date.parse(this.state.daily_export_next_attempt) > current.getTime()) return;
+    if (
+      this.state.daily_export_next_attempt &&
+      Date.parse(this.state.daily_export_next_attempt) > current.getTime()
+    )
+      return;
     try {
       const files = await this.io.list(); // Caller re-verifies private repo on every list.
       const prefix = `state/${day}/daily-v`;
-      const remote = files.flatMap((f) => {
-        if (!f.path.startsWith(prefix)) return [];
-        const match = /^state\/\d{4}-\d{2}-\d{2}\/daily-v([1-9]\d*)\.json$/.exec(f.path);
-        return match ? [{ file: f, version: Number(match[1]) }] : [];
-      }).sort((a, b) => b.version - a.version)[0];
+      const remote = files
+        .flatMap((f) => {
+          if (!f.path.startsWith(prefix)) return [];
+          const match =
+            /^state\/\d{4}-\d{2}-\d{2}\/daily-v([1-9]\d*)\.json$/.exec(f.path);
+          return match ? [{ file: f, version: Number(match[1]) }] : [];
+        })
+        .sort((a, b) => b.version - a.version)[0];
       const localVersion = this.state.daily_export_versions[day] ?? 0;
-      if (remote && (remote.version > localVersion || !this.state.daily_export_hashes[day])) {
+      if (
+        remote &&
+        (remote.version > localVersion || !this.state.daily_export_hashes[day])
+      ) {
         const content = await this.io.read(remote.file);
         if (Buffer.byteLength(content) > 262144)
           throw new BridgeError("既存GitHub日次状態が256KiB超過です");
         const saved = obj(JSON.parse(content));
-        if (saved.report_type !== "turfLab_daily_state" || saved.report_date_jst !== day)
+        if (
+          saved.report_type !== "turfLab_daily_state" ||
+          saved.report_date_jst !== day
+        )
           throw new BridgeError("既存日次状態の形式/日付が不正です");
         this.state.daily_exports[day] = remote.file.path;
-        this.state.daily_export_hashes[day] = digest(canonical({
-          ...saved, generated_at: null,
-        }));
+        this.state.daily_export_hashes[day] = digest(
+          canonical({
+            ...saved,
+            generated_at: null,
+          }),
+        );
         this.state.daily_export_versions[day] = remote.version;
         await this.save();
       }
       if (remote && remote.version < localVersion)
-        throw new BridgeError("ローカル日次版よりGitHubが古いです。状態を確認してください");
+        throw new BridgeError(
+          "ローカル日次版よりGitHubが古いです。状態を確認してください",
+        );
       const snapshot = await this.io.api("/daily-state");
-      if (snapshot.report_type !== "turfLab_daily_state" || snapshot.report_date_jst !== day)
+      if (
+        snapshot.report_type !== "turfLab_daily_state" ||
+        snapshot.report_date_jst !== day
+      )
         throw new BridgeError("日次状態の日付/形式が一致しません");
       const hashValue = digest(canonical({ ...snapshot, generated_at: null }));
       if (hashValue === this.state.daily_export_hashes[day]) {
-        this.state.daily_export_next_attempt = new Date(current.getTime() + 15 * 60000).toISOString();
+        this.state.daily_export_next_attempt = new Date(
+          current.getTime() + 15 * 60000,
+        ).toISOString();
         await this.save();
         return;
       }
       const version = (this.state.daily_export_versions[day] ?? 0) + 1;
       if (version > 24)
-        throw new BridgeError("日次状態の版数が24を超えました。保存先とデータ変化を確認してください");
+        throw new BridgeError(
+          "日次状態の版数が24を超えました。保存先とデータ変化を確認してください",
+        );
       const content = JSON.stringify(snapshot, null, 2);
       if (Buffer.byteLength(content) > 262144)
-        throw new BridgeError("日次状態が256KiBを超えています。安全のため出力しません");
+        throw new BridgeError(
+          "日次状態が256KiBを超えています。安全のため出力しません",
+        );
       const filename = `state/${day}/daily-v${version}.json`;
       await this.io.put(filename, content);
       this.state.daily_exports[day] = filename;
       this.state.daily_export_hashes[day] = hashValue;
       this.state.daily_export_versions[day] = version;
-      this.state.daily_export_next_attempt = new Date(current.getTime() + 15 * 60000).toISOString();
+      this.state.daily_export_next_attempt = new Date(
+        current.getTime() + 15 * 60000,
+      ).toISOString();
       this.state.last_daily_export = {
         path: filename,
         at: current.toISOString(),
         version,
         status: "success",
-        reason: "変更されたCore日次状態をGitHubに追加保存しました（旧版は保持）",
+        reason:
+          "変更されたCore日次状態をGitHubに追加保存しました（旧版は保持）",
       };
     } catch (e) {
-      this.state.daily_export_next_attempt = new Date(current.getTime() + 30 * 60000).toISOString();
+      this.state.daily_export_next_attempt = new Date(
+        current.getTime() + 30 * 60000,
+      ).toISOString();
       this.state.last_daily_export = {
-        at: current.toISOString(), status: "failed",
-        reason: e instanceof BridgeError ? e.message : "日次状態出力に失敗しました",
+        at: current.toISOString(),
+        status: "failed",
+        reason:
+          e instanceof BridgeError ? e.message : "日次状態出力に失敗しました",
       };
       await this.save();
       throw e;
     }
     await this.save();
   }
-  // Receives ChatGPT's immutable reference JSON and compares it with Core's
-  // existing, verified identity records. It never registers unknown identities.
+  // Register name-only catalogs; strict/official reconciliation stays available separately.
   async syncReferences(force = false) {
     const now = this.io.now();
-    if (!force && this.state.last_reference_sync &&
-      now.getTime() - Date.parse(this.state.last_reference_sync) < (this.config.interval_seconds ?? 300) * 1000)
+    if (
+      !force &&
+      this.state.last_reference_sync &&
+      now.getTime() - Date.parse(this.state.last_reference_sync) <
+        (this.config.interval_seconds ?? 300) * 1000
+    )
       return;
     const files = await this.io.list();
-    const today = jst(now);
-    const pattern = /^daily\/\d{4}-\d{2}-\d{2}\/morning-reference-v1\.json$/;
+    const pattern =
+      /^daily\/\d{4}-\d{2}-\d{2}\/morning-reference-v[1-9]\d*\.json$/;
     this.state.reference_files ??= {};
-    for (const file of files.filter((f) => pattern.test(f.path) &&
-      f.path.split("/")[1] === today)) {
+    for (const file of files
+      .filter((f) => pattern.test(f.path))
+      .sort((a, b) => a.path.localeCompare(b.path, "en", { numeric: true }))) {
       const prior = this.state.reference_files[file.path];
       if (prior && prior.sha !== file.sha) {
         prior.conflict_sha = file.sha;
-        prior.reason = "参考分析の同名ファイルが変更されました。別名の版管理が必要です";
+        prior.reason =
+          "参考分析の同名ファイルが変更されました。別名の版管理が必要です";
         await this.save();
         continue;
       }
-      if (prior?.status === "complete" || prior?.status === "failed") continue;
+      if (
+        prior?.intake_mode === "name_only" &&
+        (prior.status === "complete" || prior.status === "failed")
+      )
+        continue;
       const report: ReferenceReceipt = prior ?? {
-        sha: file.sha, checked_at: now.toISOString(), status: "waiting",
-        reason: "DB照合待ち", races: [],
+        sha: file.sha,
+        checked_at: now.toISOString(),
+        status: "waiting",
+        reason: "DB照合待ち",
+        races: [],
       };
       try {
         const content = await this.io.read(file);
         if (Buffer.byteLength(content) > 262144)
           throw new BridgeError("参考JSONは256KiB以内です");
         const document = obj(JSON.parse(content));
-        const response = await this.io.api("/github-bridge/reference-preview", {
-          path: file.path, document,
-        });
+        const response = await this.io.api(
+          "/github-bridge/reference-register",
+          {
+            path: file.path,
+            sha: file.sha,
+            repository: this.config.repository,
+            document,
+          },
+        );
+        report.intake_mode = "name_only";
+        await this.io.put(
+          `catalog/${file.path.split("/")[1]}/name-only-${file.sha}.json`,
+          JSON.stringify(response, null, 2),
+        );
         // UI can display all reference races even when Core has zero matches.
         // This mirror never creates Core predictions or owner bets.
-        await this.io.api("/github-bridge/reference-report", {
-          path: file.path, sha: file.sha, document,
-        });
+        if (file.path.split("/")[1] === jst(now))
+          await this.io.api("/github-bridge/reference-report", {
+            path: file.path,
+            sha: file.sha,
+            document,
+          });
         report.races = rows(response.races);
-        // These packs are generated only from existing already-verified Core
-        // snapshots; a reference report can never register an unknown horse.
-        for (const race of report.races.filter((r) => r.status === "pack_ready")) {
+        // Freeze/export first. Only a complete supplied answer can enter the existing Core.
+        for (const race of report.races.filter(
+          (r) => r.status === "pack_ready",
+        )) {
           try {
-            await this.exportPack(str(race, "snapshot_id"));
+            const output = await this.exportPack(str(race, "snapshot_id"));
+            const source = rows(document.races).find(
+              (r) => r.race_key_human === race.race_key_human,
+            );
+            const answer =
+              source &&
+              referenceAnswer(
+                source,
+                obj(output.pack),
+                str(document, "generated_at"),
+              );
+            race.answer_status = answer ? "validating" : "reference_only";
+            if (answer) {
+              try {
+                const formal = {
+                  ...obj(output.prediction_template),
+                  answer: {
+                    ...answer,
+                    pack_hash: answer.pack_hash ?? obj(output.pack).pack_hash,
+                  },
+                };
+                // Incomplete answers and stale hashes never become formal predictions.
+                await this.io.api("/github-bridge/convert", {
+                  path: output.prediction_path,
+                  document: formal,
+                });
+                await this.io.put(
+                  str(output, "prediction_path"),
+                  JSON.stringify(formal, null, 2),
+                );
+                race.answer_status = "submitted";
+              } catch (e) {
+                race.answer_status = "waiting";
+                race.issues = [
+                  ...(Array.isArray(race.issues) ? race.issues : []),
+                  e instanceof Error ? e.message : "完全な正式answer待ち",
+                ];
+              }
+            }
           } catch {
             race.status = "needs_snapshot";
             race.issues = ["固定packのGitHub出力に失敗。次回再試行します"];
           }
         }
-        report.status = report.races.every((r) => r.status === "pack_ready" || r.status === "past_start")
-          ? "complete" : "waiting";
-        report.reason = `参考${report.races.length}R照合、pack出力可能${report.races.filter((r) => r.status === "pack_ready").length}R、未登録・確認待ち${report.races.filter((r) => r.status !== "pack_ready" && r.status !== "past_start").length}R`;
+        report.status = report.races.every(
+          (r) =>
+            (r.status === "pack_ready" && r.answer_status !== "waiting") ||
+            r.status === "past_start" ||
+            r.status === "catalog_only",
+        )
+          ? "complete"
+          : "waiting";
+        report.reason = `名前登録${report.races.length}R（公式未照合）、pack出力可能${report.races.filter((r) => r.status === "pack_ready").length}R、未登録・確認待ち${report.races.filter((r) => r.status !== "pack_ready" && r.status !== "past_start").length}R`;
       } catch (e) {
-        report.reason = e instanceof Error ? e.message.slice(0, 300) : "参考JSONの解析に失敗";
+        report.reason =
+          e instanceof Error ? e.message.slice(0, 300) : "参考JSONの解析に失敗";
         report.status = e instanceof SyntaxError ? "failed" : "waiting";
       }
       report.checked_at = now.toISOString();
       this.state.reference_files[file.path] = report;
       this.state.last_reference = {
-        path: file.path, status: report.status, reason: report.reason,
-        checked_at: report.checked_at, races: report.races,
+        path: file.path,
+        status: report.status,
+        reason: report.reason,
+        checked_at: report.checked_at,
+        races: report.races,
       };
       await this.save();
     }
@@ -331,13 +457,19 @@ export class PredictionBridge {
   // Morning or a real bet; Core settles only already-confirmed virtual bets.
   async syncOfficialResults(force = false) {
     const now = this.io.now();
-    if (!force && this.state.last_result_sync &&
-      now.getTime() - Date.parse(this.state.last_result_sync) < (this.config.interval_seconds ?? 300) * 1000)
+    if (
+      !force &&
+      this.state.last_result_sync &&
+      now.getTime() - Date.parse(this.state.last_result_sync) <
+        (this.config.interval_seconds ?? 300) * 1000
+    )
       return;
     this.state.official_results ??= {};
     const files = await this.io.list();
-    const pattern = /^results\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_-]+-official-v[1-9]\d*\.json$/;
-    const candidates = files.filter((f) => pattern.test(f.path))
+    const pattern =
+      /^results\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_-]+-official-v[1-9]\d*\.json$/;
+    const candidates = files
+      .filter((f) => pattern.test(f.path))
       .sort((a, b) => a.path.localeCompare(b.path));
     let processed = 0;
     for (const file of candidates) {
@@ -349,19 +481,27 @@ export class PredictionBridge {
         await this.save();
         continue;
       }
-      if (record?.status === "complete" || record?.status === "failed") continue;
+      if (record?.status === "complete" || record?.status === "failed")
+        continue;
       if (++processed > 40) break;
-      record ??= { sha: file.sha, status: "waiting", checked_at: now.toISOString(),
-        reason: "Core検証待ち" };
+      record ??= {
+        sha: file.sha,
+        status: "waiting",
+        checked_at: now.toISOString(),
+        reason: "Core検証待ち",
+      };
       try {
         const content = await this.io.read(file);
         if (Buffer.byteLength(content) > 262144)
           throw new BridgeError("公式結果JSONは256KiB以内です");
         const document = obj(JSON.parse(content));
         const result = await this.io.api("/github-bridge/official-result", {
-          path: file.path, document,
+          path: file.path,
+          document,
         });
-        const detail = await this.io.api(`/races/${encodeURIComponent(str(result, "race_id"))}`);
+        const detail = await this.io.api(
+          `/races/${encodeURIComponent(str(result, "race_id"))}`,
+        );
         if (!rows(detail.results).some((r) => r.result_id === result.result_id))
           throw new BridgeError("公式結果のCore読返し不一致", true);
         record.status = "complete";
@@ -369,15 +509,20 @@ export class PredictionBridge {
         record.result_id = str(result, "result_id");
       } catch (e) {
         const msg = e instanceof Error ? e.message : "公式結果検証に失敗";
-        record.status = /参照がありません|未登録|一時|接続できません|not found/i.test(msg)
-          ? "waiting" : "failed";
+        record.status =
+          /参照がありません|未登録|一時|接続できません|not found/i.test(msg)
+            ? "waiting"
+            : "failed";
         record.reason = msg.slice(0, 300);
       }
       record.checked_at = now.toISOString();
       this.state.official_results[file.path] = record;
       this.state.last_result = {
-        path: file.path, status: record.status, reason: record.reason,
-        checked_at: record.checked_at, result_id: record.result_id ?? null,
+        path: file.path,
+        status: record.status,
+        reason: record.reason,
+        checked_at: record.checked_at,
+        result_id: record.result_id ?? null,
       };
       await this.save();
     }
@@ -418,6 +563,7 @@ export class PredictionBridge {
       at: this.io.now().toISOString(),
     };
     await this.save();
+    return output;
   }
   async exportFailure(snapshot: string, reason: string) {
     this.state.last_export = {

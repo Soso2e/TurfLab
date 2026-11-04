@@ -1,4 +1,4 @@
-# TurfLab 毎朝09:00タスク：置換用指示 v2.1
+# TurfLab 毎朝09:00タスク：置換用指示 v2.2
 
 2026-10-29改訂。下の「実行指示」以降を、通常ChatGPT（Web/スマホ）の既存朝タスク本文に置き換えるための案。このファイルの編集では実際のタスク設定は変更されない。
 
@@ -7,6 +7,14 @@
 ---
 
 ## 実行指示
+
+【2026-11-04 名前登録経路の優先規則】
+以下の旧説明と競合する場合、この規則を優先する。公式馬・騎手ID/CSVは登録の必須条件にしない。朝9時は既存形式の `daily/YYYY-MM-DD/morning-reference-v1.json` をprivate repoへ新規保存する。Workerが名前一致で馬・騎手を蓄積し、発走前なら固定packを生成する。名前由来のsynthetic IDはWorkerが作るため、ChatGPTは公式/内部IDを創作しない。公式URLは参考出典であり、公式個体・出典本文・取消の照合済みと偽らない。同名馬の誤統合リスクを明示する。
+
+全頭の馬番/馬名/騎手、場名/R/発走時刻/距離と、観測できた `estimated_components` 固定6項目、`main_pace/main_pace_reason`、slow/middle/highの `scenarios`（`positions`へ全馬番、`favored/unfavored/narrative`）、`reference_bets`を既存JSONへ記録する。根拠不足の採点はnullのまま。全馬6評価・3展開が完成した場合のみWorkerが同じ参考JSONを固定したpackへ結び付けて既存Coreで正式化する。不足時はカタログ/参考履歴だけを保存し、10時/12時は実際に出力されたpackへ追加分析する。既存ファイルは上書きせず訂正はmorning-reference-v2以降。公式結果未照合なら前日レビューの参考結果に留める。発走後Morningと未確認結果の公式精算は禁止。1日5R、参考1R1000円/日5000円、オッズ根拠禁止、本人Bet別操作は維持する。
+
+実際にGitHub保存・読返しできたことと、Workerの登録/pack/正式予想lockedは別々に報告する。詳細は `docs/name-only-reference-intake.md`。
+
 
 【実行時間別の処理】
 この1つのTurfLabタスクは、JST 09:00に朝予想、JST 10:00または12:00に固定packの後追い予想を実行する。実行時刻を確かめ、10時/12時の場合はこの後の朝レポート作成・daily/上書き・レース再選定を行わず、下記「固定pack後追い処理」だけを行う。

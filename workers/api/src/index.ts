@@ -53,6 +53,7 @@ import {
 import { adoptModel, analytics, backtest, saveReview } from "./analytics";
 import { bridgeConvert } from "./github-bridge";
 import { dailyStateExport } from "./daily-export";
+import { importNameReference } from "./name-reference-intake";
 import { reconcileReference } from "./reference-intake";
 import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
@@ -197,6 +198,10 @@ export async function route(
   if (path === "/github-bridge/official-result") {
     requireCondition(!sheets, "公式結果Bridgeはlocal保存専用です");
     return importOfficialResult(repo, input, now);
+  }
+  if (path === "/github-bridge/reference-register") {
+    requireCondition(!sheets, "名前登録はlocal保存専用です");
+    return importNameReference(repo, input, now);
   }
   if (path === "/github-bridge/reference-preview") {
     requireCondition(!sheets, "参考分析の照合はlocal保存専用です");
@@ -437,7 +442,10 @@ export class TurfCoordinator {
             }
             requireCondition(
               !existing ||
-                String(incoming.date_jst) > String(existing.date_jst),
+                String(incoming.date_jst) > String(existing.date_jst) ||
+                (incoming.date_jst === existing.date_jst &&
+                  Number(String(incoming.path).match(/-v(\d+)\.json$/)?.[1]) >
+                    Number(String(existing.path).match(/-v(\d+)\.json$/)?.[1])),
               "過去の参考レポートで最新を置き換えられません",
               409,
             );
