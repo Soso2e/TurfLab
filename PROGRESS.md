@@ -4,8 +4,8 @@
 
 - 最新Issue #41コメントの明示方針に従い、公式IDを必須にしないname-only登録を実装。strict Wizardは維持。名前由来ID・同名混同リスク・公式未確認来歴を保存し、source SHA単位でカタログ/参考全文をprivate GitHubへ追記する。
 - 発走前は既存pack/Bridge/Coreを再利用。完全な全馬6評価・3展開/answerだけ正式化し、欠測は補完しない。過去分はカタログだけ。結果精算・本人Betは別経路。
-- ローカル全169テスト・型・lint・build成功。11/3実参考JSONを隔離MemoryRepositoryへ取り込み、4R/47馬/34騎手/47出走馬、snapshot/予想/結果/精算/本人Bet各0、再送hash一致を確認。同じ実JSONを隔離Durable Objectへ実POSTし、再送・プロセス再起動後のCoreバックアップhash一致も確認。本番の発走前正式予想受入ではない。
-- 作業中: 追加境界テスト、PR/CI/main、Windows既存stateバックアップ・反映・実読返し。実タスク本文/定時実行、発走前実1R、公式結果、OS再起動/iPhoneは未確認。元worktreeの未コミット変更を保持。
+- ローカル全169テスト・型・lint・build成功。11/3実参考JSONを隔離MemoryRepositoryへ取り込み、4R/47馬/34騎手/47出走馬、snapshot/予想/結果/精算/本人Bet各0、再送hash一致を確認。同じ実JSONを隔離Durable Objectへ実POSTし、再送・プロセス再起動後のCoreバックアップhash一致も確認。隔離DOでは架空の発走前JSON→Worker（GitHub輸送のみメモリ代替）→pack→Core locked→再起動hash一致も成功。本番の発走前正式予想受入ではない。
+- 作業中: PR #52のLinux/Windows CIは実装commitで成功。記録更新後の最終HEAD CI、main、Windows既存stateバックアップ・反映・実読返し。実タスク本文/定時実行、発走前実1R、公式結果、OS再起動/iPhoneは未確認。元worktreeの未コミット変更を保持。
 
 
 ## 2026-11-03 Core state versioned exports
@@ -144,4 +144,4 @@
 
 | 2026-11-04-02 | NAR形式CSVをWizard draftへ変換し未確認ID/状態を空欄で保持。架空CSVからCore lockedまで隔離検証。PID再利用時の旧Worker記録退避を実装・隔離確認 | 実装済み・未確認 | `packages/shared/src/race-wizard.ts`, `apps/web/src/RaceImportWizard.tsx`, `scripts/windows/Start-GitHubSync.ps1`, `tests/race-wizard.test.ts`, `PROGRESS.md` | 実CSV・個体照合・発走前実1Rと実運用適用 |
 
-| 2026-11-04-02 | Issue #41の名前登録方針を実装。source SHA別カタログ・soft pack・完全回答の既存Core連携、strict/履歴保全、発走後拒否。169テストと11/3実参考JSONの隔離カタログ確認 | 実装済み・未確認 | name-reference-intake、reference-answer、Bridge/Core/Web/日次出力/テスト/文書 | PR/CI/main・Windows反映、発走前実1R/実定時受入 |
+| 2026-11-04-05 | Issue #41の名前登録方針を実装。source SHA別カタログ・soft pack・完全回答の既存Core連携、strict/履歴保全、発走後拒否。169テストと11/3実参考JSONの隔離カタログ確認 | 実装済み・未確認 | name-reference-intake、reference-answer、Bridge/Core/Web/日次出力/テスト/文書 | PR/CI/main・Windows反映、発走前実1R/実定時受入 |
