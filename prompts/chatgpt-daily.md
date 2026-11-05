@@ -11,7 +11,11 @@
 【2026-11-04 名前登録経路の優先規則】
 以下の旧説明と競合する場合、この規則を優先する。公式馬・騎手ID/CSVは登録の必須条件にしない。朝9時は既存形式の `daily/YYYY-MM-DD/morning-reference-v1.json` をprivate repoへ新規保存する。Workerが名前一致で馬・騎手を蓄積し、発走前なら固定packを生成する。名前由来のsynthetic IDはWorkerが作るため、ChatGPTは公式/内部IDを創作しない。公式URLは参考出典であり、公式個体・出典本文・取消の照合済みと偽らない。同名馬の誤統合リスクを明示する。
 
-全頭の馬番/馬名/騎手、場名/R/発走時刻/距離と、観測できた `estimated_components` 固定6項目、`main_pace/main_pace_reason`、slow/middle/highの `scenarios`（`positions`へ全馬番、`favored/unfavored/narrative`）、`reference_bets`を既存JSONへ記録する。根拠不足の採点はnullのまま。全馬6評価・3展開が完成した場合のみWorkerが同じ参考JSONを固定したpackへ結び付けて既存Coreで正式化する。不足時はカタログ/参考履歴だけを保存し、10時/12時は実際に出力されたpackへ追加分析する。既存ファイルは上書きせず訂正はmorning-reference-v2以降。公式結果未照合なら前日レビューの参考結果に留める。発走後Morningと未確認結果の公式精算は禁止。1日5R、参考1R1000円/日5000円、オッズ根拠禁止、本人Bet別操作は維持する。
+全頭の馬番/馬名/騎手、場名/R/発走時刻/距離と、観測できた `estimated_components` 固定6項目、`main_pace/main_pace_reason`、slow/middle/highの `scenarios`（`positions`へ全馬番、`favored/unfavored/narrative`）、`reference_bets`を既存JSONへ記録する。根拠不足の採点はnullのまま。全馬6評価・3展開が完成した場合のみWorkerが同じ参考JSONを固定したpackへ結び付けて既存Coreで正式化する。距離などpack用の必須情報が不足する場合はカタログ/参考履歴のみ。6評価・3展開の欠測だけではpack生成を止めず、正式予想を保留する。10時/12時は実際に出力されたpackへ追加分析する。既存ファイルは上書きせず訂正はmorning-reference-v2以降。公式結果未照合なら前日レビューの参考結果に留める。発走後Morningと未確認結果の公式精算は禁止。1日5R、参考1R1000円/日5000円、オッズ根拠禁止、本人Bet別操作は維持する。
+
+【2026-11-05 参考JSONのデータ契約】
+トップレベルは `schema_version: "1"`、`report_type: "chatgpt_daily_reference"`、`date_jst`、時差付き実生成日時 `generated_at`、`core_importable: false`、最大5件の `races`。レースは `track`、整数 `race_no`（または`race_number`）、`race_key_human: YYYY-MM-DD|場名|12R`、`scheduled_start_at_jst`、観測した整数メートルの `distance_m`、`surface`、`horses`を使う。距離が未観測なら`distance_m: null`と理由・出典・確認時刻を記し、距離を馬名/レース名や過去開催から推測しない。馬は `horse_number / horse_name / jockey / draw_number / weight_kg`、評価は `estimated_components`の `ability / course / pace / going / draw_weight / horse_jockey_course`を使う。`evaluations: null`は欠測記録として保存されるが、6評価として変換されない。各評価の欠測もnull、全体未観測なら`estimated_components: null`とする。
+距離欠測やAPI障害でpackがない場合は、不足理由と `catalog/`・Workerの実受信結果を分けて報告する。確認できた新しいメタデータの訂正は発走前に新しい参考JSON版へ保存し、実際の新生成日時を付ける。過去の生成時刻を使い回さず、変更済みの騎手・出走情報を隠さない。実タスク本文を更新していない場合は更新済みと報告しない。
 
 実際にGitHub保存・読返しできたことと、Workerの登録/pack/正式予想lockedは別々に報告する。詳細は `docs/name-only-reference-intake.md`。
 
