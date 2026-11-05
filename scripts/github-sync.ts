@@ -7,6 +7,7 @@ import {
   type BridgeConfig,
 } from "./github-bridge";
 import { obj, rows, str, type Row } from "../packages/shared/src/domain";
+import { checkpointCore, writeWorkerHealth } from "./worker-health";
 
 const arg = (name: string) => process.argv[process.argv.indexOf(name) + 1];
 if (!process.argv.includes("--data-home"))
@@ -24,7 +25,9 @@ if (
 )
   throw new Error("interval_secondsは60〜3600です");
 const vars = await readFile(path.join(home, ".dev.vars"), "utf8");
-const token = vars.match(/^API_TOKEN="([0-9]{8}|[A-Za-z0-9_-]{24,})"\r?$/m)?.[1];
+const token = vars.match(
+  /^API_TOKEN="([0-9]{8}|[A-Za-z0-9_-]{24,})"\r?$/m,
+)?.[1];
 if (!token) throw new Error("DataHomeのAPI認証設定を確認してください");
 const origin = process.env.TURFLAB_BRIDGE_API_ORIGIN ?? "http://127.0.0.1:8787";
 if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(origin))
@@ -96,6 +99,7 @@ try {
     },
   });
   await bridge.init();
+  let nextCheckpoint = 0;
   do {
     const ack: string[] = [];
     let commandError: string | null = null;
@@ -141,8 +145,23 @@ try {
         },
         ack,
       });
+      if (Date.now() >= nextCheckpoint) {
+        await checkpointCore(bridgeHome, api);
+        nextCheckpoint = Date.now() + (config.interval_seconds ?? 300) * 1000;
+      }
+      await writeWorkerHealth(bridgeHome, {
+        checked_at: new Date().toISOString(),
+        status: "healthy",
+        last_error: null,
+      });
     } catch {
-      /* API down: local receipts survive, next heartbeat retries. No secrets logged. */
+      // Even JSON decoding failures/DO internal errors cannot leave a stale green status.
+      await writeWorkerHealth(bridgeHome, {
+        checked_at: new Date().toISOString(),
+        status: "failed",
+        last_error:
+          "WorkerのAPI通信・状態報告・検証済みバックアップに失敗。API/SQLiteとログを確認してください",
+      });
     }
     if (process.argv.includes("--once")) break;
     await new Promise((resolve) => setTimeout(resolve, 5000));

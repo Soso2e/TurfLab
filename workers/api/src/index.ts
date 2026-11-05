@@ -103,7 +103,10 @@ export async function readBody(request: Request): Promise<Row> {
     "Content-Typeはapplication/jsonです",
     415,
   );
-  const limit = 262144;
+  // Catalog receipts include complete source documents; even one normal
+  // production backup exceeds the ordinary mutation limit.
+  const restoring = new URL(request.url).pathname === "/api/restore";
+  const limit = restoring ? 16 * 1024 * 1024 : 262144;
   const reader = request.body?.getReader();
   requireCondition(reader, "本文が必要です", 400);
   let length = 0;
@@ -114,7 +117,10 @@ export async function readBody(request: Request): Promise<Row> {
     length += value.length;
     if (length > limit) {
       await reader.cancel();
-      throw new DomainError("入力は256KiB以内です", 413);
+      throw new DomainError(
+        restoring ? "復元入力は16MiB以内です" : "入力は256KiB以内です",
+        413,
+      );
     }
     parts.push(value);
   }

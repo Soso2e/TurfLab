@@ -1,5 +1,14 @@
 # PROGRESS.md
 
+## 2026-11-05 PR #52 本番継続検証・DB復旧
+
+- 障害を再現: 本番Workerの最終同期は06:15 JST。以後APIログはDOの`internal error`/500を反復し、Worker最外周catchがエラーを記録せず、直前の`last_error:null`が残っていた。再起動でも500。本番DO SQLiteは12,288 bytesでヘッダー宣言286ページと一致せず、read-only `integrity_check`が`database disk image is malformed`。ファイル破損の物理的な発生原因は未特定。
+- 停止中state22ファイルのコピー・SHA-256全一致を確認し、破損原本も別名退避。11/4夜の正常な空DBバックアップと論理backupを検証。private GitHubのcatalog4件・参照元Blob SHA・JSON一致を照合し、receiptの全行から業務backupを再構成。11/4の日次出力4R/47出走馬とも一致。11/5の一時復旧で同名カタログの来歴時刻だけが違う8行は古い行を保持し、receipt双方は原文保持。エクスポートされていない変更まで回収できた証拠はない。
+- 復元APIの256KiB上限が約401KBの正規backupを413拒否する問題も修正。復元だけ16MiBへ拡張し、hash/行/参照検証・空DB限定は維持。再構成backupを既存APIで空DBへ復元し、読返しhash `67dcc7a106d646f3fb488360f111049662eafcedc35f86a78d6282d76d8661e2` 一致。80馬/48騎手/4R/47出走馬/4receipt、snapshot・予想・結果・本人Bet・精算0。
+- 11/5のdailyは2R/21頭。実Workerが同日catalogを追記し、両Rとも`catalog_only`/距離未観測を確認。距離や6評価を捏造せず、pack0・正式予想0を維持。発走前でも距離欠測では固定pack生成不可。6評価欠測のみならpack生成可能・正式化保留という契約を朝タスク置換用本文へ明記。実ChatGPTタスク本文の更新は未実施。
+- WorkerのAPI障害をDO外`health.json`へ記録し、Statusで120秒超をstale表示。検証済み論理checkpointを既定5分ごとにDO外へ保持する処理を追加。型・lint・174テスト・build成功（欠測、256KiB超の復元、16MiB制限、非空拒否、checkpoint破損拒否/health復旧を含む）。本番への暫定反映・復元済み、PR/CI/main反映とmainからの最終再起動は作業中。
+- 次: CI・PR・mainへ反映し本番読返し/再起動後hashを確認。距離を観測できる場合は新しい参考JSON版を発走前に作り、実pack・完全回答・lockedは別途受入。iPhone/OS再起動/公式結果の独立取得は未確認。
+
 ## 2026-11-04 名前登録経路
 
 - 最新Issue #41コメントの明示方針に従い、公式IDを必須にしないname-only登録を実装。strict Wizardは維持。名前由来ID・同名混同リスク・公式未確認来歴を保存し、source SHA単位でカタログ/参考全文をprivate GitHubへ追記する。
@@ -123,6 +132,7 @@
 
 | ID | 内容 | 結果 | 変更ファイル | 次 |
 |---|---|---|---|---|
+| 2026-11-05-01 | 本番DO破損/500とWorker無記録、復元413を再現。破損原本保全、Blob検証済みcatalogから復旧しbackup hash一致。Worker health/checkpointと復元上限、朝JSON契約を修正。174テスト成功 | 動作確認済み | Worker/Status/API、worker-health、回帰テスト、朝タスク置換案/名前登録手順/PROGRESS | PR/CI/main反映、main再起動、距離未観測によりpack0・実タスク更新未実施 |
 | 2026-10-18-01 | 指定先へmainをクローンし、依存導入と初期検証を実施。型・lint成功。テスト未実行エラーとビルド失敗、パス内の#に関する警告を記録 | 調査完了 | `PROGRESS.md`（新規） | パス影響の切り分けと開発対象の確定 |
 | 2026-10-20-01 | Windows単一オリジン・固定DO永続化・運用スクリプト・390px評価/3展開/Bet・重複拒否/見送り履歴・手順書を実装。104テスト、隔離ブラウザ/再起動/論理復元、実tailnet HTTPSをWindowsで確認。実データとiPhoneは未確認 | 動作確認済み | `scripts/windows/*`, `scripts/run-tool.mjs`, Web/API/テスト/CI、`docs/windows-tailscale-quickstart.md`他 | PR/CI、Issue #34のiPhone、Issue #30の実1R受入 |
 | 2026-10-20-02 | 実装をコミット/PushしてPR #35を作成。実装コミットのUbuntu/Windows Node 22 CI成功、実Serveの停止/再開とHTTPS二重認証を確認。通常DataHomeは試験データなしで起動・共有中 | 動作確認済み | `PROGRESS.md`, Windows手順書 | iPhone実機、実データ1R、Sheets別受入。mainは未マージ |
@@ -145,3 +155,5 @@
 | 2026-11-04-02 | NAR形式CSVをWizard draftへ変換し未確認ID/状態を空欄で保持。架空CSVからCore lockedまで隔離検証。PID再利用時の旧Worker記録退避を実装・隔離確認 | 実装済み・未確認 | `packages/shared/src/race-wizard.ts`, `apps/web/src/RaceImportWizard.tsx`, `scripts/windows/Start-GitHubSync.ps1`, `tests/race-wizard.test.ts`, `PROGRESS.md` | 実CSV・個体照合・発走前実1Rと実運用適用 |
 
 | 2026-11-04-05 | Issue #41の名前登録方針を実装。source SHA別カタログ・soft pack・完全回答の既存Core連携、strict/履歴保全、発走後拒否。170テストと11/3実参考JSONの隔離カタログ確認 | 実装済み・未確認 | name-reference-intake、reference-answer、Bridge/Core/Web/日次出力/テスト/文書 | PR/CI/main・Windows反映、発走前実1R/実定時受入 |
+
+|
