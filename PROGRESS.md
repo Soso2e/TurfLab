@@ -6,8 +6,9 @@
 - 停止中state22ファイルのコピー・SHA-256全一致を確認し、破損原本も別名退避。11/4夜の正常な空DBバックアップと論理backupを検証。private GitHubのcatalog4件・参照元Blob SHA・JSON一致を照合し、receiptの全行から業務backupを再構成。11/4の日次出力4R/47出走馬とも一致。11/5の一時復旧で同名カタログの来歴時刻だけが違う8行は古い行を保持し、receipt双方は原文保持。エクスポートされていない変更まで回収できた証拠はない。
 - 復元APIの256KiB上限が約401KBの正規backupを413拒否する問題も修正。復元だけ16MiBへ拡張し、hash/行/参照検証・空DB限定は維持。再構成backupを既存APIで空DBへ復元し、読返しhash `67dcc7a106d646f3fb488360f111049662eafcedc35f86a78d6282d76d8661e2` 一致。80馬/48騎手/4R/47出走馬/4receipt、snapshot・予想・結果・本人Bet・精算0。
 - 11/5のdailyは2R/21頭。実Workerが同日catalogを追記し、両Rとも`catalog_only`/距離未観測を確認。距離や6評価を捏造せず、pack0・正式予想0を維持。発走前でも距離欠測では固定pack生成不可。6評価欠測のみならpack生成可能・正式化保留という契約を朝タスク置換用本文へ明記。実ChatGPTタスク本文の更新は未実施。
-- WorkerのAPI障害をDO外`health.json`へ記録し、Statusで120秒超をstale表示。検証済み論理checkpointを既定5分ごとにDO外へ保持する処理を追加。型・lint・174テスト・build成功（欠測、256KiB超の復元、16MiB制限、非空拒否、checkpoint破損拒否/health復旧を含む）。本番への暫定反映・復元済み、PR/CI/main反映とmainからの最終再起動は作業中。
-- 次: CI・PR・mainへ反映し本番読返し/再起動後hashを確認。距離を観測できる場合は新しい参考JSON版を発走前に作り、実pack・完全回答・lockedは別途受入。iPhone/OS再起動/公式結果の独立取得は未確認。
+- WorkerのAPI障害をDO外`health.json`へ記録し、Statusで120秒超をstale表示。検証済み論理checkpointを既定5分ごとにDO外へ保持する処理を追加。型・lint・174テスト・build成功（欠測、256KiB超の復元、16MiB制限、非空拒否、checkpoint破損拒否/health復旧を含む）。実Workerの隔離`--once`でもAPI到達不可のfailed記録を確認。
+- PR #53の最終HEAD `26b1a35` はPush/PR双方のLinux・Windows CI全成功後、main `0a569e5`へマージ。ログオン参照worktreeへ反映し、停止中24ファイルのSHA-256一致を確認後に再起動。再起動後の業務backup hashは上記復旧hashと一致、SQLite8件はすべてintegrity_check=ok。実Worker source・healthy記録・DO外checkpoint、8443 HTTPS/未認証401/認証APIを確認し既存443を保持。既存ローカル進捗・元worktreeの未コミット4ファイルも保持。
+- 次: 距離を観測できる場合は新しい参考JSON版を発走前に作り、実pack・完全回答・lockedは別途受入。元JSONの公式URL2件は今回のWeb取得では404で、距離は確認できなかった。距離欠測により本番pack0を維持。実ChatGPTタスク本文更新、iPhone/OS再起動/公式結果の独立取得、DB破損の物理的発生原因は未確認。
 
 ## 2026-11-04 名前登録経路
 
@@ -156,4 +157,4 @@
 
 | 2026-11-04-05 | Issue #41の名前登録方針を実装。source SHA別カタログ・soft pack・完全回答の既存Core連携、strict/履歴保全、発走後拒否。170テストと11/3実参考JSONの隔離カタログ確認 | 実装済み・未確認 | name-reference-intake、reference-answer、Bridge/Core/Web/日次出力/テスト/文書 | PR/CI/main・Windows反映、発走前実1R/実定時受入 |
 
-|
+| 2026-11-05-01 | 本番DO破損/500とWorker無記録、復元413を再現。原本保全しBlob検証済みcatalogから復旧、再起動後もbackup hash一致。health/checkpoint・復元上限・朝JSON契約を修正。174テストとPush/PR双方のLinux/Windows CI成功、PR #53をmainへ反映 | 動作確認済み | Worker/Status/API、worker-health、回帰テスト、朝タスク置換案/名前登録手順/PROGRESS | 本番2R/21頭catalog保存済み、距離未観測でpack0。実タスク本文更新と発走前実pack→locked、物理破損原因は未確認 |
