@@ -6,7 +6,7 @@
 - 実Codex CLI（ChatGPTログイン、gpt-6.1-sol）で東京9R・9頭の参考分析、53項目の確認状況、3展開を生成。名前登録・固定pack作成まで本番ローカルCoreで読返し。6評価の根拠不足でCLIがblockedを返し、正式Morningは未確定。初回記録の生成元が既存ChatGPT/GitHub表記になったため、CLIの来歴を表す実装を追加し、元の時刻・内容を保った訂正参考版を追記した。旧履歴には初回表記が残る。
 - localhost停止を確認して永続state24ファイルをバックアップし全SHA一致を確認後、新worktreeから起動。Tailscaleの既存8443番はlocalhost:8787を参照。スマホ実機は未確認。
 - 実装済み・未確認。5分周期、JST09〜21時の3時間枠で最大5Rまで候補追加、発走後の公式結果照合、レビュー蓄積と翌日入力、既存順位評価。CLIは1日12回/各15分、同時実行1件を初期値にした。中断結果が不明なら再発行を保留。モデル採用は既存の未使用30R・本人承認に従う。
-- ローカル186テスト・型・lint・build成功。追加テストは固定pack→Core locked、再起動後の二重呼出し防止、ファイル競合・二重Worker拒否。実レースのlocked、公式結果・精算、長期改善、実OS再起動は未確認。次は継続Worker起動とスマホ表示、実資料が揃うレースでの通し受入。
+- ローカル189テスト・型・lint・build成功。追加テストは固定pack→Core locked、再起動後の二重呼出し防止、ファイル競合・二重Worker拒否、レース取得500後の継続と401/403時の停止。実レースのlocked、公式結果・精算、長期改善、実OS再起動は未確認。次は実資料が揃うレースでの通し受入とスマホ実機確認。
 - 継続Workerを起動し、初回周期のhealthy・公式結果取得保留1件を確認。既存ログオンタスクのXMLを保全して新worktreeのStart-AtLogonへ更新し、enabled設定でCLIも起動する構成にした。Tailscale8443のHTTPS/未認証401/認証APIに成功。Edgeの390px画面でログイン・ローカルWorker稼働表示・JSエラー0・横はみ出し0を確認。実iPhoneとOS再起動は未確認。16時台の追加調査は十分な全頭根拠を確保できず0R、東京9Rの公式結果取得も保留。参考1Rから正式予想・精算までの実受入は継続課題。
 
 ## 2026-11-08 Issue #57 C2 第1段階
@@ -176,3 +176,4 @@
 
 | 2026-11-08-01 | Issue #57 のC2責務、状態遷移、読取専用診断、AI Provider境界を実装。隔離Bridge統合とWindows CLIを確認 | 実装済み・未確認 | ADR 0002、c2-job、c2-status、c2-ai-provider、テスト・運用手順 | Cloud binding・認証、実CLI、定時GitHub保存、実1R・精算・停止復旧の受入 |
 | 2026-11-08-02 | Issue #59 の53項目、実Codex CLI接続、ローカル周期処理と状態表示を実装。実参考1R・名前登録/packまで確認、正式化は根拠不足で保留。186テスト成功 | 実装済み・未確認 | local-predictions、local-codex、Web/API、Windows起動、予想手順、PROGRESS | 実locked・公式結果/精算・長期改善・スマホ/OS再起動 |
+| 2026-11-08-03 | 個別ジョブの失敗理由を保存して処理を継続、401/403は停止するよう修正。189テスト・型/lint/build成功。実Workerを再起動し16:57 JSTのhealthy、Tailscale HTTPS/認証API成功を確認 | 動作確認済み | scripts/local-prediction-worker.ts、tests/local-predictions.test.ts、PROGRESS.md | 実正式予想0・公式結果取得保留1。実レース通し受入・iPhone・OS再起動・長期改善は未確認。今回の追加修正はローカルのみ |
