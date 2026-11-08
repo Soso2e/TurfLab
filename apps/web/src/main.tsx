@@ -10,6 +10,7 @@ import {
 import "./style.css";
 import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
+import { LocalPredictionStatus } from "./LocalPredictionStatus";
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -354,7 +355,10 @@ function App() {
             {tab === "today" && (
               <>
                 {storage === "local" && (
+                  <>
                   <GitHubSyncStatus api={api} refresh={reload} />
+                  <LocalPredictionStatus api={api} />
+                  </>
                 )}
                 <div className="page-heading">
                   <div>

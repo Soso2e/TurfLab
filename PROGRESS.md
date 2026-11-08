@@ -1,10 +1,18 @@
 # PROGRESS.md
 
+## 2026-11-08 Issue #59 ローカルCLI運用
+
+- ユーザーの方針変更でCloudflare導入を保留。localhost + Tailscaleで、Codex CLIの公開Web調査、53項目の根拠棚卸し、既存6評価/3展開・Core検証へ接続するWorkerを実装。ChatGPT/GitHub経路と既存Coreを共用する。
+- 実Codex CLI（ChatGPTログイン、gpt-6.1-sol）で東京9R・9頭の参考分析、53項目の確認状況、3展開を生成。名前登録・固定pack作成まで本番ローカルCoreで読返し。6評価の根拠不足でCLIがblockedを返し、正式Morningは未確定。初回記録の生成元が既存ChatGPT/GitHub表記になったため、CLIの来歴を表す実装を追加し、元の時刻・内容を保った訂正参考版を追記した。旧履歴には初回表記が残る。
+- localhost停止を確認して永続state24ファイルをバックアップし全SHA一致を確認後、新worktreeから起動。Tailscaleの既存8443番はlocalhost:8787を参照。スマホ実機は未確認。
+- 実装済み・未確認。5分周期、JST09〜21時の3時間枠で最大5Rまで候補追加、発走後の公式結果照合、レビュー蓄積と翌日入力、既存順位評価。CLIは1日12回/各15分、同時実行1件を初期値にした。中断結果が不明なら再発行を保留。モデル採用は既存の未使用30R・本人承認に従う。
+- ローカル186テスト・型・lint・build成功。追加テストは固定pack→Core locked、再起動後の二重呼出し防止、ファイル競合・二重Worker拒否。実レースのlocked、公式結果・精算、長期改善、実OS再起動は未確認。次は継続Worker起動とスマホ表示、実資料が揃うレースでの通し受入。
+
 ## 2026-11-08 Issue #57 C2 第1段階
 
 - 実装済み・未確認。JST日・固定pack・SHA・lease/fence・期限・再試行の純粋状態モデル、既存Worker証跡の読取専用CLI、AI Providerの契約・Windows PATH検知・モックを追加。Cloud Job用メタデータとWindows Coreの業務正本を分ける設計をADR 0002に記録した。
 - Windowsで `npm run check`（型・lint・183テスト・build）成功。隔離検証で、5R中の一部失敗、重複・順不同、403、発走後の拒否、PC停止後の同一SHA再開を確認。空のDataHomeに診断ファイルを作成せず、Codex/AntigravityのPATH検知とClaude未検知を確認。実CLIの起動・認証・課金は未検証。
-- 次は隔離Cloud Worker/D1で永続化とoutbound認証を検証し、CLI非対話、実ChatGPT定時受渡し、実1R、結果照合/精算、PC停止復旧の順に受け入れる。
+- 後続は上記のローカルCLI方針へ更新。Cloud Worker/D1の接続は保留し、実レース・結果・レビューの連続運用を優先する。
 
 ## 2026-11-05 PR #52 本番継続検証・DB復旧
 
@@ -166,3 +174,4 @@
 | 2026-11-05-01 | 本番DO破損/500とWorker無記録、復元413を再現。原本保全しBlob検証済みcatalogから復旧、再起動後もbackup hash一致。health/checkpoint・復元上限・朝JSON契約を修正。174テストとPush/PR双方のLinux/Windows CI成功、PR #53をmainへ反映 | 動作確認済み | Worker/Status/API、worker-health、回帰テスト、朝タスク置換案/名前登録手順/PROGRESS | 本番2R/21頭catalog保存済み、距離未観測でpack0。実タスク本文更新と発走前実pack→locked、物理破損原因は未確認 |
 
 | 2026-11-08-01 | Issue #57 のC2責務、状態遷移、読取専用診断、AI Provider境界を実装。隔離Bridge統合とWindows CLIを確認 | 実装済み・未確認 | ADR 0002、c2-job、c2-status、c2-ai-provider、テスト・運用手順 | Cloud binding・認証、実CLI、定時GitHub保存、実1R・精算・停止復旧の受入 |
+| 2026-11-08-02 | Issue #59 の53項目、実Codex CLI接続、ローカル周期処理と状態表示を実装。実参考1R・名前登録/packまで確認、正式化は根拠不足で保留。186テスト成功 | 実装済み・未確認 | local-predictions、local-codex、Web/API、Windows起動、予想手順、PROGRESS | 実locked・公式結果/精算・長期改善・スマホ/OS再起動 |

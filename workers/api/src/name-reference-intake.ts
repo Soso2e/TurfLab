@@ -72,6 +72,7 @@ export async function importNameReference(
       );
   }
   const staged = new StagedRepository(repo);
+  const localCli = input.repository === "local/codex";
   const provenance: Row = {
     identity_confidence: "name_only",
     official_identity_verified: false,
@@ -79,6 +80,7 @@ export async function importNameReference(
     external_id: null,
     identity_risk: identityRisk,
     source_sha: sourceSha,
+    source_provider: localCli ? "codex_cli" : "chatgpt_github",
     source_path: input.path!,
     source_created_at: generated,
     official_source_verified: false,
@@ -88,8 +90,8 @@ export async function importNameReference(
   const base: Row = {
     schema_version: "0.2",
     created_at: generated,
-    source: "chatgpt_reference",
-    source_url: `https://api.github.com/repos/${str(input, "repository")}/git/blobs/${sourceSha}`,
+    source: localCli ? "codex_cli_reference" : "chatgpt_reference",
+    source_url: localCli ? `urn:turflab:local:blob:${sourceSha}` : `https://api.github.com/repos/${str(input, "repository")}/git/blobs/${sourceSha}`,
     retrieved_at: generated,
     available_at: generated,
     valid_as_of: generated,

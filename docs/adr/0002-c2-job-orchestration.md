@@ -2,6 +2,8 @@
 
 2026-11-08。採用方針は C2。第1段階は状態遷移、読取診断、AI Provider の契約を実装する。Cloudflare の永続化・連携は後続。
 
+同日のユーザー方針更新により、当面はlocalhostとTailscaleで運用する。CLIによる調査・予想・結果確認・レビューをローカルWorkerへ接続する。以下のCloudflare設計は将来案として保留し、直近の手順は [ローカルCLI運用](../local-cli-operation.md) を優先する。
+
 ## 背景と監査
 
 - 親 [#41](https://github.com/Soso2e/TurfLab/issues/41) の許諾済み根拠、無人 GitHub 書込、実1R・結果精算は受入待ち。[#36](https://github.com/Soso2e/TurfLab/issues/36) と [#39](https://github.com/Soso2e/TurfLab/issues/39) の本番受入、[#55](https://github.com/Soso2e/TurfLab/issues/55) の検証仮説も独立に扱う。基準は `origin/main` の `520abbd`。

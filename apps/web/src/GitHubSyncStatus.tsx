@@ -100,11 +100,11 @@ export function GitHubSyncStatus({
       )}
       {reference && (
         <details>
-          <summary>ChatGPT朝9時の参考予想を見る（Core未取込も表示）</summary>
+          <summary>{obj(reference.document).producer === "codex_cli" ? "Codex CLI" : "ChatGPT"} の参考予想を見る（Core未取込も表示）</summary>
           <p>保存日: {String(reference.date_jst)} · Core正式予想とは別管理</p>
           {rows(obj(reference.document).races ?? []).map((r) => (
             <section key={String(r.race_key_human)} className="reference-daily-race">
-              <h3>{String(r.track)} {String(r.race_number)}R · {String(r.race_name)}</h3>
+              <h3>{String(r.track)} {String(r.race_number ?? r.race_no)}R · {String(r.race_name)}</h3>
               <p>発走予定: {time(r.scheduled_start_at_jst)} · 状態: {String(r.status ?? "参考分析")}</p>
               <p>出走馬 {rows(r.horses ?? []).length}頭 · 参考額 {String(r.total_reference_yen ?? 0)}円</p>
               <p>参考評価上位: {JSON.stringify(r.selections_summary ?? {})}</p>

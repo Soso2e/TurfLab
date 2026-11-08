@@ -401,6 +401,16 @@ export class TurfCoordinator {
         return response({ error: "本人用認証が必要です" }, 401);
       try {
         const bridgePath = new URL(request.url).pathname;
+        if (bridgePath === "/api/local-predictions/status") {
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          if (request.method === "GET")
+            return response(await this.state.storage.get<Row>("local-predictions-status") ?? { status: "disabled" });
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const input = await readBody(request);
+          requireCondition(["healthy", "failed"].includes(String(input.status)), "状態が不正です");
+          await this.state.storage.put("local-predictions-status", input);
+          return response({ status: "saved" });
+        }
         if (
           [
             "/api/github-bridge/status",
