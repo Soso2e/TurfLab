@@ -1,5 +1,11 @@
 # PROGRESS.md
 
+## 2026-11-08 Issue #57 C2 第1段階
+
+- 実装済み・未確認。JST日・固定pack・SHA・lease/fence・期限・再試行の純粋状態モデル、既存Worker証跡の読取専用CLI、AI Providerの契約・Windows PATH検知・モックを追加。Cloud Job用メタデータとWindows Coreの業務正本を分ける設計をADR 0002に記録した。
+- Windowsで `npm run check`（型・lint・183テスト・build）成功。隔離検証で、5R中の一部失敗、重複・順不同、403、発走後の拒否、PC停止後の同一SHA再開を確認。空のDataHomeに診断ファイルを作成せず、Codex/AntigravityのPATH検知とClaude未検知を確認。実CLIの起動・認証・課金は未検証。
+- 次は隔離Cloud Worker/D1で永続化とoutbound認証を検証し、CLI非対話、実ChatGPT定時受渡し、実1R、結果照合/精算、PC停止復旧の順に受け入れる。
+
 ## 2026-11-05 PR #52 本番継続検証・DB復旧
 
 - 障害を再現: 本番Workerの最終同期は06:15 JST。以後APIログはDOの`internal error`/500を反復し、Worker最外周catchがエラーを記録せず、直前の`last_error:null`が残っていた。再起動でも500。本番DO SQLiteは12,288 bytesでヘッダー宣言286ページと一致せず、read-only `integrity_check`が`database disk image is malformed`。ファイル破損の物理的な発生原因は未特定。
@@ -158,3 +164,5 @@
 | 2026-11-04-05 | Issue #41の名前登録方針を実装。source SHA別カタログ・soft pack・完全回答の既存Core連携、strict/履歴保全、発走後拒否。170テストと11/3実参考JSONの隔離カタログ確認 | 実装済み・未確認 | name-reference-intake、reference-answer、Bridge/Core/Web/日次出力/テスト/文書 | PR/CI/main・Windows反映、発走前実1R/実定時受入 |
 
 | 2026-11-05-01 | 本番DO破損/500とWorker無記録、復元413を再現。原本保全しBlob検証済みcatalogから復旧、再起動後もbackup hash一致。health/checkpoint・復元上限・朝JSON契約を修正。174テストとPush/PR双方のLinux/Windows CI成功、PR #53をmainへ反映 | 動作確認済み | Worker/Status/API、worker-health、回帰テスト、朝タスク置換案/名前登録手順/PROGRESS | 本番2R/21頭catalog保存済み、距離未観測でpack0。実タスク本文更新と発走前実pack→locked、物理破損原因は未確認 |
+
+| 2026-11-08-01 | Issue #57 のC2責務、状態遷移、読取専用診断、AI Provider境界を実装。隔離Bridge統合とWindows CLIを確認 | 実装済み・未確認 | ADR 0002、c2-job、c2-status、c2-ai-provider、テスト・運用手順 | Cloud binding・認証、実CLI、定時GitHub保存、実1R・精算・停止復旧の受入 |

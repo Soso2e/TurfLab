@@ -20,6 +20,8 @@ Issue #30の手動Core実行を追加。6項目の固定スコア、全馬の3�
 
 ## 構成と運用
 
+Issue #57 の第1段階では、`npm run c2:status` で Windows Worker の日次証跡を読み取れます。Core 確定・結果取込は Worker が読み返した範囲で表示します。[診断の実行方法](docs/daily-operation-flow.md#c2-日次診断) · [C2の責務と段階導入](docs/adr/0002-c2-job-orchestration.md)
+
 **既存ChatGPT毎朝9時タスク → Google Sheets ↔ Web**。ChatGPTは前日の結果解析と原則5レースの予想を行う。有料AI APIは使わず、既存スケジュールも変更しない。Webは検証・表示・本人操作・集計を担当する。
 
 - JRA・地方競馬を対象に、条件が不足する日は5レース未満や見送り可。

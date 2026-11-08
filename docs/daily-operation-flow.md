@@ -146,3 +146,20 @@ GET `/api/analytics/ranks` / `/api/stats.rank_metrics` と日次stateに、採�
 独自baselineを外部の印から独立して作る→独立した複数の外部予想の**理由**と出典を収集→異論があった馬の追い切り/転入・実績/位置取りを一次資料で再検査→新事実だけで再評価→baselineと最終判断の差分を残す。多数決/印への加点は禁止。比較できない時は足りない資料を表示し、欠測を埋めない。オッズ・人気は印や買い目を決める根拠に使用しない。
 
 11月5日の笠松12R・園田12Rは **手動チャット予想とユーザー報告着順** のレビューだけをprivate `TurfLab-data/reviews/2026-11-05/` へ新規記録した。Core正式予想/公式結果/本人購入/精算は作らない。現在のGitHub Bridgeは `reviews/` をCoreへ自動取込せず、調査メモに留まる。2026-11-05に既存のTurfLab定時タスク（09/10/12 JST）の**プロンプトへ外部根拠監査ルールのみ追加し、更新成功を確認**した。スケジュールと本人Betの設定は変更なし。次回実行での外部資料取得、レビュー自動GitHub保存、Core反映の本番動作は未検証。モデル重みやコードは未変更。
+
+## C2 日次診断
+
+Windows で `npm run c2:status` を実行する。既定の対象は今日の JST と `%LOCALAPPDATA%\TurfLab`。別の日付や隔離 DataHome も指定できる。
+
+```powershell
+npm run c2:status -- --date 2026-11-08 --data-home 'C:\TurfLab-test'
+npm run c2:status -- --snapshot 'C:\TurfLab-test\daily-v1.json' --providers
+```
+
+- 出力は `github-bridge/state.json` と `health.json` を投影した JSON。参考レース・固定入力・受信済み Morning・Core locked・結果取込を別集計し、各レースの最終段階、観測時刻と Blob SHA、失敗区分を表示する。名前だけの参考レースは、Core ID が分かるまで別枠で表示する。
+- `null` は未観測、`0` は手元の証跡に該当件数なし。Worker がまだ受信していない GitHub ファイル、Core へ直接登録した内容、GitHub `reviews/` のメモは集計の範囲外。Worker がファイルを読めなかった場合は、対応するレースが一覧に出ないことがある。最新 DB の件数が必要なら、既存の本人認証付き Web を確認する。
+- heartbeat が120秒を超えると `STALE`。当日の Morning が受信済み・未確定で、Worker が stale または failed なら `WAITING_LOCAL` を表示する。状態ファイルで停止理由まで区別できない場合は Worker ログを確認する。
+- `--snapshot` には手元にある信頼済みの Core 日次 state を指定する。レビューは対象日と生成時刻 `as_of` を付けた別集計。スナップショット内の locked や結果件数で Worker の receipt を補完しない。
+- `--providers` は Windows PATH のコマンドファイルを探す。存在が確認できても、非対話実行、認証、利用条件、料金は未検証のまま表示する。診断の起動に既存 API キーや GitHub 接続は不要。
+
+状態遷移とクラウド側の導入条件は [ADR 0002](adr/0002-c2-job-orchestration.md) を参照。

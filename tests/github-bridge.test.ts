@@ -19,6 +19,7 @@ import { MemoryRepository, backup } from "../packages/shared/src/repository";
 import { obj, str, rows, type Row } from "../packages/shared/src/domain";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { wizardDraft, wizardRequest, wizardAnswer } from "./wizard-fixture";
+import { diagnoseC2 } from "../scripts/c2-diagnostics";
 
 const NOW = "2026-10-27T01:00:00.000Z";
 async function setup(count = 1) {
@@ -102,6 +103,25 @@ async function setup(count = 1) {
   };
 }
 describe("GitHub Prediction Bridge (isolated only)", () => {
+  it("projects persisted Bridge evidence without writing Core or claiming a failed race", async () => {
+    const s = await setup(5);
+    for (const [i, { name }] of s.documents.entries())
+      s.files.get(name)!.sha = i.toString().repeat(40);
+    const read = s.io.read;
+    s.io.read = async (file) => {
+      if (file.path === s.documents[0].name) throw new BridgeError("通信断", true);
+      return read(file);
+    };
+    await s.bridge.sync(true);
+    const stateFile = path.join(s.home, "state.json");
+    const before = await readFile(stateFile, "utf8");
+    const beforeCore = await backup(s.repo);
+    const report = diagnoseC2("2026-10-27", NOW, JSON.parse(before), null, null);
+    expect(report.counts).toMatchObject({ ai_saved_races: 4, core_locked_races: 4 });
+    expect(report.races.every((race) => race.status === "CORE_LOCKED")).toBe(true);
+    expect(await readFile(stateFile, "utf8")).toBe(before);
+    expect((await backup(s.repo)).hash).toBe(beforeCore.hash);
+  });
   it("一部blob通信失敗でも他Rは保存し、6R目を確認待ちにする", async () => {
     const s = await setup(7);
     const read = s.io.read;

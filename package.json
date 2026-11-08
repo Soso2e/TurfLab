@@ -18,6 +18,7 @@
     "test:runtime": "node scripts/run-tool.mjs tsx scripts/runtime-smoke.ts",
     "test:wizard": "node scripts/run-tool.mjs tsx scripts/wizard-smoke.ts",
     "test:bridge": "node scripts/run-tool.mjs tsx scripts/bridge-smoke.ts",
+    "c2:status": "node scripts/run-tool.mjs tsx scripts/c2-status.ts",
     "generate:d1": "tsx scripts/generate-d1.ts"
   },
   "dependencies": {
