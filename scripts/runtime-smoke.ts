@@ -458,6 +458,8 @@ await page.setViewportSize({ width: 390, height: 844 });
 await page.getByRole("button", { name: /本日のレース/ }).click();
 await page.getByRole("heading", { name: "本日のレース" }).waitFor();
 await page.locator('input[type="date"]').fill(coreDate);
+// The per-race pipeline history is collapsed by default on the home screen.
+await page.locator("summary", { hasText: "レースごとの処理履歴" }).click();
 await page.getByText("参考プランの採用・予約額", { exact: false }).waitFor();
 await page.screenshot({
   path: `${outputDir}/turflab-mobile.png`,
