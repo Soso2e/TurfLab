@@ -17,6 +17,7 @@ import { PredictionBridge, type BridgeIO } from "../scripts/github-bridge";
 import { wizardAnswer, wizardDraft } from "./wizard-fixture";
 import { referenceAnswer } from "../packages/shared/src/reference-answer";
 import { saveResearchBaseline } from "../workers/api/src/local-research-baseline";
+import { enrichedReference } from "../scripts/local-history-research";
 
 const NOW = "2026-11-04T01:00:00.000Z";
 export function nameReference(): Row {
@@ -52,6 +53,42 @@ export function nameReference(): Row {
 }
 
 describe("name-only reference intake (isolated fixtures)", () => {
+  it("adds sourced past-run evidence to a new snapshot and keeps the original input intact", async () => {
+    const repo = new MemoryRepository();
+    const source: Row = { ...nameReference(), repository: "local/codex" };
+    const document = obj(source.document);
+    document.workflow_version = "research-v1";
+    document.model = "fixture";
+    const race = rows(document.races)[0];
+    race.jurisdiction = "NAR";
+    race.research = {
+      source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_babaCode=32&k_raceDate=2026%2F11%2F04&k_raceNo=1",
+      headcount: 3,
+    };
+    for (const horse of rows(race.horses)) horse.recent_runs = [];
+    const first = await importNameReference(repo, source, NOW);
+    const pack = await inputPack(repo, str(rows(first.races)[0], "snapshot_id"), NOW);
+    const capture = "2026-11-04T01:05:00.000Z";
+    const run = {
+      date_jst: "2026-11-02", track: "佐賀", distance_m: 1400, field_size: 9,
+      finish: 2, corners: [3, 2], finish_time_s: 91.5, last_3f_s: 38.9,
+      source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/RaceMarkTable?k_babaCode=32&k_raceDate=2026%2F11%2F02&k_raceNo=2",
+    };
+    const enriched = enrichedReference(pack, { horses: [
+      { horse_number: 1, horse_name: "架空馬1", recent_runs: [run, { ...run, date_jst: "2026-11-04" }] },
+      { horse_number: 2, horse_name: "別の馬", recent_runs: [run] },
+    ] }, "2026-11-04", capture);
+    const next = await importNameReference(repo, {
+      ...source, path: "daily/2026-11-04/morning-reference-v2.json", sha: "b".repeat(40),
+      document: { ...document, races: [enriched], generated_at: capture },
+    }, capture);
+    const fresh = await inputPack(repo, str(rows(next.races)[0], "snapshot_id"), capture);
+    expect(fresh.input_hash).not.toEqual(pack.input_hash);
+    expect(rows(obj(pack.research).horses).map((h) => h.recent_runs)).toEqual([[], [], []]);
+    expect(rows(obj(fresh.research).horses).map((h) => h.recent_runs)).toEqual([
+      [expect.objectContaining({ ...run, source_checked_at: capture })], [], [],
+    ]);
+  });
   it("freezes CLI observations before analysis, keeps provenance estimated and replays the baseline", async () => {
     const repo = new MemoryRepository();
     const source: Row = { ...nameReference(), repository: "local/codex" };

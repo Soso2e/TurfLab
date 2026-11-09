@@ -23,6 +23,7 @@ import {
 import { StagedRepository } from "./storage";
 import { inputPack } from "./race-wizard";
 import { validateReferenceMirror } from "./reference-report";
+import { officialResearchUrl, validatePastRunSource } from "../../../packages/shared/src/race-research";
 
 export const normalizeName = (v: unknown) =>
   typeof v === "string" ? v.normalize("NFKC").replace(/\s+/gu, " ").trim() : "";
@@ -40,7 +41,7 @@ const utc = (v: unknown) => {
   return new Date(v).toISOString();
 };
 
-function validateResearch(reference: Row, horses: Row[], day: string, number: number): Row {
+function validateResearch(reference: Row, horses: Row[], day: string, number: number, captured: string): Row {
   const research = obj(reference.research);
   const source = new URL(str(research, "source_url"));
   const hosts = reference.jurisdiction === "JRA"
@@ -64,7 +65,7 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
   for (const horse of horses) {
     const recent = rows(horse.recent_runs);
     requireCondition(recent.length <= 5, "近走は各馬5件以内です");
-    for (const run of recent)
+    for (const run of recent) {
       requireCondition(typeof run.date_jst === "string" &&
         /^\d{4}-\d{2}-\d{2}$/.test(run.date_jst) && run.date_jst < day &&
         typeof run.distance_m === "number" && run.distance_m > 0 &&
@@ -72,6 +73,17 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
         Array.isArray(run.corners) && run.corners.length <= 4 &&
         run.corners.every((position) => Number.isInteger(position) && Number(position) > 0),
       "近走の開催日・距離・着順・通過順が不正です");
+      if (run.source_url != null) validatePastRunSource(run, day, captured);
+    }
+  }
+  if (research.history_version != null) {
+    requireCondition(research.history_version === "official-history-v1" &&
+      research.history_checked_at === captured, "追加調査の版または時刻が不正です");
+    for (const note of [...rows(research.track_notes ?? []),
+      ...horses.flatMap((h) => rows(h.jockey_notes ?? []))])
+      requireCondition(officialResearchUrl(note.source_url) &&
+        typeof note.note === "string" && note.note.length <= 400 &&
+        note.source_checked_at === captured, "追加調査の出典または時刻が不正です");
   }
   return {
     ...research,
@@ -79,6 +91,7 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
       horse_number: horse.horse_number!,
       recent_runs: horse.recent_runs!,
       jockey_observation: horse.jockey_observation ?? null,
+      ...(horse.jockey_notes ? { jockey_notes: horse.jockey_notes } : {}),
     })),
   };
 }
@@ -243,7 +256,7 @@ export async function importNameReference(
     try {
       const start = utc(reference.scheduled_start_at_jst);
       const research = localCli && document.workflow_version === "research-v1"
-        ? validateResearch(reference, given, day, Number(number))
+        ? validateResearch(reference, given, day, Number(number), generated)
         : null;
       requireCondition(
         jstDate(start) === day && instant(generated) < instant(start),

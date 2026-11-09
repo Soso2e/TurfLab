@@ -202,6 +202,10 @@ function App() {
     .sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))
     .find((s) => obj(s.evidence_json ?? {}).research);
   const research = researchSnapshot && obj(obj(researchSnapshot.evidence_json).research);
+  const officialRunCount = rows(research?.horses ?? []).reduce(
+    (count, horse) => count + rows(horse.recent_runs).filter((run) => run.source_url).length,
+    0,
+  );
   const researchProfiles = detail ? rows(detail.research_baselines ?? []).filter((f) =>
     obj(f.features_json).snapshot_id === researchSnapshot?.snapshot_id) : [];
   const canEditBet =
@@ -590,6 +594,7 @@ function App() {
                   {research && <p>調査保存 {time(researchSnapshot?.captured_at)} · 馬場 {String(research.going ?? "未確認")} ·{" "}
                     <a href={String(research.source_url)} target="_blank" rel="noreferrer">出馬表の出典</a>
                   </p>}
+                  {research?.history_version && <p>公式成績の出典付き近走 {officialRunCount}件</p>}
                 </section>
                 <section className="panel">
                   <h2>コースと固定入力</h2>
@@ -650,10 +655,21 @@ function App() {
                             <td>
                               {!observed && <Evidence row={e} />}
                               {observed && <details>
-                                <summary>出馬表から記録した近走 {recent.length}件</summary>
+                                <summary>保存した近走 {recent.length}件</summary>
                                 {observed.jockey_observation && <p>{String(observed.jockey_observation)}</p>}
+                                {rows(observed.jockey_notes ?? []).map((note, i) => <p key={i}>
+                                  {String(note.note)} · <a href={String(note.source_url)} target="_blank" rel="noreferrer">騎手の出典</a>
+                                </p>)}
                                 {recent.map((run, i) => (
-                                  <p key={i}>{String(run.date_jst)} {String(run.track ?? "")} {String(run.distance_m)}m · {run.finish == null ? "着順未確認" : String(run.finish) + "着"} · 通過順 {arr(run, "corners").join("–") || "未確認"}</p>
+                                  <p key={i}>
+                                    {String(run.date_jst)} {String(run.track ?? "")} {String(run.distance_m)}m · {run.finish == null ? "着順未確認" : String(run.finish) + "着"}<br />
+                                    通過順 {arr(run, "corners").join("–") || "未確認"}
+                                    {run.corners_source_url && "（出馬表）"}
+                                    {run.finish_time_s != null && <> · 時計 {String(run.finish_time_s)}秒</>}
+                                    {run.last_3f_s != null && <> · 上がり {String(run.last_3f_s)}秒</>}
+                                    {run.margin && <> · 着差 {String(run.margin)}</>}
+                                    {run.source_url && <> · <a href={String(run.source_url)} target="_blank" rel="noreferrer">成績の出典</a></>}
+                                  </p>
                                 ))}
                               </details>}
                               {(!observed || rows(e.past5).length > 0) && <details>
