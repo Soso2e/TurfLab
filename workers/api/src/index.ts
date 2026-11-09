@@ -7,6 +7,7 @@ import {
   requireCondition,
   type Json,
   type Row,
+  type Table,
 } from "../../../packages/shared/src/domain";
 import {
   backup,
@@ -59,6 +60,12 @@ import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
 import { rankPerformance } from "./rank-analytics";
 import { saveResearchBaseline } from "./local-research-baseline";
+import {
+  getTablesMetadata,
+  getTableData,
+  executeQuery,
+  type QueryRequest,
+} from "./db-explorer";
 import {
   dashboard,
   dailyRun,
@@ -179,6 +186,24 @@ export async function route(
   }
   if (method === "GET" && path === "/backup") return backup(repo);
   if (method === "GET" && path === "/integrity") return integrityReport(repo);
+  if (method === "GET" && path === "/db/tables") {
+    return getTablesMetadata(repo);
+  }
+  const dbTableMatch = path.match(/^\/db\/table\/([^/]+)$/);
+  if (method === "GET" && dbTableMatch) {
+    const table = decodeURIComponent(dbTableMatch[1]) as Table;
+    return getTableData(repo, table, {
+      search: url.searchParams.get("search") ?? undefined,
+      sortBy: url.searchParams.get("sortBy") ?? undefined,
+      sortOrder: (url.searchParams.get("sortOrder") as "asc" | "desc") ?? undefined,
+      limit: url.searchParams.get("limit") ? Number(url.searchParams.get("limit")) : undefined,
+      offset: url.searchParams.get("offset") ? Number(url.searchParams.get("offset")) : undefined,
+      filterSql: url.searchParams.get("filterSql") ?? undefined,
+    });
+  }
+  if (method === "POST" && path === "/db/query") {
+    return executeQuery(repo, input as unknown as QueryRequest);
+  }
   if (method === "GET" && path === "/legacy") {
     requireCondition(sheets, "Sheets接続が未設定です", 503);
     return sheets.legacy();

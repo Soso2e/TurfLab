@@ -11,6 +11,7 @@ import "./style.css";
 import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
+import { DatabaseExplorer } from "./DatabaseExplorer";
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -88,8 +89,6 @@ function App() {
   const [data, setData] = useState<Row>();
   const [detail, setDetail] = useState<Row>();
   const [stats, setStats] = useState<Row>();
-  const [legacy, setLegacy] = useState<Row>();
-  const [legacyName, setLegacyName] = useState("Race");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -249,12 +248,6 @@ function App() {
       await reload();
     });
   }
-  async function fetchLegacy() {
-    await action(async () => {
-      setLegacy(await api("/legacy"));
-      setTab("legacy");
-    });
-  }
   return (
     <div className="app">
       <aside className="sidebar">
@@ -277,20 +270,16 @@ function App() {
             ["today", "本日のレース", "01"],
             ["import", "データを取り込む", "02"],
             ["stats", "成績と検証", "03"],
-            ["legacy", "既存Sheetsを見る", "04"],
+            ["db", "データベース", "04"],
             ["settings", "接続とバックアップ", "05"],
           ].map(([id, title, no]) => (
             <button
               key={id}
               className={tab === id ? "active" : ""}
               onClick={() => {
-                if (id === "legacy") {
-                  void fetchLegacy();
-                } else {
-                  setTab(id);
-                  if (id === "stats")
-                    void action(async () => setStats(await api("/stats")));
-                }
+                setTab(id);
+                if (id === "stats")
+                  void action(async () => setStats(await api("/stats")));
               }}
             >
               <span>{no}</span>
@@ -301,7 +290,7 @@ function App() {
         <div className="side-bottom">
           <span className="dot" /> 個人用・仮想購入のみ
           <p>
-            ChatGPT → Sheets ↔ Web
+            ChatGPT / CLI ↔ Local DB ↔ Web
             <br />
             表示・予算は日本時間
           </p>
@@ -1388,7 +1377,7 @@ function App() {
                     検証用の数値計算を表示する
                   </label>
                   <p>
-                    予想・展開/数値シミュレーションはChatGPTが担当します。Webは結果を受け取り、本人Betを管理します。ChatGPT→Sheetsの自動受信は本番検証待ちです。
+                    予想・展開/数値シミュレーションはChatGPT / CLIが担当します。Webは結果を受け取り、本人Betを管理します。
                   </p>
                   <p className="muted">
                     {mode.startsWith("pipeline")
@@ -1615,75 +1604,12 @@ function App() {
                 )}
               </>
             )}
-            {tab === "legacy" && (
-              <>
-                <div className="page-heading">
-                  <div>
-                    <p className="eyebrow">EXISTING SHEETS · READ ONLY</p>
-                    <h1>既存 Sheets を見る</h1>
-                    <p>元の記録と集計を、そのまま確認する。</p>
-                  </div>
-                  <button disabled={busy} onClick={() => void fetchLegacy()}>
-                    再読み込み
-                  </button>
-                </div>
-                <section className="panel">
-                  <p className="muted">
-                    旧スコアを確率へ変換しません。旧 Bet
-                    は参考収支と本人購入の区別を確認してから移行します。
-                  </p>
-                  {legacy && (
-                    <>
-                      <select
-                        value={legacyName}
-                        aria-label="既存タブ"
-                        onChange={(e) => setLegacyName(e.target.value)}
-                      >
-                        {rows(legacy.tables).map((t) => (
-                          <option value={String(t.name)} key={String(t.name)}>
-                            {String(t.name)}
-                          </option>
-                        ))}
-                      </select>
-                      {rows(legacy.tables)
-                        .filter((t) => t.name === legacyName)
-                        .map((t) => (
-                          <React.Fragment key={String(t.name)}>
-                            {t.truncated && (
-                              <p>最初の500行を表示しています。</p>
-                            )}
-                            <div className="table-scroll">
-                              <table>
-                                <thead>
-                                  <tr>
-                                    {arr(t, "headers").map((h, i) => (
-                                      <th key={i}>{String(h)}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {arr(t, "rows").map((row, i) => (
-                                    <tr key={i}>
-                                      {(row as Json[]).map((v, j) => (
-                                        <td key={j}>
-                                          {v == null
-                                            ? "—"
-                                            : typeof v === "boolean"
-                                              ? String(v)
-                                              : String(v)}
-                                        </td>
-                                      ))}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </React.Fragment>
-                        ))}
-                    </>
-                  )}
-                </section>
-              </>
+            {tab === "db" && (
+              <DatabaseExplorer
+                api={api}
+                onError={setError}
+                onNotice={setNotice}
+              />
             )}
             {tab === "settings" && (
               <>
@@ -1691,7 +1617,7 @@ function App() {
                   <div>
                     <p className="eyebrow">CONNECTION & RECORDS</p>
                     <h1>接続とバックアップ</h1>
-                    <p>Sheets を正本として使い、予想の版と根拠を保管する。</p>
+                    <p>ローカルSQLiteデータベースを正本として使い、予想の版と根拠を保管する。</p>
                   </div>
                 </div>
                 <section className="panel">
@@ -1715,7 +1641,6 @@ function App() {
                       setToken("");
                       setData(undefined);
                       setDetail(undefined);
-                      setLegacy(undefined);
                       setStats(undefined);
                     }}
                   >
