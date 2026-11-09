@@ -8,6 +8,7 @@ export async function predictWithCodex(
   directory: string,
   prompt: string,
   model: string,
+  webSearch = true,
 ): Promise<Row> {
   await mkdir(directory, { recursive: true });
   const schema = path.join(directory, "schema.json");
@@ -58,7 +59,7 @@ export async function predictWithCodex(
         "--disable",
         "multi_agent",
         "-c",
-        'web_search="live"',
+        webSearch ? 'web_search="live"' : 'web_search="disabled"',
         "-c",
         "project_doc_max_bytes=0",
         "--output-schema",

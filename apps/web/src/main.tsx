@@ -28,6 +28,15 @@ const time = (n: Json | undefined) =>
 const today = () =>
   new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const uid = () => crypto.randomUUID();
+function raceState(race: Row, result: Json | undefined) {
+  if (result === "cancelled" || race.status === "cancelled") return "取消";
+  if (result === "official") return "結果確定";
+  if (result === "provisional") return "暫定結果";
+  if (race.status === "started") return "発走済み · 結果待ち";
+  return Date.parse(String(race.scheduled_start_at)) <= Date.now()
+    ? "発走予定時刻を経過 · 結果待ち"
+    : "発走前";
+}
 const statusNames: Record<string, string> = {
   locked: "確定",
   validated: "確認待ち",
@@ -188,6 +197,13 @@ function App() {
   );
   const purchase = data?.purchase_stats ? obj(data.purchase_stats) : {};
   const race = detail ? obj(detail.race) : undefined;
+  const latestResult = detail && rows(detail.results).sort((a, b) => Number(b.revision) - Number(a.revision))[0];
+  const researchSnapshot = detail && rows(detail.snapshots)
+    .sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))
+    .find((s) => obj(s.evidence_json ?? {}).research);
+  const research = researchSnapshot && obj(obj(researchSnapshot.evidence_json).research);
+  const researchProfiles = detail ? rows(detail.research_baselines ?? []).filter((f) =>
+    obj(f.features_json).snapshot_id === researchSnapshot?.snapshot_id) : [];
   const canEditBet =
     race?.status === "scheduled" &&
     Date.now() < Date.parse(String(race.scheduled_start_at));
@@ -354,12 +370,6 @@ function App() {
             )}
             {tab === "today" && (
               <>
-                {storage === "local" && (
-                  <>
-                  <GitHubSyncStatus api={api} refresh={reload} />
-                  <LocalPredictionStatus api={api} />
-                  </>
-                )}
                 <div className="page-heading">
                   <div>
                     <p className="eyebrow">DAILY OVERVIEW</p>
@@ -378,7 +388,9 @@ function App() {
                     </button>
                   </div>
                 </div>
-                <div className="metrics">
+                <details className="panel">
+                  <summary>登録件数・仮想購入予算・精算損益</summary>
+                  <div className="metrics">
                   <article>
                     <span>登録レース</span>
                     <strong>
@@ -399,12 +411,13 @@ function App() {
                   </article>
                   <article>
                     <span>精算済み損益 · 全期間</span>
-                    <strong>{yen(purchase.net_yen)}</strong>
+                    <strong>{Number(purchase.settled_tickets) > 0 ? yen(purchase.net_yen) : "精算なし"}</strong>
                     <p>
                       未精算 {String(purchase.pending_tickets ?? 0)}券を除外
                     </p>
                   </article>
-                </div>
+                  </div>
+                </details>
                 <section className="panel">
                   <div className="section-heading">
                     <h2>レース一覧</h2>
@@ -418,11 +431,11 @@ function App() {
                     <div className="empty">
                       <span className="empty-icon">◎</span>
                       <h3>この日のレースは未登録です</h3>
-                      <p>
-                        ChatGPT の出力を Sheets
-                        に保存したら、同期してください。開催なしの日は登録不要です。
-                      </p>
+                      <p>{storage === "local"
+                        ? "出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。"
+                        : "ChatGPTの出力をSheetsに保存したら、同期してください。"}</p>
                       <button
+                        hidden={storage !== "sheets"}
                         className="primary"
                         disabled={busy || storage !== "sheets"}
                         onClick={() =>
@@ -456,17 +469,15 @@ function App() {
                           <div className="race-title">
                             <span>
                               {String(r.race_number)}R ·{" "}
-                              {String(
-                                r.status === "scheduled"
-                                  ? "発走前"
-                                  : (statusNames[String(r.status)] ?? r.status),
-                              )}
+                              {raceState(r, r.result_status)}
                             </span>
                             <h3>{String(r.name)}</h3>
                             <p>
-                              最終取得 {time(r.retrieved_at)} · 本人購入{" "}
-                              {yen(r.spent_yen)}
+                              {Number(r.bet_count) > 0
+                                ? `本人の仮想購入 ${yen(r.spent_yen)} · ${Number(r.settlement_pending) > 0 ? "精算待ち " + r.settlement_pending + "券" : "損益 " + yen(r.settlement_net_yen)}`
+                                : "本人の仮想購入なし"}
                             </p>
+                            {r.research_at && <small>調査保存 {time(r.research_at)}</small>}
                             {arr(r, "missing").length > 0 && (
                               <small className="missing">
                                 {arr(r, "missing").join(" / ")}
@@ -482,8 +493,14 @@ function App() {
                     </div>
                   )}
                 </section>
-                <section className="panel">
-                  <h2>レースごとのCore処理</h2>
+                {storage === "local" && <LocalPredictionStatus api={api} />}
+                {storage === "local" && (
+                  <details className="panel"><summary>GitHub / ChatGPTの同期</summary>
+                    <GitHubSyncStatus api={api} refresh={reload} />
+                  </details>
+                )}
+                <details className="panel">
+                  <summary>レースごとの処理履歴</summary>
                   <p>
                     参考プランの採用・予約額 {yen(data?.reference_budget_yen)} /
                     ¥5,000 · 本人購入とは別予算
@@ -514,12 +531,9 @@ function App() {
                       Coreの実行記録はありません。取り込み画面から1Rを実行できます。
                     </p>
                   )}
-                </section>
-                <section className="panel">
-                  <div className="section-heading">
-                    <h2>日次の処理状況</h2>
-                    <span>既存 ChatGPT タスク · 受信自動化は本番検証待ち</span>
-                  </div>
+                </details>
+                <details className="panel">
+                  <summary>日次の取り込み履歴</summary>
                   {data && rows(data.daily_runs).length ? (
                     rows(data.daily_runs).map((r) => (
                       <div key={String(r.daily_run_id)} className="run-row">
@@ -540,7 +554,7 @@ function App() {
                     の取り込みは別処理です。未反映の出力は「Sheets
                     の出力を確認」から再確認できます。
                   </p>
-                </section>
+                </details>
               </>
             )}
             {tab === "detail" && detail && race && (
@@ -561,11 +575,22 @@ function App() {
                       {time(race.scheduled_start_at)} ·{" "}
                       {String(obj(detail.course).surface)}{" "}
                       {String(obj(detail.course).distance_m)}m ·{" "}
-                      {statusNames[String(race.status)]}
+                      {raceState(race, latestResult?.official_status)}
                     </p>
                   </div>
                   <button onClick={() => setTab("today")}>← 一覧へ</button>
                 </div>
+                <section className="panel">
+                  <h2>このレースの状況</h2>
+                  <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
+                  <p>本人の仮想購入 {rows(detail.bets).filter((b) => b.status === "confirmed").length}券</p>
+                  {latestResult?.finish_order_json && <p>
+                    着順 {arr(latestResult, "finish_order_json").slice(0, 3).map((group) => Array.isArray(group) ? group.join("・") : String(group)).join(" → ")}
+                  </p>}
+                  {research && <p>調査保存 {time(researchSnapshot?.captured_at)} · 馬場 {String(research.going ?? "未確認")} ·{" "}
+                    <a href={String(research.source_url)} target="_blank" rel="noreferrer">出馬表の出典</a>
+                  </p>}
+                </section>
                 <section className="panel">
                   <h2>コースと固定入力</h2>
                   <p>
@@ -601,7 +626,11 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {rows(detail.entries).map((e) => (
+                        {rows(detail.entries).sort((a, b) => Number(a.horse_number) - Number(b.horse_number)).map((e) => {
+                          const observed = rows(research?.horses ?? []).find((h) => h.horse_number === e.horse_number);
+                          const recent = rows(observed?.recent_runs ?? []);
+                          const profile = researchProfiles.find((p) => p.horse_id === e.horse_id);
+                          return (
                           <tr key={String(e.entry_id)}>
                             <td>
                               <span className="horse-number">
@@ -611,6 +640,7 @@ function App() {
                             <td>
                               <strong>{String(obj(e.horse).horse_name)}</strong>
                               <small>{String(obj(e.jockey).jockey_name)}</small>
+                              {profile && <small>過去の位置取り · {String(obj(profile.features_json).early_position_group)}</small>}
                             </td>
                             <td>
                               {e.status === "active"
@@ -618,8 +648,15 @@ function App() {
                                 : String(e.status)}
                             </td>
                             <td>
-                              <Evidence row={e} />
-                              <details>
+                              {!observed && <Evidence row={e} />}
+                              {observed && <details>
+                                <summary>出馬表から記録した近走 {recent.length}件</summary>
+                                {observed.jockey_observation && <p>{String(observed.jockey_observation)}</p>}
+                                {recent.map((run, i) => (
+                                  <p key={i}>{String(run.date_jst)} {String(run.track ?? "")} {String(run.distance_m)}m · {run.finish == null ? "着順未確認" : String(run.finish) + "着"} · 通過順 {arr(run, "corners").join("–") || "未確認"}</p>
+                                ))}
+                              </details>}
+                              {(!observed || rows(e.past5).length > 0) && <details>
                                 <summary>
                                   過去5走 {rows(e.past5).length}件
                                 </summary>
@@ -628,10 +665,11 @@ function App() {
                                 ) : (
                                   <p>未取得。ゼロとして扱いません。</p>
                                 )}
-                              </details>
+                              </details>}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1133,14 +1171,21 @@ function App() {
                   )}
                   <h3>本人購入の記録</h3>
                   {rows(detail.bets).length ? (
-                    rows(detail.bets).map((b) => (
+                    rows(detail.bets).map((b) => {
+                      const settled = rows(detail.settlements).find((s) =>
+                        s.bet_id === b.bet_id && s.result_id === latestResult?.result_id);
+                      return (
                       <div className="run-row" key={String(b.bet_id)}>
                         <span>
                           {String(b.ticket_type)}{" "}
                           {arr(b, "selections_json").join("-")}
                         </span>
                         <strong>{yen(b.amount_yen)}</strong>
-                        <span>{statusNames[String(b.status)]}</span>
+                        <span>{settled
+                          ? `${Number(settled.refund_yen) > 0 ? "返還" : Number(settled.payout_yen) > 0 ? "的中" : "不的中"} · 損益 ${yen(settled.net_yen)}`
+                          : b.status === "confirmed" && Date.parse(String(race.scheduled_start_at)) <= Date.now()
+                            ? "精算待ち"
+                            : statusNames[String(b.status)]}</span>
                         <button
                           disabled={
                             busy || b.status !== "confirmed" || !canEditBet
@@ -1181,7 +1226,8 @@ function App() {
                           取消
                         </button>
                       </div>
-                    ))
+                      );
+                    })
                   ) : (
                     <p>まだ購入していません。</p>
                   )}

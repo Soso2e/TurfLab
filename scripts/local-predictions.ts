@@ -1,9 +1,10 @@
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
-import { obj } from "../packages/shared/src/domain";
+import { obj, type Row } from "../packages/shared/src/domain";
 import {
   claimLocalWorker,
+  CoreRequestError,
   LocalPredictionWorker,
 } from "./local-prediction-worker";
 
@@ -13,8 +14,15 @@ const { values } = parseArgs({
     once: { type: "boolean" },
     model: { type: "string", default: "gpt-6.1-sol" },
     origin: { type: "string", default: "http://127.0.0.1:8787" },
+    "race-url": { type: "string" },
   },
 });
+if (values["race-url"]) {
+  const url = new URL(values["race-url"]);
+  if (!values.once || url.protocol !== "https:" || url.username || url.password ||
+      url.port || !["www.keiba.go.jp", "www.jra.go.jp", "app.jra.jp"].includes(url.hostname))
+    throw new Error("OFFICIAL_RACE_URL_AND_ONCE_REQUIRED");
+}
 const dataHome = path.resolve(
   values["data-home"] ?? path.join(process.env.LOCALAPPDATA ?? ".", "TurfLab"),
 );
@@ -36,7 +44,13 @@ const api = async (route: string, body?: unknown) => {
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`CORE_HTTP_${response.status}`);
+  if (!response.ok) {
+    const error = response.status === 422 ? await response.json().then(obj).catch(() => ({} as Row)) : {};
+    const detail = typeof error.error === "string"
+      ? error.error.replaceAll(token, "[認証情報]").slice(0, 300)
+      : undefined;
+    throw new CoreRequestError(response.status, detail);
+  }
   return obj(await response.json());
 };
 const release = await claimLocalWorker(home);
@@ -51,7 +65,12 @@ try {
       path.join(process.cwd(), "prompts/prediction-method.md"),
       "utf8",
     ));
-  const worker = new LocalPredictionWorker(home, api, factors, values.model!);
+  const worker = new LocalPredictionWorker(
+    home, api, factors, values.model!, undefined, undefined,
+    (stage) => api("/local-predictions/status", {
+      status: "running", stage, checked_at: new Date().toISOString(),
+    }).catch(() => {}),
+  );
   await worker.init();
   let stopping = false;
   process.on("SIGINT", () => {
@@ -65,7 +84,7 @@ try {
     try {
       if ((await api("/status")).storage_mode !== "local")
         throw new Error("LOCAL_CORE_REQUIRED");
-      status = { ...(await worker.tick()), status: "healthy" };
+      status = { ...(await worker.tick(new Date(), values["race-url"])), status: "healthy" };
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
       status = {

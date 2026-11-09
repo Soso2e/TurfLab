@@ -324,6 +324,8 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
     ),
     predictions,
     snapshots: await select("race_snapshots"),
+    research_baselines: (await repo.list("entity_features")).filter((f) =>
+      obj(f.features_json ?? {}).race_id === raceId && String(f.feature_id).startsWith("baseline:")),
     evaluations: await select("horse_evaluations"),
     simulations: await select("simulation_runs"),
     recommendations: await select("recommendations"),
@@ -336,6 +338,8 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
         e.action === "revise-bet" && bets.some((b) => b.bet_id === e.entity_id),
     ),
     results: await select("race_results"),
+    settlements: (await repo.list("settlements")).filter((s) =>
+      bets.some((b) => b.bet_id === s.bet_id)),
     adoptions: await select("prediction_adoptions"),
     reviews: await select("reviews"),
     pipeline_runs: await select("race_pipeline_runs"),
@@ -358,8 +362,19 @@ export async function dashboard(repo: Repository, date: string): Promise<Row> {
   for (const r of races) {
     const d = await detail(repo, str(r, "race_id"));
     const predictions = rows(d.predictions);
+    const result = rows(d.results).sort((a, b) => Number(b.revision) - Number(a.revision))[0];
+    const confirmed = rows(d.bets).filter((b) => b.status === "confirmed");
+    const settled = rows(d.settlements).filter((s) =>
+      result?.result_id === s.result_id && confirmed.some((b) => b.bet_id === s.bet_id));
+    const research = rows(d.snapshots).filter((s) => obj(s.evidence_json ?? {}).research)
+      .sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
     cards.push({
       ...r,
+      result_status: result?.official_status ?? null,
+      research_at: research?.captured_at ?? null,
+      bet_count: confirmed.length,
+      settlement_pending: confirmed.length - settled.length,
+      settlement_net_yen: settled.length ? settled.reduce((sum, s) => sum + Number(s.net_yen), 0) : null,
       prediction_status: predictions.some((p) => p.status === "locked")
         ? "locked"
         : predictions.length

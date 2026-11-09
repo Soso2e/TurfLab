@@ -58,6 +58,7 @@ import { reconcileReference } from "./reference-intake";
 import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
 import { rankPerformance } from "./rank-analytics";
+import { saveResearchBaseline } from "./local-research-baseline";
 import {
   dashboard,
   dailyRun,
@@ -188,6 +189,10 @@ export async function route(
       decodeURIComponent(path.split("/")[2]),
     );
   if (!input) throw new DomainError("APIが見つかりません", 404);
+  if (path === "/local-predictions/baseline") {
+    requireCondition(!sheets, "調査ベースラインはlocal保存専用です");
+    return saveResearchBaseline(repo, input, now);
+  }
   if (path.startsWith("/race-import/")) {
     requireCondition(
       !sheets,
@@ -407,7 +412,7 @@ export class TurfCoordinator {
             return response(await this.state.storage.get<Row>("local-predictions-status") ?? { status: "disabled" });
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);
-          requireCondition(["healthy", "failed"].includes(String(input.status)), "状態が不正です");
+          requireCondition(["healthy", "failed", "running"].includes(String(input.status)), "状態が不正です");
           await this.state.storage.put("local-predictions-status", input);
           return response({ status: "saved" });
         }

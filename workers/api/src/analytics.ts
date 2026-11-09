@@ -340,9 +340,9 @@ export async function saveReview(
     "採用予想と公式結果を指定してください",
   );
   requireCondition(
-    (await repo.list("prediction_adoptions")).some(
-      (a) => a.prediction_id === p.prediction_id,
-    ),
+    p.status === "locked" &&
+      [...await repo.list("prediction_adoptions"), ...await repo.list("reference_adoptions")]
+        .some((a) => a.prediction_id === p.prediction_id),
     "採用予想が必要です",
   );
   for (const k of [

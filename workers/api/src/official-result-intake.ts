@@ -32,11 +32,15 @@ export async function importOfficialResult(
   const url = new URL(sourceUrl);
   requireCondition(url.protocol === "https:" && !url.username && !url.password,
     "公式結果には正しいHTTPS URLが必要です");
+  requireCondition(race.jurisdiction === "JRA" || race.jurisdiction === "NAR",
+    "登録済みレースの主催区分が未確認です。公式出馬表との照合が必要です");
   const hosts = race.jurisdiction === "JRA"
-    ? ["jra.go.jp", "www.jra.go.jp"]
+    ? ["jra.go.jp", "www.jra.go.jp", "app.jra.jp"]
     : ["keiba.go.jp", "www.keiba.go.jp"];
   requireCondition(hosts.includes(url.hostname),
     "公式結果URLと競馬管轄が一致しません");
+  requireCondition(result.published_at != null,
+    "公式結果の公表時刻が未確認です。取得時刻とは区別して保留しました");
   requireCondition(instant(checked) <= instant(now) &&
     instant(checked) >= instant(result.published_at),
     "結果公表前または未来の取得時刻は使えません");

@@ -460,6 +460,12 @@ export function validateRow(table: Table, row: Row): void {
   }
 }
 
+export function isNameReference(row: Row): boolean {
+  return ["chatgpt_reference", "codex_cli_reference"].includes(String(row.source)) &&
+    obj(row.evidence_json ?? {}).identity_confidence === "name_only" &&
+    obj(row.evidence_json ?? {}).official_identity_verified === false;
+}
+
 export function snapshotContents(row: Row): Row {
   const keys = [
     "race_id",
@@ -475,5 +481,8 @@ export function snapshotContents(row: Row): Row {
     "bias_sample_size",
     "expected_pace",
   ];
-  return Object.fromEntries(keys.map((k) => [k, row[k] ?? null]));
+  const fixed = Object.fromEntries(keys.map((k) => [k, row[k] ?? null]));
+  const research = obj(row.evidence_json ?? {}).research;
+  if (research != null) fixed.research = research;
+  return fixed;
 }

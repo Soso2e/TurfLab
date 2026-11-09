@@ -5,6 +5,7 @@ import {
   hash,
   idOf,
   instant,
+  isNameReference,
   money,
   num,
   obj,
@@ -111,9 +112,7 @@ async function fixedData(repo: Repository, p: Row, now: string) {
     ])
       requireCondition(
         (saved[key] != null ||
-          (snapshot.source === "chatgpt_reference" &&
-            obj(snapshot.evidence_json ?? {}).identity_confidence ===
-              "name_only" &&
+          (isNameReference(snapshot) &&
             ["draw_number", "carried_weight_kg"].includes(key))) &&
           canonical(saved[key] ?? null) === canonical(entry[key] ?? null),
         `固定出走馬の${key}が不足または変更されています`,

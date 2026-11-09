@@ -7,6 +7,7 @@ import {
   hash,
   idOf,
   instant,
+  isNameReference,
   money,
   num,
   obj,
@@ -134,20 +135,18 @@ export async function validatePrediction(
   for (const e of evidence) {
     asOf(e, cutoff);
     const u = new URL(str(e, "source_url"));
-    requireCondition(
-      ["https:", "http:"].includes(u.protocol),
-      "出典URLはHTTP(S)です",
-    );
     const permittedReference =
-      snapshot.source === "chatgpt_reference" &&
-      race.source === "chatgpt_reference" &&
-      obj(race.evidence_json ?? {}).official_identity_verified === false &&
-      obj(snapshot.evidence_json ?? {}).identity_confidence === "name_only" &&
-      obj(snapshot.evidence_json ?? {}).official_identity_verified === false &&
+      isNameReference(snapshot) &&
+      isNameReference(race) &&
       e.source === snapshot.source &&
       e.source_url === snapshot.source_url &&
       e.classification === "estimate" &&
       e.confirmed === false;
+    requireCondition(
+      ["https:", "http:"].includes(u.protocol) ||
+        (permittedReference && /^urn:turflab:local:blob:[a-f0-9]{40}$/.test(u.href)),
+      "出典URLが不正です",
+    );
     if (
       (!permittedReference && e.confirmed !== true) ||
       u.hostname.endsWith(".invalid")

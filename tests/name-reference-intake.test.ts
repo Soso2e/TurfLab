@@ -16,6 +16,7 @@ import { route } from "../workers/api/src/index";
 import { PredictionBridge, type BridgeIO } from "../scripts/github-bridge";
 import { wizardAnswer, wizardDraft } from "./wizard-fixture";
 import { referenceAnswer } from "../packages/shared/src/reference-answer";
+import { saveResearchBaseline } from "../workers/api/src/local-research-baseline";
 
 const NOW = "2026-11-04T01:00:00.000Z";
 export function nameReference(): Row {
@@ -51,6 +52,43 @@ export function nameReference(): Row {
 }
 
 describe("name-only reference intake (isolated fixtures)", () => {
+  it("freezes CLI observations before analysis, keeps provenance estimated and replays the baseline", async () => {
+    const repo = new MemoryRepository();
+    const source: Row = { ...nameReference(), repository: "local/codex" };
+    const document = obj(source.document);
+    document.workflow_version = "research-v1";
+    document.model = "fixture";
+    const race = rows(document.races)[0];
+    race.jurisdiction = "NAR";
+    race.research = {
+      source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_babaCode=32&k_raceDate=2026%2F11%2F04&k_raceNo=1",
+      headcount: 3,
+      going: null,
+    };
+    for (const horse of rows(race.horses)) {
+      horse.recent_runs = [1, 2].map((date) => ({
+        date_jst: `2026-11-0${date}`, distance_m: 1600, finish: 2, field_size: 9, corners: [2],
+      }));
+    }
+    const receipt = await importNameReference(repo, source, NOW);
+    const pack = await inputPack(repo, str(rows(receipt.races)[0], "snapshot_id"), NOW);
+    expect(rows(pack.evidence)[0]).toMatchObject({ classification: "estimate", confirmed: false });
+    const input = { snapshot_id: pack.snapshot_id, pack_hash: pack.pack_hash };
+    await saveResearchBaseline(repo, input, NOW);
+    await saveResearchBaseline(repo, input, NOW);
+    const features = await repo.list("entity_features");
+    expect(features).toHaveLength(3);
+    expect(obj(features[0].features_json)).toMatchObject({
+      normalized_finish_mean: 0.125, early_position_group: "前方傾向",
+    });
+    await expect(saveResearchBaseline(repo, { ...input, pack_hash: "changed" }, NOW))
+      .rejects.toThrow("固定パック");
+    const converted = await convertAnswer(repo, {
+      ...input, operation_id: "cli-research-fixture", answer: wizardAnswer(pack, NOW),
+    }, NOW);
+    expect((await runRace(repo, obj(converted.pipeline), NOW)).status).toBe("complete");
+    expect(await repo.list("virtual_bets")).toHaveLength(0);
+  });
   it("実朝JSONのrace_no/R表記を正規化し、名簿0頭でも参考履歴を保存する", async () => {
     const repo = new MemoryRepository(),
       source = nameReference();

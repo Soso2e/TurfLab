@@ -2,6 +2,7 @@ import {
   canonical,
   hash,
   instant,
+  isNameReference,
   jstDate,
   obj,
   requireCondition,
@@ -38,6 +39,49 @@ const utc = (v: unknown) => {
   );
   return new Date(v).toISOString();
 };
+
+function validateResearch(reference: Row, horses: Row[], day: string, number: number): Row {
+  const research = obj(reference.research);
+  const source = new URL(str(research, "source_url"));
+  const hosts = reference.jurisdiction === "JRA"
+    ? ["www.jra.go.jp", "jra.go.jp", "app.jra.jp"]
+    : reference.jurisdiction === "NAR" ? ["www.keiba.go.jp", "keiba.go.jp"] : [];
+  requireCondition(
+    source.protocol === "https:" && !source.username && !source.password &&
+      !source.port && hosts.includes(source.hostname),
+    "管轄に対応する公式出馬表URLが必要です",
+  );
+  if (reference.jurisdiction === "NAR")
+    requireCondition(
+      source.pathname === "/KeibaWeb/TodayRaceInfo/DebaTable" &&
+        source.searchParams.get("k_raceDate")?.replaceAll("/", "-") === day &&
+        source.searchParams.get("k_raceNo") === String(number) &&
+        /^\d{1,2}$/.test(source.searchParams.get("k_babaCode") ?? ""),
+      "出馬表URLの日付・レース番号が不一致です",
+    );
+  requireCondition(research.headcount === horses.length && horses.length >= 2,
+    "全頭の出馬表が必要です");
+  for (const horse of horses) {
+    const recent = rows(horse.recent_runs);
+    requireCondition(recent.length <= 5, "近走は各馬5件以内です");
+    for (const run of recent)
+      requireCondition(typeof run.date_jst === "string" &&
+        /^\d{4}-\d{2}-\d{2}$/.test(run.date_jst) && run.date_jst < day &&
+        typeof run.distance_m === "number" && run.distance_m > 0 &&
+        (run.finish == null || (Number.isInteger(run.finish) && Number(run.finish) > 0)) &&
+        Array.isArray(run.corners) && run.corners.length <= 4 &&
+        run.corners.every((position) => Number.isInteger(position) && Number(position) > 0),
+      "近走の開催日・距離・着順・通過順が不正です");
+  }
+  return {
+    ...research,
+    horses: horses.map((horse) => ({
+      horse_number: horse.horse_number!,
+      recent_runs: horse.recent_runs!,
+      jockey_observation: horse.jockey_observation ?? null,
+    })),
+  };
+}
 
 /** Separate opt-in policy implemented by the daily Worker, never by strict Wizard.
  * Immutable source receipts also let a crash before GitHub export retry exactly.
@@ -198,6 +242,9 @@ export async function importNameReference(
     };
     try {
       const start = utc(reference.scheduled_start_at_jst);
+      const research = localCli && document.workflow_version === "research-v1"
+        ? validateResearch(reference, given, day, Number(number))
+        : null;
       requireCondition(
         jstDate(start) === day && instant(generated) < instant(start),
         "発走日時/生成日時が不正です",
@@ -215,7 +262,7 @@ export async function importNameReference(
           obj(r.evidence_json ?? {}).race_key === key,
       );
       requireCondition(
-        !existingRace || existingRace.source === "chatgpt_reference",
+        !existingRace || isNameReference(existingRace),
         "既存の厳密照合レースは変更しません",
         409,
       );
@@ -226,7 +273,7 @@ export async function importNameReference(
         const t = c && (await staged.get("tracks", str(c, "track_id")));
         requireCondition(
           normalizeName(t?.name) !== trackName ||
-            r.source === "chatgpt_reference",
+            isNameReference(r),
           "既存の厳密照合レースと衝突しています",
           409,
         );
@@ -324,11 +371,11 @@ export async function importNameReference(
         const model = await entity(
           "model_versions",
           "model_version",
-          "chatgpt-name-v1",
+          research ? ["codex-research-v1", document.model] : "chatgpt-name-v1",
           {
-            provider: "ChatGPT",
-            model_identifier: "chatgpt_reference",
-            prompt_version: "name-only-v1",
+            provider: research ? "Codex CLI" : "ChatGPT",
+            model_identifier: research ? str(document, "model") : "chatgpt_reference",
+            prompt_version: research ? "research-v1" : "name-only-v1",
             feature_version: SCORE_VERSION,
             weights_json: scoreWeights,
             parameters_json: {
@@ -343,8 +390,8 @@ export async function importNameReference(
           snapshot_id: await synthetic("snapshot", [key, sourceSha]),
           race_id: raceId,
           captured_at: generated,
-          weather: null,
-          going: null,
+          weather: research?.weather ?? null,
+          going: research?.going ?? null,
           entries_state_json: fixed,
           scratch_status_json: fixed
             .filter((e) => e.status !== "active")
@@ -353,6 +400,7 @@ export async function importNameReference(
           input_hash: "pending",
           evidence_json: {
             ...provenance,
+            ...(research ? { research } : {}),
             model_version_id: model.model_version_id,
             race_key: key,
             unknowns: [
