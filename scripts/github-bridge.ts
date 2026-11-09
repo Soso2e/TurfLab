@@ -73,6 +73,7 @@ interface State {
   daily_export_versions?: Record<string, number>;
   daily_export_next_attempt?: string;
   last_daily_export?: Row;
+  daily_inventory?: Row;
   last_export?: Row;
   reference_files?: Record<string, ReferenceReceipt>;
   last_reference_sync?: string;
@@ -193,6 +194,7 @@ export class PredictionBridge {
           races: r.races,
         }))
         .slice(-12),
+      daily_inventory: this.state.daily_inventory ?? null,
       repository: this.config.repository,
       last_sync: this.state.last_sync,
       last_error: this.state.last_error,
@@ -593,6 +595,24 @@ export class PredictionBridge {
     this.busy = true;
     try {
       const files = await this.io.list();
+      const day = jst(this.io.now());
+      this.state.daily_inventory = {
+        date_jst: day,
+        checked_at: this.io.now().toISOString(),
+        packs: files.filter(
+          (f) => f.path.startsWith(`packs/${day}/`) && f.path.endsWith(".json"),
+        ).length,
+        predictions: files.filter(
+          (f) =>
+            f.path.startsWith(`predictions/${day}/`) &&
+            f.path.endsWith(".json"),
+        ).length,
+        reference: files.some(
+          (f) =>
+            f.path.startsWith(`daily/${day}/morning-reference-v`) &&
+            f.path.endsWith(".json"),
+        ),
+      };
       let transportError = false;
       for (const file of files
         .filter(

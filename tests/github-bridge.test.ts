@@ -122,6 +122,24 @@ describe("GitHub Prediction Bridge (isolated only)", () => {
     expect(await readFile(stateFile, "utf8")).toBe(before);
     expect((await backup(s.repo)).hash).toBe(beforeCore.hash);
   });
+  it("日別の入力パック・正式予想・参考分析を分けて観測し、参考分析を取り込まない", async () => {
+    const s = await setup(0);
+    s.files.set("daily/2026-10-27/morning-reference-v1.json", {
+      sha: "ref",
+      content: "{}",
+    });
+    s.files.set("packs/2026-10-26/old.json", { sha: "old", content: "{}" });
+    await s.bridge.sync();
+    expect(s.bridge.status().daily_inventory).toEqual({
+      date_jst: "2026-10-27",
+      checked_at: NOW,
+      packs: 0,
+      predictions: 0,
+      reference: true,
+    });
+    expect(s.bridge.status().success).toBe(0);
+    expect(s.bridge.status().records).toEqual([]);
+  });
   it("一部blob通信失敗でも他Rは保存し、6R目を確認待ちにする", async () => {
     const s = await setup(7);
     const read = s.io.read;
@@ -339,7 +357,10 @@ describe("scheduled daily Core snapshot", () => {
     const contents = s.files.get(name)?.content;
     expect(contents).toBeTruthy();
     expect(JSON.parse(contents!).report_type).toBe("turfLab_daily_state");
-    expect(s.bridge.status().last_daily_export).toHaveProperty("status", "success");
+    expect(s.bridge.status().last_daily_export).toHaveProperty(
+      "status",
+      "success",
+    );
     await s.bridge.exportDailyStateIfDue();
     const restarted = new PredictionBridge(s.home, s.config, s.io);
     await restarted.init();
