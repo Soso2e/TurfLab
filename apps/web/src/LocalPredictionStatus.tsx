@@ -57,6 +57,19 @@ export function LocalPredictionStatus({
       </p>
       {reference.path && <p>直近の調査 · 固定入力 {saved}レース</p>}
       {state?.error && <p>{String(state.error)}</p>}
+      {state?.learning != null && (
+        <details>
+          <summary>
+            学習の記録 {String(obj(state.learning).races ?? 0)}R ／ 1番手単勝の回収率{" "}
+            {obj(obj(state.learning).top1_flat_win).return_rate == null
+              ? "未算出"
+              : `${Math.round(Number(obj(obj(state.learning).top1_flat_win).return_rate) * 100)}%`}
+          </summary>
+          <p>判定: {String(obj(obj(state.learning).top1_flat_win).verdict ?? "標本不足")}</p>
+          <p>仮想プラン {String(obj(obj(state.learning).ev_plans).fixed ?? 0)}件 · 判定: {String(obj(obj(state.learning).ev_plans).verdict ?? "標本不足")}</p>
+          <p>時系列検証 {String(obj(state.learning).holdout_races ?? 0)}R · 重み候補 {obj(state.learning).candidate_ready ? "あり（本人承認待ち）" : "なし"}</p>
+        </details>
+      )}
       {rows(state?.provisional_predictions ?? []).length > 0 && (
         <details>
           <summary>暫定予想 {rows(state?.provisional_predictions ?? []).length}件（正式予想ではありません）</summary>
