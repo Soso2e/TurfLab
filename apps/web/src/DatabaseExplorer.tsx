@@ -1,5 +1,22 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { type Row, type Json } from "../../../packages/shared/src/domain";
+import {
+  IconDatabase,
+  IconSearch,
+  IconFilter,
+  IconRefresh,
+  IconCopy,
+  IconCheck,
+  IconDownload,
+  IconTable,
+  IconCode,
+  IconChevronRight,
+  IconChevronLeft,
+  IconChevronUp,
+  IconChevronDown,
+  IconClose,
+  IconZap,
+} from "./Icons";
 
 export interface DatabaseExplorerProps {
   api: (path: string, body?: unknown) => Promise<Row>;
@@ -215,7 +232,7 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
     a.download = `turflab_${selectedTable}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    onNotice(`${selectedTable}.csv をダウンロードしました`);
+    onNotice(`${selectedTable}.csv を保存しました`);
   };
 
   const applyPreset = (presetKey: string) => {
@@ -292,6 +309,7 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
     // ID styling (UUID or long hash)
     if (col.endsWith("_id") || col.endsWith("_key") || col.endsWith("_hash")) {
       const short = strVal.length > 14 ? `${strVal.slice(0, 6)}…${strVal.slice(-6)}` : strVal;
+      const isCopied = copiedId === `${col}-${strVal}`;
       return (
         <span
           className="db-id-chip"
@@ -302,7 +320,11 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
           }}
         >
           {short}
-          {copiedId === `${col}-${strVal}` ? " ✓" : ""}
+          {isCopied ? (
+            <span className="db-copy-icon ok"><IconCheck size={11} /></span>
+          ) : (
+            <span className="db-copy-icon"><IconCopy size={11} /></span>
+          )}
         </span>
       );
     }
@@ -339,7 +361,9 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
       <div className="page-heading">
         <div>
           <p className="eyebrow">DATABASE STUDIO · READ ONLY & QUERY</p>
-          <h1>データベース (DB)</h1>
+          <h1>
+            <span className="icon-wrap"><IconDatabase size={22} /></span> データベース
+          </h1>
           <p>
             内部SQLiteに蓄積された全29テーブルのレコードを、生データレベルでブラウズ・検索・検証。
           </p>
@@ -349,21 +373,24 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
             総レコード: <strong>{meta?.totalRows?.toLocaleString() ?? "—"}</strong> 件
           </span>
           <button
-            className="secondary"
+            className="secondary db-btn-icon"
             disabled={loading}
             onClick={() => {
               void loadMetadata();
               void loadData();
             }}
           >
-            {loading ? "更新中..." : "↻ DB再読込"}
+            <IconRefresh size={14} className={loading ? "spin" : ""} />
+            <span>{loading ? "更新中..." : "DB再読込"}</span>
           </button>
         </div>
       </div>
 
       {/* Preset Queries Bar */}
       <div className="db-presets-bar">
-        <span className="db-presets-label">⚡ クイック抽出:</span>
+        <span className="db-presets-label">
+          <IconZap size={13} /> クイック抽出:
+        </span>
         <div className="db-presets-chips">
           {Object.entries(PRESET_QUERIES).map(([k, p]) => (
             <button
@@ -384,6 +411,7 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
         {/* Left Sidebar: Table Navigator */}
         <aside className="db-table-sidebar">
           <div className="db-search-box">
+            <span className="db-search-icon"><IconSearch size={14} /></span>
             <input
               type="text"
               placeholder="テーブルを絞り込み..."
@@ -453,28 +481,28 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                 onClick={() => setViewMode("table")}
                 title="テーブル表示"
               >
-                ▦ 表
+                <IconTable size={13} /> 表
               </button>
               <button
                 className={`db-mode-btn ${viewMode === "json" ? "active" : ""}`}
                 onClick={() => setViewMode("json")}
                 title="JSON生データ表示"
               >
-                {"{ }"} JSON
+                <IconCode size={13} /> JSON
               </button>
               <button
-                className="secondary"
+                className="secondary db-btn-icon"
                 disabled={!data || data.rows.length === 0}
                 onClick={handleExportCsv}
                 title="CSVダウンロード"
               >
-                ⤓ CSV
+                <IconDownload size={13} /> CSV
               </button>
               <button
                 className={`db-sql-toggle-btn ${sqlConsoleOpen ? "active" : ""}`}
                 onClick={() => setSqlConsoleOpen(!sqlConsoleOpen)}
               >
-                ⚡ SQL / フィルタ {filterSql ? "(適用中)" : ""}
+                <IconFilter size={13} /> SQL / フィルタ {filterSql ? "(適用中)" : ""}
               </button>
             </div>
           </div>
@@ -500,17 +528,18 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                         setPage(0);
                         void loadData(selectedTable, 0, "", search);
                       }}
+                      title="条件をクリア"
                     >
-                      ×
+                      <IconClose size={13} />
                     </button>
                   )}
                 </div>
                 <button type="submit" className="primary" disabled={loading}>
-                  実行 (Filter)
+                  適用
                 </button>
               </form>
               <div className="db-sql-help">
-                利用可能な演算子: <code>=</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>LIKE '%東京%'</code>, <code>AND</code>, <code>OR</code>
+                利用可能な構文: <code>=</code>, <code>!=</code>, <code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>LIKE '%東京%'</code>, <code>AND</code>, <code>OR</code>
               </div>
             </div>
           )}
@@ -518,12 +547,15 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
           {/* Quick Search & Summary */}
           <div className="db-grid-toolbar">
             <form onSubmit={handleSearchSubmit} className="db-inline-search">
-              <input
-                type="text"
-                placeholder="テーブル内全文検索..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+              <div className="db-inline-search-input">
+                <IconSearch size={13} className="search-lead-icon" />
+                <input
+                  type="text"
+                  placeholder="テーブル内全文検索..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
               <button type="submit" disabled={loading}>
                 検索
               </button>
@@ -545,14 +577,14 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
             <div className="db-stats-summary">
               {data && (
                 <span>
-                  <strong>{data.filteredTotal.toLocaleString()}</strong> 件表示
+                  <strong>{data.filteredTotal.toLocaleString()}</strong> 件
                   {data.filteredTotal !== data.total && (
                     <span className="db-filtered-note">
                       {" "}(全 {data.total.toLocaleString()} 件中)
                     </span>
                   )}
                   {data.executionMs !== undefined && (
-                    <span className="db-exec-time"> · ⚡ {data.executionMs}ms</span>
+                    <span className="db-exec-time"> · {data.executionMs}ms</span>
                   )}
                 </span>
               )}
@@ -601,7 +633,11 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                             <span>{col}</span>
                             {sortBy === col && (
                               <span className="db-sort-indicator">
-                                {sortOrder === "asc" ? "▲" : "▼"}
+                                {sortOrder === "asc" ? (
+                                  <IconChevronUp size={12} />
+                                ) : (
+                                  <IconChevronDown size={12} />
+                                )}
                               </span>
                             )}
                           </div>
@@ -653,8 +689,9 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                     setPage(next);
                     void loadData(selectedTable, next, filterSql, search);
                   }}
+                  title="前のページ"
                 >
-                  ◀ 前へ
+                  <IconChevronLeft size={13} /> 前へ
                 </button>
                 <button
                   disabled={page >= totalPages - 1 || loading}
@@ -663,8 +700,9 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                     setPage(next);
                     void loadData(selectedTable, next, filterSql, search);
                   }}
+                  title="次のページ"
                 >
-                  次へ ▶
+                  次へ <IconChevronRight size={13} />
                 </button>
                 <select
                   value={pageSize}
@@ -693,18 +731,28 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                 onClick={() => setSelectedRow(null)}
                 title="閉じる"
               >
-                ✕
+                <IconClose size={16} />
               </button>
             </div>
 
             <div className="db-drawer-actions">
               <button
-                className="secondary"
+                className="secondary db-btn-icon"
                 onClick={() =>
                   handleCopy(JSON.stringify(selectedRow, null, 2), "drawer-json")
                 }
               >
-                {copiedId === "drawer-json" ? "✓ コピー完了" : "JSON全体をコピー"}
+                {copiedId === "drawer-json" ? (
+                  <>
+                    <IconCheck size={13} />
+                    <span>コピー完了</span>
+                  </>
+                ) : (
+                  <>
+                    <IconCopy size={13} />
+                    <span>JSON全体をコピー</span>
+                  </>
+                )}
               </button>
             </div>
 
@@ -723,7 +771,11 @@ export function DatabaseExplorer({ api, onError, onNotice }: DatabaseExplorerPro
                         )
                       }
                     >
-                      {copiedId === `field-${key}` ? "✓" : "📋"}
+                      {copiedId === `field-${key}` ? (
+                        <IconCheck size={11} />
+                      ) : (
+                        <IconCopy size={11} />
+                      )}
                     </button>
                   </div>
                   <div className="db-field-value">

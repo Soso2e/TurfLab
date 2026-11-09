@@ -1451,3 +1451,229 @@ button:focus-visible {
     max-height: 340px;
   }
 }
+
+/* Modern UIUX Enhancements with Line Icons */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+.db-btn-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.icon-wrap {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+  color: #28765a;
+}
+
+/* Sidebar navigation with line icons */
+.sidebar nav button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+}
+.nav-icon {
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+.sidebar nav button.active .nav-icon {
+  opacity: 1;
+}
+
+/* Date Quick Switch Toolbar */
+.date-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.date-step-btn {
+  padding: 6px 10px;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.date-step-btn.active-date {
+  background: #1b4d3e;
+  color: #ffffff;
+  border-color: #1b4d3e;
+  font-weight: 600;
+}
+
+/* Track Filter Chips */
+.track-filter-chips {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.track-chip {
+  padding: 4px 10px;
+  font-size: 11px;
+  border-radius: 14px;
+  border: 1px solid #d4ddd5;
+  background: #f7faf7;
+  color: #314a3e;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.12s ease;
+}
+.track-chip:hover {
+  background: #e9f2ec;
+  border-color: #28765a;
+}
+.track-chip.active {
+  background: #1b4d3e;
+  color: #ffffff;
+  border-color: #1b4d3e;
+  font-weight: 600;
+}
+
+/* Countdown Pill */
+.countdown-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+  background: #e6f2eb;
+  color: #1d5c3f;
+  border: 1px solid #c8e0d2;
+  margin-left: 6px;
+}
+.countdown-pill.urgent {
+  background: #fef0e8;
+  color: #b33900;
+  border-color: #f7cfba;
+  animation: pulse-urgent 1.5s infinite;
+}
+@keyframes pulse-urgent {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Floating Toast Notification */
+.floating-toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #153d32;
+  color: #ffffff;
+  padding: 12px 18px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 1000;
+  animation: slide-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 90vw;
+}
+@keyframes slide-up {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.floating-toast-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.toast-icon {
+  color: #5ce6a8;
+  display: flex;
+  align-items: center;
+}
+.toast-close {
+  background: transparent;
+  border: none;
+  color: #9cb8ab;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+}
+.toast-close:hover {
+  color: #ffffff;
+}
+
+/* Mobile Bottom Navigation Bar */
+.mobile-bottom-nav {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* Reserve bottom space for mobile navigation */
+  body {
+    padding-bottom: 68px;
+  }
+  .floating-toast {
+    bottom: 74px;
+    right: 16px;
+    left: 16px;
+    justify-content: space-between;
+  }
+  .mobile-bottom-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 56px;
+    background: #12332a;
+    border-top: 1px solid #1f4a3e;
+    z-index: 900;
+    justify-content: space-around;
+    align-items: stretch;
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.15);
+  }
+  .bottom-nav-item {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    background: transparent;
+    border: none;
+    color: #8dafa1;
+    font-size: 10px;
+    padding: 0;
+    cursor: pointer;
+    transition: color 0.12s, background 0.12s;
+  }
+  .bottom-nav-item.active {
+    color: #4ce6a1;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.05);
+  }
+  .bottom-nav-item:hover {
+    color: #c5ded3;
+  }
+}
