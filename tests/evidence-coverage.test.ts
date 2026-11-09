@@ -164,3 +164,48 @@ it("rebuilds the real Kawasaki 1R pack with only going changed (skipped without 
   for (const r of after) if (r.source_url) validatePastRunSource(r, "2026-11-10", captured);
   expect(evidenceCoverage(pack)).toMatchObject({ formal_allowed: false });
 });
+
+it("fixes odds and a virtual plan before the start, keeping odds out of the pack", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = "2026-11-10T05:30:00.000Z";
+  vi.setSystemTime(now);
+  const race = { race_id: "r1", race_date_jst: "2026-11-10", race_number: 1, jurisdiction: "NAR", scheduled_start_at: "2026-11-10T06:00:00.000Z" };
+  const pack: Row = {
+    ...kawasaki({ going: "良", source_url: "https://www.keiba.go.jp/x" }), pack_hash: "c".repeat(64),
+    information_cutoff_at: now, snapshot_id: "s", evidence: [], race,
+  };
+  obj(pack.research).history_version = "official-history-v1";
+  const api = async (url: string): Promise<Row> =>
+    url === "/daily-state" ? { races: [{ race, predictions: [] }, ...Array.from({ length: 4 }, (_, i) => ({ race: { race_id: "o" + i, race_date_jst: "2026-11-10", scheduled_start_at: "2026-11-10T01:00:00.000Z" }, entries: [], predictions: [], official_result: { official_status: "cancelled" } }))] } : { predictions: [] };
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-prerace-"));
+  await immutableLocalFile(path.join(home, "exchange"), "packs/2026-11-10/race-c.json", JSON.stringify({
+    pack, prediction_path: "predictions/2026-11-10/race.json", prediction_template: {},
+  }));
+  const prompts: string[] = [];
+  const infer = vi.fn(async (_dir: string, prompt: string): Promise<Row> => {
+    prompts.push(prompt);
+    if (prompt.includes("単勝オッズ")) return {
+      going: "良", weather: "晴", bias: null, odds_source_url: null,
+      win_odds: [{ horse_number: 1, odds: 9 }, { horse_number: 6, odds: 1.2 }],
+    };
+    return { blocked: true, reason: "暫定", lab_evaluations: [
+      { horse_number: 1, components: { ability: 70, course: 60 } },
+      { horse_number: 6, components: { ability: 60, course: 50 } },
+    ] };
+  });
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer);
+  await worker.init();
+  const report = await worker.tick(new Date(now));
+  const issues = JSON.stringify(report.job_issues);
+  const prerace = JSON.parse(await readFile(path.join(home, "exchange/prerace/2026-11-10", (await readdir(path.join(home, "exchange/prerace/2026-11-10")))[0]), "utf8"));
+  expect(prerace).toMatchObject({ odds_complete: true, race_id: "r1" });
+  const planDir = path.join(home, "exchange/plans/2026-11-10");
+  const plan = JSON.parse(await readFile(path.join(planDir, (await readdir(planDir))[0]), "utf8"));
+  expect(plan).toMatchObject({ real_money: false, adopted: false, race_id: "r1" });
+  expect(plan.lines.length).toBe(2);
+  expect(issues).not.toContain("LOCAL_FILE_CONFLICT");
+  // The six-factor prompt received the pack, never the odds file.
+  const analysis = prompts.find((p) => p.includes("固定pack.research"))!;
+  expect(analysis).not.toContain("win_odds");
+  expect(report.learning).toBeDefined();
+});
