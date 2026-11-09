@@ -1,5 +1,11 @@
 # PROGRESS.md
 
+## 2026-11-09 公式結果の公表時刻が不明な場合の扱い（#61）
+
+- 公式結果ページに公表時刻の表示が無いと、結果の取込が保留され続けていた（高知Ａ－３など）。`published_at_basis:"retrieved_upper_bound"` を指定した場合だけ、確認時刻を公表時刻の上限として保存し、`is_estimated:true` と `evidence_json.published_at_basis` で区別する。実際より遅い時刻に倒すため、過去の予想へ結果が漏れる方向には働かない。既定値は `"official"` で、従来どおり公表時刻を必須とする。推測の時刻・未知の根拠・発走前の確認は拒否。
+- CLIの結果確認プロンプト、`docs/github-result-bridge.md`、`docs/local-cli-operation.md`、`prompts/chatgpt-daily.md` を更新。実ChatGPTタスク本文は未更新。
+- 195テスト・型・lint・build成功。実レースでの取込・精算は未確認（Windows環境で要受入）。
+
 ## 2026-11-09 前走の公式成績をCLIで追加調査
 
 - 名簿の固定後、CLIが各馬の前走成績をWebで追加調査。出典・確認時刻付きの通過順、時計、上がり、着差、騎手・コース資料を新しいsnapshotに保存し、最新の固定入力だけを分析へ渡す。近走は同一形式で保存し、旧snapshotも保持。追加呼出しに合わせ日上限を12から18へ変更。

@@ -503,18 +503,19 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           const document = await this.generate(
             `${day}-result-${key}-${Math.floor(hour / 6)}`,
             rules +
-              `現在UTC ${new Date().toISOString()}。以下の登録レースの完全な公式結果・全券種払戻・取消返還と公表時刻を公式サイトで実際に確認する。取得不能は {blocked:true,reason:理由}。公表時刻を取得時刻で代用しない。JSON契約は ` +
+              `現在UTC ${new Date().toISOString()}。以下の登録レースの完全な公式結果・全券種払戻・取消返還と公表時刻を公式サイトで実際に確認する。取得不能は {blocked:true,reason:理由}。公表時刻はページに表示がある場合だけ published_at に入れ published_at_basis:"official"。表示が無ければ published_at:null、published_at_basis:"retrieved_upper_bound"（Coreが取得時刻を上限として記録する）。公表時刻を推測しない。JSON契約は ` +
               JSON.stringify({
                 bridge_version: "1",
                 source_verification: "official_page_checked",
                 source_checked_at: "UTC ISO",
                 race_date_jst: raceDay,
                 payouts_complete: true,
+                published_at_basis: "official または retrieved_upper_bound",
                 result: {
                   race_id: raceId,
                   revision: 1,
                   official_status: "official",
-                  published_at: "UTC ISO",
+                  published_at: "UTC ISO または null",
                   retrieved_at: "source_checked_atと同じ",
                   source_url: "JRAまたはkeiba.go.jp公式結果URL",
                   finish_order_json: [[1], [2]],
