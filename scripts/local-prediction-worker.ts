@@ -20,6 +20,18 @@ import { PredictionBridge, type BridgeIO } from "./github-bridge";
 import { predictWithCodex } from "./local-codex";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { enrichedReference, historyPrompt } from "./local-history-research";
+import { loadNarCsvDir, narStats } from "./nar-csv-stats";
+
+// What counts as evidence for each of the six factors. Missing evidence is
+// never filled with a guess; "no experience" is a fact, not missing data.
+export const scoringRules = `6項目の根拠の定義:
+- ability: 近走の着順・着差・時計・上がり・相手。近走が無い馬は欠測。
+- course: 今回の競馬場・距離・コース形状での実績や適性。
+- pace: 過去の通過順から見た脚質と、今回の先行馬の数。
+- going: pack.research.going は公式出馬表の表示を history_checked_at に確認した観測値として使ってよい（別途の観測時刻は不要）。null のときだけ欠測。
+- draw_weight: 枠・馬番の傾向（pack.research.local_stats.draw の期間・標本付き集計、または出典付きの資料）と斤量。枠の傾向資料が無いときは欠測。
+- horse_jockey_course: 騎手の今回の競馬場での成績（local_stats.jockeys か jockey_notes の公式騎手リーディング）と、馬の今回のコース・距離での近走。人馬コンビの過去実績が0例なのは「経験なし」という事実で、欠測ではない（その場合は騎手と馬それぞれの根拠で採点）。騎手の成績も馬の近走も無いときだけ欠測。`;
+const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整数またはnull(全馬共通), component:6項目名, detail:何が無いか}], lab_evaluations:[{horse_number, horse_name, components:{6項目:0〜100またはnull(根拠なし)}, rationale}]} を返す。lab_evaluations は正式予想ではない研究用記録。根拠のある項目だけ数値にし、根拠の無い項目は必ずnull。`;
 
 export const blobSha = (text: string) =>
   createHash("sha1")
@@ -46,7 +58,7 @@ export async function immutableLocalFile(
   content: string,
 ) {
   if (
-    !/^(daily|packs|predictions|results|catalog|reviews)\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_.-]+\.json$/.test(
+    !/^(daily|packs|predictions|results|catalog|reviews|lab)\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9_.-]+\.json$/.test(
       name,
     )
   )
@@ -121,6 +133,7 @@ export class LocalPredictionWorker {
     private infer = predictWithCodex,
     private maxCallsPerDay = 18,
     private onProgress?: (stage: string) => Promise<unknown>,
+    private maxResultCallsPerDay = 10,
   ) {
     this.exchange = path.join(home, "exchange");
     this.bridge = new PredictionBridge(
@@ -179,8 +192,13 @@ export class LocalPredictionWorker {
     }
     const day = key.slice(0, 10);
     const jobs = await readdir(path.join(this.home, "jobs"));
+    // Results and reviews have their own budget so prediction research cannot
+    // starve them (and vice versa).
+    const afterRace = (name: string) => /-(result|review)-/u.test(name);
+    const limit = afterRace(key) ? this.maxResultCallsPerDay : this.maxCallsPerDay;
     let calls = 0;
-    for (const job of jobs.filter((name) => name.startsWith(day)))
+    for (const job of jobs.filter((name) => name.startsWith(day) &&
+      afterRace(name) === afterRace(key)))
       if (
         await readFile(
           path.join(this.home, "jobs", job, "started.json"),
@@ -188,9 +206,14 @@ export class LocalPredictionWorker {
         ).catch(() => null)
       )
         calls++;
-    if (calls >= this.maxCallsPerDay) {
+    if (calls >= limit) {
       this.blockedJobs++;
-      this.jobIssues.push({ job: key, reason: "本日のCLI呼出し上限に到達" });
+      this.jobIssues.push({
+        job: key,
+        reason: afterRace(key)
+          ? "本日の結果確認・振り返りのCLI呼出し上限に到達"
+          : "本日のCLI呼出し上限に到達",
+      });
       return null;
     }
     // A crashed/ambiguous invocation is never silently reissued.
@@ -223,6 +246,9 @@ export class LocalPredictionWorker {
       this.jobIssues.push({
         job: key,
         reason: String(document.reason ?? "資料不足").slice(0, 600),
+        ...(Array.isArray(document.missing)
+          ? { missing: rows(document.missing).slice(0, 40) }
+          : {}),
       });
     }
     await writeFile(result + ".tmp", JSON.stringify(document));
@@ -400,12 +426,14 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           day + "-" + str(pack, "pack_hash") + (pack.research ? "-context-v2" : "-context-v1"),
           `分析開始UTC ${new Date().toISOString()}。情報締切はpack.information_cutoff_at。\n` + common +
             (pack.research
-              ? "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。馬場等の欠測とサンプル数を明示。比較根拠がある6項目だけ採点。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。"
+              ? "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n" + scoringRules
               : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
-            "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。正式化に不足なら {blocked:true,reason:理由}。\n" +
+            "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。全馬の全6項目に根拠があるときだけ正式回答にする。1つでも根拠が無ければ正式にせず " + blockedShape + "\n" +
             JSON.stringify({ pack, baseline, source_context: sourceContext }),
           !pack.research,
         );
+        if (answer?.blocked)
+          await this.saveLab(pack, answer, day);
         if (answer && !answer.blocked) {
           const document = { ...obj(output.prediction_template), answer };
           await this.api("/github-bridge/convert", {
@@ -459,7 +487,9 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
     const captured = receipt ? str(receipt, "finished_at") : now.toISOString();
     if (jstDate(captured) !== day || Date.parse(str(race, "scheduled_start_at")) <= Date.now())
       throw new Error("LOCAL_RESEARCH_CUTOFF");
-    const reference = enrichedReference(pack, answer, day, captured);
+    const reference = enrichedReference(
+      pack, answer, day, captured, await this.localStats(pack, day),
+    );
     await immutableLocalFile(
       this.exchange,
       `daily/${day}/morning-reference-v${Date.parse(captured)}.json`,
@@ -475,6 +505,62 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       obj(obj(s.evidence_json ?? {}).research ?? {}).history_version === "official-history-v1");
     if (!snapshot) throw new Error("LOCAL_HISTORY_NOT_SAVED");
     return this.bridge.exportPack(str(snapshot, "snapshot_id"));
+  }
+
+  /** Blocked (incomplete) analyses are kept as Lab records: not adopted, not
+   * sent to Core, immutable and written only before the scheduled start. */
+  private async saveLab(pack: Row, answer: Row, day: string) {
+    const race = obj(pack.race);
+    const savedAt = new Date().toISOString();
+    if (Date.parse(str(race, "scheduled_start_at")) <= Date.parse(savedAt)) return;
+    const evaluations = rows(answer.lab_evaluations ?? []);
+    const missing = rows(answer.missing ?? []);
+    if (!evaluations.length && !missing.length) return;
+    await immutableLocalFile(
+      this.exchange,
+      `lab/${day}/${raceKey(str(race, "race_id"))}-${str(pack, "pack_hash").slice(0, 16)}.json`,
+      JSON.stringify({
+        schema_version: "1",
+        lane: "lab",
+        adopted: false,
+        lab_version: "incomplete-six-factor-v1",
+        race_id: race.race_id,
+        scheduled_start_at: race.scheduled_start_at,
+        pack_hash: pack.pack_hash,
+        information_cutoff_at: pack.information_cutoff_at,
+        saved_at: savedAt,
+        model: this.model,
+        reason: String(answer.reason ?? "").slice(0, 600),
+        missing: missing.slice(0, 120),
+        evaluations: evaluations.slice(0, 20),
+      }),
+    );
+  }
+
+  /** Aggregates from owner-saved NAR CSVs in <DataHome>/nar-csv, if any. */
+  private async localStats(pack: Row, day: string): Promise<Row | null> {
+    const race = obj(pack.race);
+    if (race.jurisdiction !== "NAR") return null;
+    try {
+      const loaded = await loadNarCsvDir(path.join(this.home, "nar-csv"));
+      if (!loaded) return null;
+      const stats = narStats(loaded.runs, {
+        track: str(obj(pack.track), "name"),
+        date: day,
+        surface: obj(pack.course).surface,
+        distance_m: obj(pack.course).distance_m,
+        going: obj(pack.research ?? {}).going,
+        jockeys: rows(pack.entries)
+          .filter((e) => e.status === "active")
+          .map((e) => String(e.jockey_name ?? "")),
+      }, loaded.files);
+      if (stats && loaded.unrecognized.length)
+        stats.unrecognized_finish_values = loaded.unrecognized.slice(0, 10);
+      return stats;
+    } catch (error) {
+      this.failedJob("nar-csv", error);
+      return null;
+    }
   }
 
   private async reviewRecent(now: Date, day: string, hour: number) {

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -158,4 +158,72 @@ it("runs a fixed pack through the existing Core and resumes without another AI c
   await restarted.tick(new Date(now));
   expect(infer).toHaveBeenCalledTimes(2);
   expect(await repo.list("predictions")).toHaveLength(1);
+});
+
+it("keeps an incomplete analysis as an unadopted Lab record, not a Core prediction", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = "2026-11-09T01:00:00.000Z";
+  vi.setSystemTime(now);
+  const repo = new MemoryRepository();
+  const input = wizardRequest(wizardDraft(now));
+  const preview = await previewMaster(repo, input, now);
+  await confirmMaster(
+    repo,
+    { ...input, preview_hash: preview.preview_hash, confirmed: true },
+    now,
+  );
+  const infer = vi.fn(async (_directory: string, prompt: string): Promise<Row> =>
+    prompt.includes("最大")
+      ? { races: [], limitations: [] }
+      : {
+          blocked: true,
+          reason: "枠の傾向資料なし",
+          missing: [{ horse_number: null, component: "draw_weight", detail: "枠別集計なし" }],
+          lab_evaluations: [{
+            horse_number: 1, horse_name: "x",
+            components: { ability: 60, course: 50, pace: 55, going: 50, draw_weight: null, horse_jockey_course: 40 },
+            rationale: "研究用",
+          }],
+        },
+  );
+  const api = async (url: string, body?: unknown) =>
+    obj(await route(repo, new Request("http://local/api" + url, {
+      method: body ? "POST" : "GET",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+    }), now));
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-local-lab-"));
+  const worker = new LocalPredictionWorker(home, api, "53項目", "fixture", infer);
+  await worker.init();
+  const report = await worker.tick(new Date(now));
+  expect(report.job_issues).toContainEqual(expect.objectContaining({
+    missing: [expect.objectContaining({ component: "draw_weight" })],
+  }));
+  expect(await repo.list("predictions")).toHaveLength(0);
+  const labDir = path.join(home, "exchange", "lab", "2026-11-09");
+  const lab = await readdir(labDir);
+  expect(lab).toHaveLength(1);
+  const record = JSON.parse(await readFile(path.join(labDir, lab[0]), "utf8"));
+  expect(record).toMatchObject({ lane: "lab", adopted: false, saved_at: now });
+  expect(record.evaluations[0].components.draw_weight).toBeNull();
+});
+
+it("keeps a separate CLI budget for official results", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = new Date("2026-11-09T05:00:00Z");
+  vi.setSystemTime(now);
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-local-budget-"));
+  const races = [{
+    race: { race_id: "done", race_date_jst: "2026-11-09", scheduled_start_at: "2026-11-09T03:00:00Z" },
+    entries: [], predictions: [],
+  }];
+  const api = vi.fn(async (url: string): Promise<Row> =>
+    url === "/daily-state" ? { races } : {});
+  const infer = vi.fn(async () => ({ blocked: true, reason: "公表待ち" }));
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer, 0, undefined, 1);
+  await worker.init();
+  const report = await worker.tick(now);
+  expect(infer).toHaveBeenCalledTimes(1);
+  expect(String(infer.mock.calls[0])).toContain("公式結果");
+  expect(report.job_issues).toContainEqual(expect.objectContaining({ reason: "本日のCLI呼出し上限に到達" }));
 });
