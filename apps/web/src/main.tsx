@@ -302,11 +302,7 @@ function App() {
             MY RESEARCH <span>/</span> {date.replaceAll("-", ".")}
           </div>
           <span className="connection">
-            {token
-              ? storage === "sheets"
-                ? "Sheets接続"
-                : "ローカル記録"
-              : "未接続"}
+            {token ? "ローカルDB (SQLite)" : "未接続"}
           </span>
         </header>
         {!token ? (
@@ -424,25 +420,7 @@ function App() {
                     <div className="empty">
                       <span className="empty-icon">◎</span>
                       <h3>この日のレースは未登録です</h3>
-                      <p>{storage === "local"
-                        ? "出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。"
-                        : "ChatGPTの出力をSheetsに保存したら、同期してください。"}</p>
-                      <button
-                        hidden={storage !== "sheets"}
-                        className="primary"
-                        disabled={busy || storage !== "sheets"}
-                        onClick={() =>
-                          void action(async () => {
-                            setOutput(
-                              await api("/sync", { operation_id: uid() }),
-                            );
-                            await reload();
-                            setNotice("Sheetsからの取り込みを確認しました");
-                          })
-                        }
-                      >
-                        Sheets の出力を確認
-                      </button>
+                      <p>出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。</p>
                       <button onClick={() => setTab("import")}>
                         JSONを取り込む
                       </button>
@@ -542,11 +520,7 @@ function App() {
                       まだ Web 側の取り込み記録はありません。
                     </p>
                   )}
-                  <p className="muted">
-                    ChatGPT の実行と Web
-                    の取り込みは別処理です。未反映の出力は「Sheets
-                    の出力を確認」から再確認できます。
-                  </p>
+                  
                 </details>
               </>
             )}
@@ -1307,18 +1281,7 @@ function App() {
                     <h1>データを取り込む</h1>
                     <p>ChatGPT の出力を検証し、保存前に確認する。</p>
                   </div>
-                  <button
-                    disabled={busy || storage !== "sheets"}
-                    onClick={() =>
-                      void action(async () => {
-                        setOutput(await api("/sync", { operation_id: uid() }));
-                        setNotice("Sheetsの受信データを確認しました");
-                        await reload();
-                      })
-                    }
-                  >
-                    Sheets の出力を確認
-                  </button>
+                  
                 </div>
                 {storage === "local" && (
                   <RaceImportWizard
@@ -1623,9 +1586,7 @@ function App() {
                 <section className="panel">
                   <h2>接続状態</h2>
                   <p>
-                    {storage === "sheets"
-                      ? "Google Sheets が正本です。"
-                      : "ローカル開発用の記録を使用しています。Sheets の接続設定はサーバー側で行います。"}
+                    ローカルSQLiteデータベースを使用しています。全29テーブルのレコードは「04 データベース」から閲覧できます。
                   </p>
                   <p>
                     分析元: 既存 ChatGPT タスク（接続検証待ち） · 有料 AI API:
