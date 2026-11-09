@@ -57,6 +57,17 @@ export function LocalPredictionStatus({
       </p>
       {reference.path && <p>直近の調査 · 固定入力 {saved}レース</p>}
       {state?.error && <p>{String(state.error)}</p>}
+      {rows(state?.provisional_predictions ?? []).length > 0 && (
+        <details>
+          <summary>暫定予想 {rows(state?.provisional_predictions ?? []).length}件（正式予想ではありません）</summary>
+          {rows(state?.provisional_predictions ?? []).map((item, i) => (
+            <p key={i}>
+              {item.confidence != null && <>信頼度 {Math.round(Number(item.confidence) * 100)}% · </>}
+              欠測・弱い根拠: {((item.missing_factors ?? []) as string[]).join("、")}
+            </p>
+          ))}
+        </details>
+      )}
       {Number(state?.blocked_jobs ?? 0) > 0 && (
         <details>
           <summary>保留 {Number(state?.blocked_jobs)}件 · 理由を見る</summary>
