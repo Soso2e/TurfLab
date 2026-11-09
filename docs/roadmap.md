@@ -1,6 +1,6 @@
 # 開発ロードマップ v0.2
 
-状態: 親7件・子21件に実装対応しローカル検証中。本番接続・実データ確認は未完了。最新の [実装状況](implementation-status.md) を参照。GitHubのSub-issuesとして親子を登録し、本文にも相互参照を残します。
+状態: 親7件・子21件に実装対応しローカル検証中。本番接続・実データ確認は未完了。最新の [実装状況](implementation-status.md) を参照。今後の開発方針（Record／Labの2レーン）は [TurfLab Next 軽量版](turflab-next.md) を参照。GitHubのSub-issuesとして親子を登録し、本文にも相互参照を残します。
 
 ## Phase番号の整理
 
