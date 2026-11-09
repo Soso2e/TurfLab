@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1160 690" width="100%" height="auto" font-family="system-ui, -apple-system, 'Segoe UI', 'Hiragino Sans', 'Meiryo', sans-serif">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="coreGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#172554"/>
+    </linearGradient>
+    <linearGradient id="cliGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#065f46"/>
+      <stop offset="100%" stop-color="#064e3b"/>
+    </linearGradient>
+    <linearGradient id="ghGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#4c1d95"/>
+      <stop offset="100%" stop-color="#2e1065"/>
+    </linearGradient>
+    <linearGradient id="uiGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#7c2d12"/>
+      <stop offset="100%" stop-color="#431407"/>
+    </linearGradient>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#60a5fa"/>
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#34d399"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#c084fc"/>
+    </marker>
+    <marker id="arrowAmber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 9 5 L 0 9 z" fill="#fbbf24"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1160" height="690" rx="16" fill="url(#bgGrad)"/>
+
+  <!-- Header -->
+  <text x="40" y="44" fill="#f8fafc" font-size="22" font-weight="700">TurfLab システム全体構成と2系統のデータ受渡し（Architecture Overview）</text>
+  <text x="40" y="68" fill="#94a3b8" font-size="13">AIの分析候補（未検証）をすべて Core API で検問・ロック（locked）し、AI参考収支と本人の仮想購入収支を厳格に分離する設計</text>
+
+  <!-- ==================== LEFT: Route A (Local CLI) ==================== -->
+  <rect x="30" y="92" width="350" height="568" rx="12" fill="url(#cliGrad)" stroke="#10b981" stroke-width="1.5"/>
+  <rect x="46" y="108" width="150" height="24" rx="12" fill="#10b981"/>
+  <text x="121" y="125" fill="#022c22" font-size="12" font-weight="700" text-anchor="middle">経路A：ローカルCLI自動運用</text>
+  <text x="46" y="154" fill="#ecfdf5" font-size="16" font-weight="700">LocalPredictionWorker</text>
+  <text x="46" y="173" fill="#a7f3d0" font-size="12">scripts/local-prediction-worker.ts（5分周期）</text>
+
+  <!-- Codex CLI Box -->
+  <rect x="46" y="192" width="318" height="156" rx="10" fill="#022c22" stroke="#34d399" stroke-width="1"/>
+  <text x="62" y="216" fill="#6ee7b7" font-size="14" font-weight="700">Codex CLI（gpt-6.1-sol）</text>
+  <text x="62" y="236" fill="#d1fae5" font-size="11.5">• scripts/local-codex.ts から非対話起動（stdin入力）</text>
+  <text x="62" y="255" fill="#d1fae5" font-size="11.5">• --sandbox read-only / shell・multi_agent無効</text>
+  <text x="62" y="274" fill="#d1fae5" font-size="11.5">• 1日最大12呼出し / 1回15分上限 / 256KiB上限</text>
+  <text x="62" y="293" fill="#d1fae5" font-size="11.5">• started.json（wx排他）でクラッシュ時の重複再実行を防止</text>
+  <text x="62" y="312" fill="#fcd34d" font-size="11.5" font-weight="600">• 4種のジョブ：①出馬表調査 ②1R本分析 ③結果確認 ④翌日レビュー</text>
+  <text x="62" y="331" fill="#a7f3d0" font-size="11">※ ②本分析と④レビューは web_search="disabled" で完全固定</text>
+
+  <!-- Local Exchange Box -->
+  <rect x="46" y="366" width="318" height="162" rx="10" fill="#022c22" stroke="#34d399" stroke-width="1"/>
+  <text x="62" y="390" fill="#6ee7b7" font-size="14" font-weight="700">ローカル追記領域（local-predictions/exchange/）</text>
+  <text x="62" y="410" fill="#d1fae5" font-size="11.5">すべて flag: "wx"（上書き禁止・GitHub同一Blob SHA計算）</text>
+  <text x="62" y="432" fill="#a7f3d0" font-size="11.5" font-family="monospace">daily/YYYY-MM-DD/morning-reference-v*.json</text>
+  <text x="62" y="450" fill="#a7f3d0" font-size="11.5" font-family="monospace">catalog/YYYY-MM-DD/name-only-{sha}.json</text>
+  <text x="62" y="468" fill="#a7f3d0" font-size="11.5" font-family="monospace">packs/YYYY-MM-DD/{race-key}-{pack_hash}.json</text>
+  <text x="62" y="486" fill="#a7f3d0" font-size="11.5" font-family="monospace">predictions/YYYY-MM-DD/{race-key}-morning-v1.json</text>
+  <text x="62" y="504" fill="#a7f3d0" font-size="11.5" font-family="monospace">results/ &amp; reviews/ YYYY-MM-DD/*.json</text>
+
+  <!-- Jobs / Receipts Box -->
+  <rect x="46" y="542" width="318" height="100" rx="10" fill="#022c22" stroke="#10b981" stroke-dasharray="4 3"/>
+  <text x="62" y="565" fill="#6ee7b7" font-size="13" font-weight="700">ジョブ証跡（local-predictions/jobs/{key}/）</text>
+  <text x="62" y="585" fill="#d1fae5" font-size="11.5">• started.json（開始ロック） / schema.json</text>
+  <text x="62" y="603" fill="#d1fae5" font-size="11.5">• answer.json（生出力） / validated.json（検証後）</text>
+  <text x="62" y="621" fill="#d1fae5" font-size="11.5">• receipt.json（CLI完了時刻を刻印・AI自己申告時刻は不使用）</text>
+
+  <!-- ==================== CENTER: Windows Core API ==================== -->
+  <rect x="415" y="92" width="330" height="568" rx="12" fill="url(#coreGrad)" stroke="#3b82f6" stroke-width="2"/>
+  <rect x="431" y="108" width="156" height="24" rx="12" fill="#3b82f6"/>
+  <text x="509" y="125" fill="#eff6ff" font-size="12" font-weight="700" text-anchor="middle">中央正本：TurfLab Core</text>
+  <text x="431" y="154" fill="#eff6ff" font-size="16" font-weight="700">Workers API + SQLite DO</text>
+  <text x="431" y="173" fill="#93c5fd" font-size="12">workers/api (http://127.0.0.1:8787 / Bearer認証)</text>
+
+  <!-- Core Modules -->
+  <rect x="431" y="192" width="298" height="114" rx="10" fill="#0f172a" stroke="#60a5fa" stroke-width="1"/>
+  <text x="447" y="215" fill="#93c5fd" font-size="13.5" font-weight="700">1. 出馬表登録 &amp; 固定Pack発行</text>
+  <text x="447" y="235" fill="#e2e8f0" font-size="11.5">• /github-bridge/reference-register（名前一致登録）</text>
+  <text x="447" y="253" fill="#e2e8f0" font-size="11.5">• /races/wizard/*（公式ID照合付き手動登録）</text>
+  <text x="447" y="271" fill="#e2e8f0" font-size="11.5">• /race-import/pack（input_hash / pack_hash / cutoff固定）</text>
+  <text x="447" y="289" fill="#fcd34d" font-size="11.5">• /local-predictions/baseline（近走の相対着順・脚質算出）</text>
+
+  <rect x="431" y="320" width="298" height="114" rx="10" fill="#0f172a" stroke="#60a5fa" stroke-width="1"/>
+  <text x="447" y="343" fill="#93c5fd" font-size="13.5" font-weight="700">2. 予想検問・6項目加重計算・Lock</text>
+  <text x="447" y="363" fill="#e2e8f0" font-size="11.5">• /github-bridge/convert（answer_schema・hash照合）</text>
+  <text x="447" y="381" fill="#e2e8f0" font-size="11.5">• /pipeline/race（能力25/コース15/展開15/馬場15/枠斤10/人馬20）</text>
+  <text x="447" y="399" fill="#e2e8f0" font-size="11.5">• オッズ・人気ワード混入拒否 / 発走後Morning拒否</text>
+  <text x="447" y="417" fill="#34d399" font-size="11.5" font-weight="600">• status="locked" 保存後に GET /races/:id で読返し検証</text>
+
+  <rect x="431" y="448" width="298" height="100" rx="10" fill="#0f172a" stroke="#60a5fa" stroke-width="1"/>
+  <text x="447" y="471" fill="#93c5fd" font-size="13.5" font-weight="700">3. 本人仮想Bet・公式結果精算・評価</text>
+  <text x="447" y="491" fill="#e2e8f0" font-size="11.5">• /bets &amp; /bets/:id/revise（発走前のみ・1R 1,000円/日5,000円）</text>
+  <text x="447" y="509" fill="#e2e8f0" font-size="11.5">• /github-bridge/official-result（saveResult + settle直列実行）</text>
+  <text x="447" y="527" fill="#e2e8f0" font-size="11.5">• /analytics/ranks &amp; /reviews（順位一致率・時系列検証）</text>
+
+  <rect x="431" y="562" width="298" height="80" rx="10" fill="#0f172a" stroke="#93c5fd" stroke-dasharray="4 3"/>
+  <text x="447" y="585" fill="#93c5fd" font-size="13" font-weight="700">永続ストレージ（29論理テーブル）</text>
+  <text x="447" y="605" fill="#cbd5e1" font-size="11.5">• Coordinator Durable Object (SQLite) + 永続ジャーナル</text>
+  <text x="447" y="623" fill="#cbd5e1" font-size="11.5">• 5分周期で /backup のハッシュ検証＆論理チェックポイント保存</text>
+
+  <!-- ==================== RIGHT TOP: Route B (GitHub Bridge + ChatGPT) ==================== -->
+  <rect x="780" y="92" width="350" height="320" rx="12" fill="url(#ghGrad)" stroke="#a855f7" stroke-width="1.5"/>
+  <rect x="796" y="108" width="180" height="24" rx="12" fill="#a855f7"/>
+  <text x="886" y="125" fill="#faf5ff" font-size="12" font-weight="700" text-anchor="middle">経路B：ChatGPT + GitHub Bridge</text>
+  <text x="796" y="154" fill="#f3e8ff" font-size="16" font-weight="700">GitHub Sync Worker &amp; 定時ChatGPT</text>
+  <text x="796" y="173" fill="#d8b4fe" font-size="12">scripts/github-sync.ts ↔ Soso2e/TurfLab-data (非公開)</text>
+
+  <rect x="796" y="190" width="318" height="106" rx="10" fill="#1e1b4b" stroke="#c084fc" stroke-width="1"/>
+  <text x="812" y="212" fill="#e9d5ff" font-size="13.5" font-weight="700">通常ChatGPT 定時タスク（09:00 / 10:00 / 12:00 JST）</text>
+  <text x="812" y="232" fill="#f3e8ff" font-size="11.5">• 09:00: 独自baseline → 外部予想3〜5件の根拠監査 → daily/保存</text>
+  <text x="812" y="250" fill="#f3e8ff" font-size="11.5">• 10:00 / 12:00: 新規packs/を読み正式predictions/を保存</text>
+  <text x="812" y="268" fill="#fde047" font-size="11.5">• state/YYYY-MM-DD/daily-vN.json を読み前日収支を振り返り</text>
+  <text x="812" y="284" fill="#d8b4fe" font-size="11">（手動時はWebウィザードへ回答JSONを直接貼付）</text>
+
+  <rect x="796" y="308" width="318" height="88" rx="10" fill="#1e1b4b" stroke="#c084fc" stroke-width="1"/>
+  <text x="812" y="330" fill="#e9d5ff" font-size="13" font-weight="700">非公開 Soso2e/TurfLab-data（追記専用）</text>
+  <text x="812" y="350" fill="#ddd6fe" font-size="11.5">• daily/ , catalog/ , packs/ , predictions/ , results/ , reviews/</text>
+  <text x="812" y="368" fill="#ddd6fe" font-size="11.5">• state/YYYY-MM-DD/daily-v1..v24.json（08:00以降15分毎差分）</text>
+  <text x="812" y="384" fill="#fca5a5" font-size="11">※ 同名ファイルのSHA変更（上書き）はConflictとして即拒否</text>
+
+  <!-- ==================== RIGHT BOTTOM: Owner Web / iPhone ==================== -->
+  <rect x="780" y="430" width="350" height="230" rx="12" fill="url(#uiGrad)" stroke="#f97316" stroke-width="1.5"/>
+  <rect x="796" y="446" width="166" height="24" rx="12" fill="#f97316"/>
+  <text x="879" y="463" fill="#fff7ed" font-size="12" font-weight="700" text-anchor="middle">本人操作：Web / iPhone</text>
+  <text x="796" y="492" fill="#ffedd5" font-size="16" font-weight="700">React Portal (apps/web)</text>
+  <text x="796" y="511" fill="#fed7aa" font-size="12">Tailscale Serve HTTPS :8443 / PC localhost:8787</text>
+
+  <rect x="796" y="526" width="318" height="118" rx="10" fill="#271206" stroke="#fb923c" stroke-width="1"/>
+  <text x="812" y="548" fill="#fdba74" font-size="13.5" font-weight="700">本人のみが実行できる独立操作</text>
+  <text x="812" y="568" fill="#ffedd5" font-size="11.5">1. 予想内容・6評価根拠・3展開・近走位置取りの確認</text>
+  <text x="812" y="586" fill="#ffedd5" font-size="11.5">2. 採用版（Morning / Final）の固定</text>
+  <text x="812" y="604" fill="#fde047" font-size="11.5" font-weight="600">3. 仮想馬券（Owner Bet）の登録・発走前訂正（AIは不関与）</text>
+  <text x="812" y="622" fill="#ffedd5" font-size="11.5">4. 採用参考収支 vs 本人購入収支・ランク一致率の比較</text>
+
+  <!-- ==================== Connectors ==================== -->
+  <!-- Route A <-> Core -->
+  <path d="M 380 270 L 413 270" stroke="#34d399" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+  <path d="M 413 300 L 380 300" stroke="#60a5fa" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+  <path d="M 380 420 L 413 420" stroke="#34d399" stroke-width="2.5" marker-end="url(#arrowGreen)"/>
+
+  <!-- Route B <-> Core -->
+  <path d="M 780 250 L 747 250" stroke="#c084fc" stroke-width="2.5" marker-end="url(#arrowPurple)"/>
+  <path d="M 747 340 L 780 340" stroke="#60a5fa" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+
+  <!-- Web <-> Core -->
+  <path d="M 780 540 L 747 540" stroke="#fbbf24" stroke-width="2.5" marker-end="url(#arrowAmber)"/>
+  <path d="M 747 575 L 780 575" stroke="#60a5fa" stroke-width="2.5" marker-end="url(#arrowBlue)"/>
+</svg>

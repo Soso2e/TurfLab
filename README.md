@@ -2,6 +2,8 @@
 
 ChatGPTによる競馬分析・展開シミュレーションを記録し、全予想の精度と本人の仮想購入収支を別々に検証する個人用ポータル。
 
+> 📊 **[システム全体設計・動作フロー完全ガイド（SVG図解・CLIプロンプト全文）](docs/system-guide.md)**
+
 ## 現在の状態
 
 サーバー稼働中のローカルCLI予想を追加。`npm run predictions:local -- --once` で実行し、Windows Workerで継続できる。[ローカルCLI運用](docs/local-cli-operation.md)
