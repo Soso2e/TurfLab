@@ -51,6 +51,51 @@ describe("verified full official results -> Core",()=>{
     await expect(importOfficialResult(real.repo,fake,now)).rejects.toThrow(/公式結果URL/);
     expect(await real.repo.list("race_results")).toHaveLength(0);
   });
+  it("rejects a missing publication time unless the upper-bound basis is declared",async()=>{
+    const {repo}=await fixture();
+    const missing=input();
+    obj(obj(missing.document).result).published_at=null;
+    await expect(importOfficialResult(repo,missing,now)).rejects.toThrow(/公表時刻が未確認/);
+    expect(await repo.list("race_results")).toHaveLength(0);
+  });
+  it("stores the check time as an upper bound when the page shows no publication time",async()=>{
+    const {repo}=await fixture();
+    const packet=input();
+    obj(packet.document).published_at_basis="retrieved_upper_bound";
+    obj(obj(packet.document).result).published_at=null;
+    const saved=await importOfficialResult(repo,packet,now);
+    expect(saved.published_at).toBe(now);
+    expect(saved.published_at_basis).toBe("retrieved_upper_bound");
+    const [row]=await repo.list("race_results");
+    expect(row.published_at).toBe(now);
+    expect(row.is_estimated).toBe(true);
+    expect(obj(row.evidence_json).published_at_basis).toBe("retrieved_upper_bound");
+    const again=await importOfficialResult(repo,packet,now);
+    expect(again.result_id).toBe(saved.result_id);
+    expect(await repo.list("race_results")).toHaveLength(1);
+  });
+  it("refuses a guessed publication time under the upper-bound basis or an unknown basis",async()=>{
+    const {repo}=await fixture();
+    const guessed=input();
+    obj(guessed.document).published_at_basis="retrieved_upper_bound";
+    await expect(importOfficialResult(repo,guessed,now)).rejects.toThrow(/null/);
+    const unknown=input();
+    obj(unknown.document).published_at_basis="guess";
+    await expect(importOfficialResult(repo,unknown,now)).rejects.toThrow(/根拠が不正/);
+    expect(await repo.list("race_results")).toHaveLength(0);
+  });
+  it("still rejects a result checked before the race started",async()=>{
+    const {repo}=await fixture();
+    const early="2026-10-12T00:00:00.000Z";
+    const packet=input();
+    obj(packet.document).published_at_basis="retrieved_upper_bound";
+    obj(packet.document).source_checked_at=early;
+    const result=obj(obj(packet.document).result);
+    result.published_at=null;
+    result.retrieved_at=early;
+    await expect(importOfficialResult(repo,packet,now)).rejects.toThrow(/発走前の結果です/);
+    expect(await repo.list("race_results")).toHaveLength(0);
+  });
   it("imports a separate second revision and keeps the original",async()=>{
     const {repo}=await fixture();
     await importOfficialResult(repo,input(1),now);

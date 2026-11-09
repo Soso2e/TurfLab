@@ -85,6 +85,17 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
         typeof note.note === "string" && note.note.length <= 400 &&
         note.source_checked_at === captured, "追加調査の出典または時刻が不正です");
   }
+  if (research.local_stats != null) {
+    const stats = obj(research.local_stats);
+    const to = obj(obj(stats.draw ?? {}).period ?? {}).to;
+    requireCondition(
+      reference.jurisdiction === "NAR" &&
+        stats.version === "nar-csv-stats-v1" &&
+        JSON.stringify(stats).length <= 30_000 &&
+        (to == null || (typeof to === "string" && to < day)),
+      "ローカル集計の版・管轄・期間が不正です",
+    );
+  }
   return {
     ...research,
     horses: horses.map((horse) => ({

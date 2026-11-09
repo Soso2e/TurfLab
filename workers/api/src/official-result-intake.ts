@@ -39,8 +39,26 @@ export async function importOfficialResult(
     : ["keiba.go.jp", "www.keiba.go.jp"];
   requireCondition(hosts.includes(url.hostname),
     "公式結果URLと競馬管轄が一致しません");
-  requireCondition(result.published_at != null,
-    "公式結果の公表時刻が未確認です。取得時刻とは区別して保留しました");
+  // The official page often shows no publication time. Then the source-check
+  // time is a conservative upper bound (published no later than it was read):
+  // it can only make the result look later, never leak it earlier. The basis
+  // is stored so it is never mistaken for an observed publication time.
+  const basis = doc.published_at_basis ?? "official";
+  requireCondition(basis === "official" || basis === "retrieved_upper_bound",
+    "公表時刻の根拠が不正です");
+  if (basis === "official")
+    requireCondition(result.published_at != null,
+      "公式結果の公表時刻が未確認です。公式に表示が無い場合は published_at_basis:\"retrieved_upper_bound\" を指定してください");
+  else {
+    requireCondition(result.published_at == null,
+      "取得時刻を上限とする場合、published_at は null にしてください（公表時刻を推測で埋めない）");
+    result.published_at = checked;
+    result.is_estimated = true;
+    result.evidence_json = {
+      ...obj(result.evidence_json ?? {}),
+      published_at_basis: "retrieved_upper_bound",
+    };
+  }
   requireCondition(instant(checked) <= instant(now) &&
     instant(checked) >= instant(result.published_at),
     "結果公表前または未来の取得時刻は使えません");
@@ -70,6 +88,8 @@ export async function importOfficialResult(
     virtual_bets_settled: entries.length,
     source_url: sourceUrl,
     source_checked_at: checked,
+    published_at: saved.published_at,
+    published_at_basis: basis,
     source_independently_fetched_by_core: false,
     note: "GitHub内の公式確認記録とCoreの完全性検証で保存。出典ページの本文はCoreから独立取得していません。",
   };
