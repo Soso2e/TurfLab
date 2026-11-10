@@ -175,7 +175,21 @@ export function buildRuns(
       });
     }
   }
-  return { runs, unrecognized: [...unrecognized].sort() };
+  return { runs: mergeRuns(runs), unrecognized: [...unrecognized].sort() };
+}
+
+/** One row per (track, day, race, horse number): overlapping monthly CSVs and
+ * TurfLab's own stored results describe the same start; the first one wins. */
+export function mergeRuns(...lists: NarRun[][]): NarRun[] {
+  const seen = new Set<string>();
+  const out: NarRun[] = [];
+  for (const r of lists.flat()) {
+    const key = `${r.track}|${r.date}|${r.race_no}|${r.horse_number ?? `j:${r.jockey}`}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(r);
+  }
+  return out;
 }
 
 type Tally = { starts: number; wins: number; top3: number };

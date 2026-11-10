@@ -22,7 +22,8 @@ import { predictWithCodex } from "./local-codex";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { officialResearchUrl } from "../packages/shared/src/race-research";
 import { enrichedReference, historyPrompt } from "./local-history-research";
-import { loadNarCsvDir, narStats, normGoing } from "./nar-csv-stats";
+import { loadNarCsvDir, mergeRuns, narStats, normGoing } from "./nar-csv-stats";
+import { importNarCsvInbox } from "./nar-csv-import";
 import { evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
 import {
   fitScale, fitWeights, features, labOutcome, learningReport, MIN_TRAIN_RACES,
@@ -151,6 +152,7 @@ export class LocalPredictionWorker {
   private blockedJobs = 0;
   private jobIssues: Row[] = [];
   private provisional: Row[] = [];
+  private csvImport: Row | null = null;
   private bridge: PredictionBridge;
   private exchange: string;
   constructor(
@@ -306,6 +308,11 @@ export class LocalPredictionWorker {
     this.provisional = [];
     const day = jstDate(now.toISOString());
     const hour = new Date(now.getTime() + 9 * 3600000).getUTCHours();
+    try {
+      this.csvImport = await importNarCsvInbox(this.home, now);
+    } catch (error) {
+      this.failedJob("nar-csv-import", error);
+    }
     if (!targetUrl) await this.reviewRecent(now, day, hour);
     const state = await this.api("/daily-state");
     const today = rows(state.races).filter(
@@ -543,6 +550,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       blocked_jobs: this.blockedJobs,
       job_issues: this.jobIssues,
       provisional_predictions: this.provisional,
+      nar_csv_import: this.csvImport,
       learning,
       model: this.model,
       checked_at: new Date().toISOString(),
@@ -833,21 +841,21 @@ JSON: {going:"良|稍重|重|不良"またはnull,weather:文字列またはnull
           .map((e) => String(e.jockey_name ?? "")),
       };
       const loaded = await loadNarCsvDir(path.join(this.home, "nar-csv"));
-      if (!loaded) {
-        // No owner CSV: fall back to official results TurfLab already stored.
-        const own = await loadCoreRuns(this.exchange);
-        return own.runs.length ? coreStats(own.runs, target, own.races) : null;
+      // Official results TurfLab stored itself fill days the owner's CSVs lack.
+      const own = await loadCoreRuns(this.exchange);
+      if (!loaded) return own.runs.length ? coreStats(own.runs, target, own.races) : null;
+      // Fixed-size provenance: the API caps local_stats at 30,000 characters.
+      const shas = loaded.files.map((f) => String(f.sha256)).sort();
+      const stats = narStats(mergeRuns(loaded.runs, own.runs), target, [{
+        name: "nar-csv", files: shas.length,
+        rows: loaded.files.reduce((n, f) => n + Number(f.rows ?? 0), 0),
+        sha256: createHash("sha256").update(shas.join("\n")).digest("hex"),
+      }]);
+      if (stats && own.runs.length) {
+        stats.core_results_merged = own.races.length;
+        stats.limitations = [...(Array.isArray(stats.limitations) ? stats.limitations.map(String) : []),
+          "CSVにない日はTurfLabが保存した公式結果（予想対象レースのみ）で補完。同一出走は重複除去"];
       }
-      const stats = narStats(loaded.runs, {
-        track: str(obj(pack.track), "name"),
-        date: day,
-        surface: obj(pack.course).surface,
-        distance_m: obj(pack.course).distance_m,
-        going: obj(pack.research ?? {}).going,
-        jockeys: rows(pack.entries)
-          .filter((e) => e.status === "active")
-          .map((e) => String(e.jockey_name ?? "")),
-      }, loaded.files);
       if (stats && loaded.unrecognized.length)
         stats.unrecognized_finish_values = loaded.unrecognized.slice(0, 10);
       return stats;
