@@ -23,7 +23,7 @@ import { raceKey } from "../packages/shared/src/github-bridge";
 import { officialResearchUrl } from "../packages/shared/src/race-research";
 import { enrichedReference, historyPrompt } from "./local-history-research";
 import { loadNarCsvDir, narStats, normGoing } from "./nar-csv-stats";
-import { evidenceCoverage, provisionalRanking } from "./evidence-coverage";
+import { evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
 import {
   fitScale, fitWeights, features, labOutcome, learningReport, MIN_TRAIN_RACES,
   planOutcome, PRIOR_WEIGHTS, virtualPlan, type Sample,
@@ -689,6 +689,7 @@ JSON: {going:"良|稍重|重|不良"またはnull,weather:文字列またはnull
       path: name,
       confidence: coverage?.confidence ?? null,
       missing_factors: [...new Set(missing.map((m) => String(m.component)))],
+      ...(coverage ? { formal_blockers: formalBlockers(pack, coverage) } : {}),
     };
     // saved_at differs on every tick, so an existing record is the record.
     if (await readFile(path.join(this.exchange, name), "utf8").catch(() => null)) {

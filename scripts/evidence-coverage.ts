@@ -107,6 +107,39 @@ export function evidenceCoverage(pack: Row): Row {
   };
 }
 
+/** Why a race is not formal, computed from the coverage alone: which factors
+ * block it, for how many horses, and how far the stored-result samples are from
+ * the minimum. Thresholds are reported, never lowered. */
+export function formalBlockers(pack: Row, coverage: Row): Row {
+  const blocking = new Map<string, { horses: Set<number>; reasons: Set<string> }>();
+  for (const m of rows(coverage.missing)) {
+    if (m.status === "weak" && m.component === "course") continue;
+    const entry = blocking.get(String(m.component)) ?? { horses: new Set(), reasons: new Set() };
+    entry.horses.add(Number(m.horse_number));
+    entry.reasons.add(String(m.detail).replace(/\d+/gu, "N"));
+    blocking.set(String(m.component), entry);
+  }
+  const stats = obj(obj(pack.research).local_stats ?? {});
+  const core = stats.version === CORE_STATS_VERSION;
+  const active = rows(pack.entries).filter((e) => e.status === "active");
+  const starts = active.map((e) => Number(obj(rows(stats.jockeys ?? [])
+    .find((j) => normName(j.jockey) === normName(e.jockey_name))?.at_track ?? {}).starts ?? 0));
+  return {
+    formal_allowed: coverage.formal_allowed === true,
+    blocking: [...blocking].map(([factor, v]) => ({
+      factor, horses: v.horses.size, reasons: [...v.reasons].slice(0, 4),
+    })),
+    progress: {
+      source: core ? "core-results" : stats.version ? String(stats.version) : "none",
+      draw_races: Number(obj(stats.draw ?? {}).races ?? 0),
+      draw_races_needed: core ? CORE_MIN_DRAW_RACES : 1,
+      jockeys_below_min: starts.filter((s) => s < (core ? CORE_MIN_JOCKEY_STARTS : 1)).length,
+      jockey_starts_needed: core ? CORE_MIN_JOCKEY_STARTS : 1,
+      fewest_jockey_starts: starts.length ? Math.min(...starts) : 0,
+    },
+  };
+}
+
 /** Removes scores for factors with no evidence, and ranks on what remains while
  * reporting how much of the score weight that remainder actually covers. */
 export function provisionalRanking(pack: Row, coverage: Row, evaluations: Row[]) {

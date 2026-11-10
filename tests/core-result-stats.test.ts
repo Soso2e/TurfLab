@@ -5,6 +5,7 @@ import { expect, it } from "vitest";
 import { coreStats, loadCoreRuns, runsFromResult } from "../scripts/core-result-stats";
 import { evidenceCoverage } from "../scripts/evidence-coverage";
 import { immutableLocalFile } from "../scripts/local-prediction-worker";
+import { validLocalStats } from "../workers/api/src/name-reference-intake";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { obj, rows, type Row } from "../packages/shared/src/domain";
 
@@ -54,4 +55,17 @@ it("uses only earlier days and keeps tiny samples as weak evidence", async () =>
   expect(obj(factors.horse_jockey_course).status).toBe("weak");
   expect(coverage.formal_allowed).toBe(false);
   expect(coreStats(runs, { ...target, date: "2026-11-03" }, races)).toBeNull();
+});
+
+it("keeps stored-result aggregates small and accepted by the API intake", () => {
+  const races = Array.from({ length: 1000 }, (_, i) => ({ race_id: `r${i}`, result: `results/2026-10-01/${"x".repeat(150)}-${i}.json` }));
+  const runs = runsFromResult(pack("r1", "2026-11-03", 1), result("r1"));
+  const target = { track: "川崎", date: "2026-11-10", surface: "ダート", distance_m: 900, going: "良", jockeys: ["高橋優"] };
+  const stats = coreStats(runs, target, races)!;
+  expect(rows(stats.files)).toEqual([expect.objectContaining({ name: "core-results", results: 1000 })]);
+  expect(JSON.stringify(stats).length).toBeLessThan(30_000);
+  expect(validLocalStats(stats, "NAR", "2026-11-10")).toBe(true);
+  expect(validLocalStats({ ...stats, version: "other" }, "NAR", "2026-11-10")).toBe(false);
+  expect(validLocalStats(stats, "JRA", "2026-11-10")).toBe(false);
+  expect(validLocalStats(stats, "NAR", "2026-11-03")).toBe(false); // period must end before the day
 });
