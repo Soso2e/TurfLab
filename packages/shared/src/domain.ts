@@ -264,6 +264,24 @@ export function ticket(
     ? [...ns].sort((a, b) => a - b)
     : [...ns];
 }
+// Official result payouts also list bracket (枠) tickets. Brackets are 1-8 and
+// may repeat (e.g. 枠連7-7), so they are validated apart from horse-number tickets.
+// Bets never use these types; they only make complete official payouts storable.
+export const bracketTicketTypes = ["bracket_quinella", "bracket_exacta"];
+export function payoutTicket(
+  type: string,
+  selections: Json,
+  validNumbers?: number[],
+): number[] {
+  if (!bracketTicketTypes.includes(type)) return ticket(type, selections, validNumbers);
+  requireCondition(Array.isArray(selections), "券種・買い目が不正です");
+  const ns = selections as number[];
+  requireCondition(
+    ns.length === 2 && ns.every((n) => Number.isInteger(n) && n >= 1 && n <= 8),
+    "枠番の買い目が不正です",
+  );
+  return type === "bracket_quinella" ? [...ns].sort((a, b) => a - b) : [...ns];
+}
 export function money(value: Json, allowZero = false): number {
   requireCondition(
     typeof value === "number" &&

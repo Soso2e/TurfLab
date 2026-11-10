@@ -1,5 +1,6 @@
 // Decides from the fixed pack alone which of the six factors have evidence, so
 // the formal/provisional split does not depend on what the LLM chooses to say.
+import { CORE_MIN_DRAW_RACES, CORE_MIN_JOCKEY_STARTS, CORE_STATS_VERSION } from "./core-result-stats";
 import { obj, rows, str, type Row } from "../packages/shared/src/domain";
 import { normName } from "./nar-csv-stats";
 
@@ -24,10 +25,16 @@ function horseEvidence(pack: Row, entry: Row): Record<Factor, Evidence> {
   const atTrack = runs.filter((r) => trackName(r.track) === track);
   const atCourse = atTrack.filter((r) => r.distance_m === distance);
   const stats = obj(research.local_stats ?? {});
+  // Aggregates of TurfLab's own stored results start tiny; below the minimum
+  // sample they are shown but count only as weak (never as observed).
+  const core = stats.version === CORE_STATS_VERSION;
   const drawRaces = Number(obj(stats.draw ?? {}).races ?? 0);
+  const drawEnough = drawRaces >= (core ? CORE_MIN_DRAW_RACES : 1);
   const drawNote = rows(research.track_notes ?? []).some((n) => /枠|馬番/u.test(String(n.note)));
   const jockey = rows(stats.jockeys ?? []).find((j) => normName(j.jockey) === normName(entry.jockey_name));
   const jockeyStarts = Number(obj(jockey?.at_track ?? {}).starts ?? 0);
+  const jockeyEnough = jockeyStarts >= (core ? CORE_MIN_JOCKEY_STARTS : 1);
+  const label = core ? "保存済み公式結果" : "CSV";
   const notes = rows(horse?.jockey_notes ?? []);
   const local = notes.some((n) => !/全国|代用/u.test(String(n.note)));
   return {
@@ -47,13 +54,17 @@ function horseEvidence(pack: Row, entry: Row): Record<Factor, Evidence> {
     going: research.going != null
       ? { status: "observed", detail: `公式表示 ${String(research.going)}` }
       : { status: "missing", detail: "馬場の公式表示なし（発表待ちを含む）" },
-    draw_weight: drawRaces > 0 || drawNote
-      ? { status: "observed", detail: drawRaces > 0 ? `CSV集計 ${drawRaces}R` : "出典付き資料" }
+    draw_weight: drawEnough || drawNote
+      ? { status: "observed", detail: drawEnough ? `${label}集計 ${drawRaces}R` : "出典付き資料" }
+      : drawRaces > 0
+        ? { status: "weak", detail: `${label}集計 ${drawRaces}R（${CORE_MIN_DRAW_RACES}R未満）` }
       : entry.carried_weight_kg != null
         ? { status: "weak", detail: "斤量のみ。枠傾向の資料なし" }
         : { status: "missing", detail: "枠傾向・斤量なし" },
-    horse_jockey_course: jockeyStarts > 0 || local
-      ? { status: "observed", detail: jockeyStarts > 0 ? `騎手の同場CSV集計 ${jockeyStarts}騎乗` : "騎手の同場成績資料" }
+    horse_jockey_course: jockeyEnough || local
+      ? { status: "observed", detail: jockeyEnough ? `騎手の同場${label}集計 ${jockeyStarts}騎乗` : "騎手の同場成績資料" }
+      : jockeyStarts > 0
+        ? { status: "weak", detail: `騎手の同場${label}集計 ${jockeyStarts}騎乗（${CORE_MIN_JOCKEY_STARTS}騎乗未満）` }
       : notes.length
         ? { status: "weak", detail: "騎手は全国成績の代用のみ" }
         : atTrack.length

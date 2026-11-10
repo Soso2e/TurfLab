@@ -104,7 +104,10 @@ try {
     );
     await api("/local-predictions/status", status).catch(() => {});
     console.log(
-      JSON.stringify({ status: status.status, at: status.checked_at }),
+      // Keep the sanitized error code in the log; status.json is overwritten
+      // by the next healthy cycle, so the log is the only failure history.
+      JSON.stringify({ status: status.status, at: status.checked_at,
+        ...("error" in status ? { error: status.error } : {}) }),
     );
     if (values.once || stopping) break;
     for (let i = 0; i < 60 && !stopping; i++)

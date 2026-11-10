@@ -4,7 +4,8 @@ $runtimeHome = Get-TurfHome $DataHome
 $bridgeDir = Join-Path $runtimeHome 'github-bridge'
 $configFile = Join-Path $bridgeDir 'config.json'
 if (-not (Test-Path -LiteralPath $configFile)) {
-    Write-Output '[TurfLab] GitHub sync is not configured. See docs/github-prediction-bridge.md.'
+    # Warning (not silent output) so logon logs and Status show the gap.
+    Write-Warning '[TurfLab] GitHub sync is NOT configured: nothing is saved to GitHub. Create github-bridge/config.json (docs/github-prediction-bridge.md).'
     return
 }
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { throw 'Install GitHub CLI and run gh auth login.' }

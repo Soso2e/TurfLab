@@ -51,6 +51,25 @@ describe("verified full official results -> Core",()=>{
     await expect(importOfficialResult(real.repo,fake,now)).rejects.toThrow(/公式結果URL/);
     expect(await real.repo.list("race_results")).toHaveLength(0);
   });
+  it("stores bracket payouts listed on NAR result pages without loosening horse tickets",async()=>{
+    const {repo}=await fixture();
+    const packet=input();
+    const payoutRows=obj(packet.document).payouts as Record<string, unknown>[];
+    payoutRows.push(
+      {ticket_type:"bracket_quinella",selections_json:[7,6],payout_per_100_yen:1680,refund_rule_json:null},
+      {ticket_type:"bracket_exacta",selections_json:[7,7],payout_per_100_yen:4950,refund_rule_json:null},
+    );
+    await importOfficialResult(repo,packet,now);
+    const stored=await repo.list("payouts");
+    expect(stored.find(p=>p.ticket_type==="bracket_quinella")?.selections_json).toEqual([6,7]);
+    expect(stored.find(p=>p.ticket_type==="bracket_exacta")?.selections_json).toEqual([7,7]);
+    const bad=input();
+    (obj(bad.document).payouts as Record<string, unknown>[]).push(
+      {ticket_type:"bracket_quinella",selections_json:[9,1],payout_per_100_yen:100,refund_rule_json:null});
+    const fresh=await fixture();
+    await expect(importOfficialResult(fresh.repo,bad,now)).rejects.toThrow(/枠番/);
+    expect(await fresh.repo.list("race_results")).toHaveLength(0);
+  });
   it("rejects a missing publication time unless the upper-bound basis is declared",async()=>{
     const {repo}=await fixture();
     const missing=input();

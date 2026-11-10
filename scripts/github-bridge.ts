@@ -104,6 +104,13 @@ export class PredictionBridge {
     private config: BridgeConfig,
     private io: BridgeIO,
   ) {}
+  /** The local CLI worker reuses this bridge over a local folder, not GitHub. */
+  private get local() {
+    return this.config.repository.startsWith("local/");
+  }
+  private get destination() {
+    return this.local ? "ローカル交換フォルダ" : "GitHub";
+  }
   async init() {
     await mkdir(path.join(this.home, "inbox"), { recursive: true });
     try {
@@ -166,6 +173,7 @@ export class PredictionBridge {
     );
     return {
       configured: true,
+      transport: this.local ? "local" : "github",
       last_export: this.state.last_export ?? null,
       last_daily_export: this.state.last_daily_export ?? null,
       last_reference: this.state.last_reference ?? null,
@@ -294,7 +302,7 @@ export class PredictionBridge {
         version,
         status: "success",
         reason:
-          "変更されたCore日次状態をGitHubに追加保存しました（旧版は保持）",
+          `変更されたCore日次状態を${this.destination}に追加保存しました（旧版は保持）`,
       };
     } catch (e) {
       this.state.daily_export_next_attempt = new Date(
@@ -422,7 +430,7 @@ export class PredictionBridge {
             }
           } catch {
             race.status = "needs_snapshot";
-            race.issues = ["固定packのGitHub出力に失敗。次回再試行します"];
+            race.issues = [`固定packの${this.destination}出力に失敗。次回再試行します`];
           }
         }
         report.status = report.races.every(
@@ -559,7 +567,7 @@ export class PredictionBridge {
     this.state.last_export = {
       path: name,
       status: "success",
-      reason: "固定パックをGitHubへ出力しました",
+      reason: `固定パックを${this.destination}へ出力しました`,
       at: this.io.now().toISOString(),
     };
     await this.save();
