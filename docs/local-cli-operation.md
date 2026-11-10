@@ -44,7 +44,12 @@ CLIは1回15分・1日最大24呼出し（調査・予想・発走前の再調�
 
 ## NAR公式CSV（任意）
 
-公式サイトのデータダウンロードのボタンで本人が保存したZIPを展開し、CSVを `%LOCALAPPDATA%\TurfLab\local-predictions\nar-csv\` に置く。**自動ダウンロードはしない。** 原本はGit管理外のこのフォルダだけに置き、GitHubへは上げない。
+公式サイトのデータダウンロードのボタンで本人が保存したZIP（またはCSV）を、展開せずに `%LOCALAPPDATA%\TurfLab\local-predictions\nar-csv-inbox\` へ置く。Workerが毎周期取り込み、`nar-csv\<SHA-256>.csv` に一度だけ保存し、`nar-csv\manifest.json` に出典・取込日時・行数・期間を記録する。同じ内容は重複として無視、NARの表と判別できないCSVは `nar-csv-inbox\rejected\` へ移す（推測で読まない）。取込状況は `status.json` の `nar_csv_import`。
+
+**自動ダウンロードはしない。** keiba.go.jp の robots.txt は Googlebot 以外に DataDownload・DataRoom を不許可としており、NARの許諾が得られるまで本人の手動保存だけを入口にする。第三者サイト（netkeiba等）も規約で自動取得を認める記載を確認できていないため取得しない。原本はGit管理外のこのフォルダだけに置き、GitHubへは上げない。
+
+- 重複除去: 月別CSVの重なりとTurfLabが保存した公式結果は、(競馬場, 日, R, 馬番) で1出走に数える。CSVがない日は保存済み公式結果で補完する。
+- `local_stats` の出典はファイル数・行数・SHA-256の集約値で記録し、API上限（30,000字）を超えない。
 
 - 地方レースの追加調査のたびに、対象レース日の**前日まで**のレースだけで、同じ競馬場・芝ダ・距離の枠番別成績（同じ馬場の内訳付き）と、出走騎手の競馬場別・コース別成績を集計する。集計値・期間・標本数・CSVのSHA-256を固定入力（`research.local_stats`）に入れる。LLMには集計値だけが渡る。
 - 列は説明書の項目名（競馬場、競走年月日、レース番号、芝ダート区分、距離、馬場／枠番、馬番、騎手名、着順）で対応づける。実CSVのヘッダーは未確認のため、置いた後に次で読めるか確認する。`runs_with_course` が0なら列名が合っていない。
