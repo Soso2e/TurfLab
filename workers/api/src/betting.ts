@@ -10,6 +10,7 @@ import {
   requireCondition,
   rows,
   str,
+  payoutTicket,
   ticket,
   type Row,
 } from "../../../packages/shared/src/domain";
@@ -395,7 +396,7 @@ export async function saveResult(
         "払戻と返還を同じ行へ混在できません",
       );
     }
-    const ns = ticket(str(p, "ticket_type"), p.selections_json, numbers);
+    const ns = payoutTicket(str(p, "ticket_type"), p.selections_json, numbers);
     const key = canonical([p.ticket_type, ns]);
     requireCondition(!payoutKeys.has(key), "払戻買い目が重複しています");
     payoutKeys.add(key);

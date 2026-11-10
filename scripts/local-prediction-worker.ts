@@ -16,6 +16,7 @@ import {
   str,
   type Row,
 } from "../packages/shared/src/domain";
+import { coreStats, loadCoreRuns } from "./core-result-stats";
 import { PredictionBridge, type BridgeIO } from "./github-bridge";
 import { predictWithCodex } from "./local-codex";
 import { raceKey } from "../packages/shared/src/github-bridge";
@@ -283,6 +284,20 @@ export class LocalPredictionWorker {
     await writeFile(result + ".tmp", JSON.stringify(document));
     await rename(result + ".tmp", result);
     return document;
+  }
+
+  /** Newest stored, non-blocked official-result answer for a race, if any. */
+  private async savedResult(key: string): Promise<Row | null> {
+    const jobs = (await readdir(path.join(this.home, "jobs")).catch(() => []))
+      .filter((name) => name.includes(`-result-${key}-`)).sort().reverse();
+    for (const job of jobs) {
+      const text = await readFile(path.join(this.home, "jobs", job, "validated.json"), "utf8")
+        .catch(() => null);
+      if (!text) continue;
+      const saved = obj(JSON.parse(text));
+      if (!saved.blocked && obj(saved.result).race_id) return saved;
+    }
+    return null;
   }
 
   async tick(now = new Date(), targetUrl?: string) {
@@ -806,8 +821,22 @@ JSON: {going:"良|稍重|重|不良"またはnull,weather:文字列またはnull
     const race = obj(pack.race);
     if (race.jurisdiction !== "NAR") return null;
     try {
+      const target = {
+        track: str(obj(pack.track), "name"),
+        date: day,
+        surface: obj(pack.course).surface,
+        distance_m: obj(pack.course).distance_m,
+        going: obj(pack.research ?? {}).going,
+        jockeys: rows(pack.entries)
+          .filter((e) => e.status === "active")
+          .map((e) => String(e.jockey_name ?? "")),
+      };
       const loaded = await loadNarCsvDir(path.join(this.home, "nar-csv"));
-      if (!loaded) return null;
+      if (!loaded) {
+        // No owner CSV: fall back to official results TurfLab already stored.
+        const own = await loadCoreRuns(this.exchange);
+        return own.runs.length ? coreStats(own.runs, target, own.races) : null;
+      }
       const stats = narStats(loaded.runs, {
         track: str(obj(pack.track), "name"),
         date: day,
@@ -850,7 +879,9 @@ JSON: {going:"良|稍重|重|不良"またはnull,weather:文字列またはnull
           official_result: entry.official_result,
         };
         if (!entry.official_result) {
-          const document = await this.generate(
+          // A complete answer that Core rejected (e.g. before a validator fix)
+          // is re-submitted from disk instead of spending another CLI call.
+          const document = (await this.savedResult(key)) ?? await this.generate(
             `${day}-result-${key}-${Math.floor(hour / 6)}`,
             rules +
               `現在UTC ${new Date().toISOString()}。以下の登録レースの完全な公式結果・全券種払戻・取消返還と公表時刻を公式サイトで実際に確認する。取得不能は {blocked:true,reason:理由}。公表時刻はページに表示がある場合だけ published_at に入れ published_at_basis:"official"。表示が無ければ published_at:null、published_at_basis:"retrieved_upper_bound"（Coreが取得時刻を上限として記録する）。公表時刻を推測しない。JSON契約は ` +

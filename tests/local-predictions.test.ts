@@ -227,3 +227,39 @@ it("keeps a separate CLI budget for official results", async () => {
   expect(String(infer.mock.calls[0])).toContain("公式結果");
   expect(report.job_issues).toContainEqual(expect.objectContaining({ reason: "本日のCLI呼出し上限に到達" }));
 });
+
+it("re-submits a stored complete result after Core rejected it, without another CLI call", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = new Date("2026-11-10T08:30:00Z");
+  vi.setSystemTime(now);
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-local-resubmit-"));
+  const races = [{
+    race: { race_id: "done", race_date_jst: "2026-11-10", scheduled_start_at: "2026-11-10T07:00:00Z" },
+    entries: [], predictions: [],
+  }];
+  const answer = { bridge_version: "1", result: { race_id: "done" }, payouts: [] };
+  let reject = true;
+  const posted: Row[] = [];
+  const api = vi.fn(async (url: string, body?: unknown): Promise<Row> => {
+    if (url === "/daily-state") return { races };
+    if (url === "/github-bridge/official-result") {
+      posted.push(obj(body));
+      if (reject) throw new Error("CORE_HTTP_400");
+    }
+    return {};
+  });
+  const infer = vi.fn(async () => answer);
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer, 0, undefined, 5);
+  await worker.init();
+  await worker.tick(now);
+  expect(infer).toHaveBeenCalledTimes(1);
+  reject = false;
+  // Next 6-hour slot: a new job key, but the stored answer is reused.
+  const later = new Date("2026-11-10T09:30:00Z");
+  vi.setSystemTime(later);
+  await worker.tick(later);
+  expect(infer).toHaveBeenCalledTimes(1);
+  expect(posted).toHaveLength(2);
+  expect((await readdir(path.join(home, "jobs"))).filter((j) => j.includes("-result-"))).toHaveLength(1);
+  expect(obj(posted[1].document)).toEqual(answer);
+});
