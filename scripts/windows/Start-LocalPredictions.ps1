@@ -6,6 +6,22 @@ $manifestHome = Join-Path $workerHome 'process'
 if (Get-TurfProcess $manifestHome) { Write-Output 'Local prediction worker is running.'; return }
 if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw 'Codex CLI is required.' }
 if ($Model -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid model name.' }
+# No recorded worker is alive. A lock left by a killed worker can name a PID
+# that Windows has since reused (e.g. smartscreen.exe); the worker would then
+# refuse to start forever. Archive it only when that PID is not a TurfLab
+# prediction worker. No process is ever stopped here.
+$lock = Join-Path $workerHome 'worker.lock'
+if (Test-Path -LiteralPath $lock) {
+    $lockPid = 0
+    if ([int]::TryParse((Get-Content -LiteralPath $lock -Raw).Trim(), [ref]$lockPid) -and $lockPid -gt 0) {
+        $holder = Get-CimInstance Win32_Process -Filter "ProcessId = $lockPid"
+        if ($holder -and $holder.Name -eq 'node.exe' -and $holder.CommandLine -match 'local-predictions\.ts') {
+            throw "Prediction worker PID $lockPid holds the lock but has no manifest. Inspect it; nothing was changed."
+        }
+        Move-Item -LiteralPath $lock -Destination ($lock + '.stale-' + [guid]::NewGuid().ToString('N'))
+        Write-Output "Archived stale prediction worker lock (PID $lockPid is not a prediction worker)."
+    }
+}
 $null = New-Item -ItemType Directory -Force -Path $manifestHome, (Join-Path $runtimeHome 'logs')
 $stamp = Get-Date -Format yyyyMMdd-HHmmss
 $scriptFile = Join-Path $RepoRoot 'scripts/local-predictions.ts'
