@@ -4,6 +4,7 @@
 // jockey and course of every runner. Only race days strictly before the target
 // day are used (narStats enforces the cutoff), so no result leaks into a
 // prediction of the same or an earlier day.
+import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { obj, rows, type Row } from "../packages/shared/src/domain";
@@ -89,7 +90,15 @@ export async function loadCoreRuns(exchange: string): Promise<{ runs: NarRun[]; 
 }
 
 export function coreStats(runs: NarRun[], target: NarTarget, races: Row[]): Row | null {
-  const stats = narStats(runs, target, races);
+  // A fixed-size provenance: the full list grows with every stored result and
+  // would eventually exceed the API's 30,000-character local_stats limit.
+  const paths = races.map((r) => String(r.result)).sort();
+  const files = [{
+    name: "core-results",
+    results: paths.length,
+    sha256: createHash("sha256").update(paths.join("\n")).digest("hex"),
+  }];
+  const stats = narStats(runs, target, files);
   if (!stats) return null;
   return {
     ...stats,

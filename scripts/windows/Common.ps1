@@ -21,7 +21,7 @@ function Get-TurfProcess([string]$HomePath) {
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$record.pid)"
     if (-not $process) { return $null }
     if ($process.CommandLine -ne $record.command_line -or
-        $process.CreationDate.ToUniversalTime().ToString('o') -ne $record.created_at) {
+        $process.CreationDate.ToUniversalTime() -ne ([datetime]$record.created_at).ToUniversalTime()) {
         throw 'Recorded PID belongs to another process. Refusing to stop or reuse it.'
     }
     return $process

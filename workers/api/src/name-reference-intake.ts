@@ -41,6 +41,18 @@ const utc = (v: unknown) => {
   return new Date(v).toISOString();
 };
 
+/** Owner CSV aggregates and aggregates of TurfLab's own stored official results
+ * (scripts/core-result-stats.ts) are both accepted; only earlier days may count. */
+const LOCAL_STATS_VERSIONS = new Set(["nar-csv-stats-v1", "core-results-stats-v1"]);
+export function validLocalStats(value: unknown, jurisdiction: unknown, day: string): boolean {
+  const stats = obj(value);
+  const to = obj(obj(stats.draw ?? {}).period ?? {}).to;
+  return jurisdiction === "NAR" &&
+    LOCAL_STATS_VERSIONS.has(String(stats.version)) &&
+    JSON.stringify(stats).length <= 30_000 &&
+    (to == null || (typeof to === "string" && to < day));
+}
+
 function validateResearch(reference: Row, horses: Row[], day: string, number: number, captured: string): Row {
   const research = obj(reference.research);
   const source = new URL(str(research, "source_url"));
@@ -85,17 +97,11 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
         typeof note.note === "string" && note.note.length <= 400 &&
         note.source_checked_at === captured, "追加調査の出典または時刻が不正です");
   }
-  if (research.local_stats != null) {
-    const stats = obj(research.local_stats);
-    const to = obj(obj(stats.draw ?? {}).period ?? {}).to;
+  if (research.local_stats != null)
     requireCondition(
-      reference.jurisdiction === "NAR" &&
-        stats.version === "nar-csv-stats-v1" &&
-        JSON.stringify(stats).length <= 30_000 &&
-        (to == null || (typeof to === "string" && to < day)),
+      validLocalStats(research.local_stats, reference.jurisdiction, day),
       "ローカル集計の版・管轄・期間が不正です",
     );
-  }
   return {
     ...research,
     horses: horses.map((horse) => ({
