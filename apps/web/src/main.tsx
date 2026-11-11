@@ -101,8 +101,152 @@ function countdownMinutes(scheduledStart: Json | undefined): number | null {
   if (isNaN(startMs)) return null;
   return Math.round((startMs - Date.now()) / 60000);
 }
+
+interface RaceTag {
+  label: string;
+  cls: string;
+}
+function renderRaceTags(r: Row): RaceTag[] {
+  const tags: RaceTag[] = [];
+  const ev = obj(r.evidence_json);
+  const provider = String(ev.source_provider ?? r.source ?? "");
+
+  // 生成元 (Source)
+  if (provider === "codex_cli" || provider.includes("codex")) {
+    tags.push({ label: "#Codex", cls: "tag-codex" });
+  } else if (provider === "chatgpt" || provider.includes("chatgpt")) {
+    tags.push({ label: "#ChatGPT", cls: "tag-chatgpt" });
+  } else if (provider.includes("gemini")) {
+    tags.push({ label: "#Gemini", cls: "tag-gemini" });
+  } else if (provider === "official_entry_manual") {
+    tags.push({ label: "#手動", cls: "tag-codex" });
+  }
+
+  // 種別・タイミング (Kind & Timing)
+  if (r.prediction_status === "locked") {
+    tags.push({ label: "#正式Morning", cls: "tag-locked" });
+  } else if (r.prediction_status === "missing") {
+    tags.push({ label: "#事前参考", cls: "tag-pre-reference" });
+  }
+
+  // 整合性・信頼性 (Integrity)
+  if (ev.official_identity_verified === false) {
+    tags.push({ label: "#公式未照合", cls: "tag-unverified" });
+  }
+  if (r.core_importable === false) {
+    tags.push({ label: "#Core未取込", cls: "tag-not-in-core" });
+  }
+  return tags;
+}
+
+function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void }) {
+  const doc = obj(review.document);
+  const race = obj(doc.race);
+  const pred = obj(doc.chat_prediction);
+  const purchase = obj(doc.reported_purchase);
+  const finish = obj(doc.reported_finish);
+  const rev = obj(doc.review);
+  const outcome = finish.purchase_outcome_if_report_correct ? obj(finish.purchase_outcome_if_report_correct) : null;
+
+  return (
+    <div className="chat-review-modal" onClick={onClose}>
+      <div className="chat-review-dialog" onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+          <div>
+            <div className="race-tags" style={{ marginBottom: 8 }}>
+              <span className="race-tag tag-chatgpt">#ChatGPT</span>
+              <span className="race-tag tag-post-review">#事後レビュー</span>
+              <span className="race-tag tag-not-in-core">#Core未取込</span>
+              <span className="race-tag tag-unverified">#公式未照合</span>
+            </div>
+            <h2>{String(race.track)} {String(race.number)}R · {String(race.name)}</h2>
+            <p style={{ margin: "4px 0", color: "#64748b", fontSize: "13px" }}>
+              発走: {time(race.scheduled_start_jst)} · {String(race.distance_m)}m · 馬場: {String(race.reported_track_condition ?? "良")}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ border: "none", background: "transparent", fontSize: "20px", cursor: "pointer" }}>✕</button>
+        </div>
+
+        <div className="review-section">
+          <h4>🤖 ChatGPT 事前想定（会話内）</h4>
+          <p style={{ fontSize: "12px", color: "#64748b" }}>想定本線: {rows(pred.main_forecast_order).join(" → ")}</p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {rows(pred.ranking).map((r, i) => (
+              <div key={i} style={{ fontSize: "13px", display: "flex", gap: 8, alignItems: "center" }}>
+                <strong>{String(r.mark ?? "・")} {String(r.horse_number)}番 {String(r.horse_name)}</strong>
+                <span style={{ color: "#64748b", fontSize: "12px" }}>({String(r.jockey ?? "")})</span>
+                {r.profile && <small style={{ color: "#475569" }}>- {String(r.profile)}</small>}
+              </div>
+            ))}
+          </div>
+          {rows(pred.pace_scenarios).length > 0 && (
+            <div style={{ marginTop: 8, fontSize: "12px", color: "#475569" }}>
+              <strong>ペース想定: </strong>
+              {rows(pred.pace_scenarios).map((s, idx) => (
+                <span key={idx} style={{ marginRight: 8 }}>{String(s.pace)} ({String(s.assumed_weight_pct)}%): {rows(s.forecast_order).join("-")}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="review-section">
+          <h4>🎫 会話内での仮想購入 & 結果</h4>
+          <p style={{ fontSize: "13px", margin: "4px 0" }}>
+            購入: {rows(purchase.tickets).map((t, i) => (
+              <span key={i} style={{ marginRight: 8 }}>{String(t.type)} {rows(t.numbers).join("-")} ({String(t.amount_yen)}円)</span>
+            ))}
+            (計 {String(purchase.total_yen)}円)
+          </p>
+          <p style={{ fontSize: "13px", margin: "4px 0" }}>
+            確定着順（チャット報告）: {rows(finish.positions).slice(0, 5).map((p) => `${p.rank}着:${p.horse_number}番${p.horse_name}`).join(" / ")}
+          </p>
+          {outcome && (
+            <p style={{ fontSize: "13px", margin: "4px 0", fontWeight: 600, color: Number(outcome.net_yen) < 0 ? "#dc2626" : "#16a34a" }}>
+              損益: {yen(outcome.net_yen)} (投資 {yen(outcome.stake_yen)} / 払戻 {yen(outcome.return_yen)})
+            </p>
+          )}
+        </div>
+
+        <div className="review-section">
+          <h4>📝 振り返りと仮説</h4>
+          {rev.observed_if_report_correct && (
+            <p style={{ fontSize: "13px", margin: "4px 0" }}>
+              <strong>観察:</strong> {String(rev.observed_if_report_correct)}
+            </p>
+          )}
+          {rows(rev.hypotheses).length > 0 && (
+            <div style={{ marginTop: 6 }}>
+              <strong style={{ fontSize: "13px" }}>分析・仮説:</strong>
+              <ul style={{ margin: "4px 0", paddingLeft: 20, fontSize: "12px", color: "#334155" }}>
+                {rows(rev.hypotheses).map((h, i) => (
+                  <li key={i}>{String(h)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {rev.next_validation && (
+            <p style={{ fontSize: "12px", color: "#0369a1", marginTop: 6 }}>
+              <strong>次回検証:</strong> {String(rev.next_validation)}
+            </p>
+          )}
+        </div>
+
+        <div className="disclaimer">
+          ⚠️ <strong>Core分離ポリシー:</strong> 本記録は事後会話から作成された参考レビューです。Coreの公式回収率やAIモデル学習には影響しません（Core未取込・公式未照合）。
+        </div>
+
+        <div style={{ marginTop: 16, textAlign: "right" }}>
+          <button onClick={onClose}>閉じる</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [trackFilter, setTrackFilter] = useState('all');
+  const [chatReviews, setChatReviews] = useState<Row[]>([]);
+  const [selectedChatReview, setSelectedChatReview] = useState<Row | null>(null);
   const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
   const [tokenInput, setTokenInput] = useState("");
   const [tab, setTab] = useState("today");
@@ -149,12 +293,14 @@ function App() {
     setLoading(true);
     setError("");
     try {
-      const [d, s] = await Promise.all([
+      const [d, s, reviewsRes] = await Promise.all([
         api("/races?date=" + date),
         api("/status"),
+        api("/github-bridge/reviews?date=" + date).catch(() => ({ reviews: [] })),
       ]);
       setData(d);
       setStorage(String(s.storage_mode));
+      setChatReviews(rows(reviewsRes.reviews));
     } catch (e) {
       setError(e instanceof Error ? e.message : "読み込みに失敗しました");
     } finally {
@@ -548,7 +694,7 @@ function App() {
                                 {arr(r, "missing").join(" / ")}
                               </small>
                             )}
-                          </div>
+                          <div className="race-tags">{renderRaceTags(r).map((t, idx) => (<span key={idx} className={"race-tag " + t.cls}>{t.label}</span>))}</div></div>
                           <span className={"badge " + r.prediction_status}>
                             {statusNames[String(r.prediction_status)]}
                           </span>
@@ -556,6 +702,46 @@ function App() {
                         </button>
                       );
                     })}
+                      {chatReviews.map((rev) => {
+                        const doc = obj(rev.document);
+                        const rRace = obj(doc.race);
+                        const rPurchase = obj(doc.reported_purchase);
+                        const rFinish = obj(doc.reported_finish);
+                        const rOutcome = rFinish.purchase_outcome_if_report_correct ? obj(rFinish.purchase_outcome_if_report_correct) : null;
+                        const timeStr = rRace.scheduled_start_jst ? time(rRace.scheduled_start_jst).split(" ").at(-1) : "--:--";
+                        return (
+                          <button
+                            className="race-card review-card"
+                            key={String(rev.path)}
+                            onClick={() => setSelectedChatReview(rev)}
+                          >
+                            <div className="race-time">
+                              {timeStr}
+                              <small>{String(rRace.track ?? "参考")}</small>
+                            </div>
+                            <div className="race-title">
+                              <span>
+                                {String(rRace.number ?? "—")}R · チャット事後レビュー
+                              </span>
+                              <h3>{String(rRace.name ?? "ChatGPT参考レース")}</h3>
+                              <p>
+                                {rPurchase.total_yen ? "チャット仮想購入 " + yen(rPurchase.total_yen) : "チャット購入記録なし"} ·{" "}
+                                {rOutcome?.net_yen !== undefined
+                                  ? "損益 " + yen(rOutcome.net_yen)
+                                  : "結果未照合"}
+                              </p>
+                              <div className="race-tags">
+                                <span className="race-tag tag-chatgpt">#ChatGPT</span>
+                                <span className="race-tag tag-post-review">#事後レビュー</span>
+                                <span className="race-tag tag-not-in-core">#Core未取込</span>
+                                <span className="race-tag tag-unverified">#公式未照合</span>
+                              </div>
+                            </div>
+                            <span className="badge missing">参考レビュー</span>
+                            <span>↗</span>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </section>
@@ -1771,6 +1957,11 @@ function App() {
           TurfLab <span>予想の根拠と、本人の判断を記録する。</span>
         </footer>
             </main>
+
+      {/* Chat Review Modal */}
+      {selectedChatReview && (
+        <ChatReviewModal review={selectedChatReview} onClose={() => setSelectedChatReview(null)} />
+      )}
 
       {/* Floating Toast Notification */}
       {notice && (

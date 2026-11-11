@@ -92,3 +92,20 @@ export function referenceProducerLabel(producer: unknown): string {
   const key = typeof producer === "string" ? producer : LEGACY_REFERENCE_PRODUCER;
   return labels[key] ?? key;
 }
+
+const reviewPathRegex =
+  /^reviews\/(\d{4}-\d{2}-\d{2})\/([a-zA-Z0-9_-]+)-v([1-9]\d*)\.json$/;
+
+export function parseReviewPath(
+  path: string,
+): { date: string; slug: string; version: number } | null {
+  const m = reviewPathRegex.exec(path);
+  return m
+    ? {
+        date: m[1]!,
+        slug: m[2]!,
+        version: Number(m[3]),
+      }
+    : null;
+}
+

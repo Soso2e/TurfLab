@@ -453,6 +453,7 @@ export class TurfCoordinator {
             "/api/github-bridge/export",
             "/api/github-bridge/report",
             "/api/github-bridge/reference-report",
+            "/api/github-bridge/reviews",
           ].includes(bridgePath)
         ) {
           requireCondition(
@@ -517,6 +518,36 @@ export class TurfCoordinator {
               String(incoming.date_jst) >= String(latestMirror.date_jst)
             )
               await this.state.storage.put("github-reference", incoming);
+            return response({ status: "saved", path: incoming.path });
+          }
+          if (bridgePath.endsWith("/reviews")) {
+            const stored =
+              (await this.state.storage.get<Record<string, Row>>("github-chat-reviews")) ?? {};
+            if (request.method === "GET") {
+              const url = new URL(request.url);
+              const date = url.searchParams.get("date");
+              const list = Object.values(stored);
+              const filtered = date
+                ? list.filter((r) => {
+                    const doc = obj(r.document);
+                    const docDate = String(doc.recorded_for_date_jst ?? r.date_jst ?? "");
+                    const raceDate = String(obj(doc.race).scheduled_start_jst ?? "").slice(0, 10);
+                    return docDate === date || raceDate === date;
+                  })
+                : list;
+              return response({ reviews: filtered });
+            }
+            requireCondition(request.method === "POST", "POSTが必要です", 405);
+            const incoming = await readBody(request);
+            requireCondition(typeof incoming.path === "string", "pathが必要です");
+            stored[String(incoming.path)] = {
+              path: incoming.path,
+              sha: incoming.sha,
+              date_jst: incoming.date_jst ?? String(incoming.path).split("/")[1],
+              document: incoming.document,
+              updated_at: new Date().toISOString(),
+            };
+            await this.state.storage.put("github-chat-reviews", stored);
             return response({ status: "saved", path: incoming.path });
           }
           requireCondition(request.method === "POST", "POSTが必要です", 405);

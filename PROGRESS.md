@@ -1,5 +1,31 @@
 # PROGRESS.md
 
+## 2026-11-11 ChatGPT予想・事後レビューの可視化とタグ運用ルール・JSON出し入れ整備
+
+- 目的
+  - ChatGPTとの対話や事後レビュー（名古屋11R オールワン特別等）をTurfLab画面から確認可能にしつつ、Coreの正式予想（回収率・モデル学習）と混ざらないよう「タグ」による識別と二重台帳の分離を確立する。
+  - レース出走馬などのデータをChatGPTへ渡しやすくするためのJSONエクスポート機能と、受け入れルールを整備する。
+- 運用のルール整備（`docs/chatgpt-integration-rules.md`）
+  - 生成元タグ（`#ChatGPT`, `#Codex`, `#Gemini`, `#手動`）、種別タグ（`#正式Morning`, `#事前参考`, `#事後レビュー`, `#バックテスト`）、信頼性タグ（`#Core未取込`, `#公式未照合`, `#発走前固定`）の体系を定義。
+  - 出走馬JSONエクスポート仕様、事前参考予想・事後レビューJSON受取仕様、Core分離ポリシーを明文化。
+- GitHub Bridge & API の拡張
+  - `packages/shared/src/github-bridge.ts`: `parseReviewPath` を追加し、`reviews/YYYY-MM-DD/*-review-v*.json` を判定・抽出。
+  - `scripts/github-bridge.ts` & `scripts/github-sync.ts`: `syncChatReviews` を追加し、GitHubリポジトリ（`Soso2e/TurfLab-data`）上のレビューファイルを検知してTurfLab APIへ自動同期。
+  - `workers/api/src/index.ts`: `/api/github-bridge/reviews` エンドポイントを実装し、Durable Object storage（`github-chat-reviews`）に安全に永続化・クエリ可能にした。
+  - 単体テスト `tests/github-bridge.test.ts` にレビュー同期テストを追加し、既存テスト全件と合わせてパス。
+- UI（フロントエンド）の実装
+  - `apps/web/src/style.css`: 各タグ（`.race-tag`）のスタイル、チャットレビューカード（`.review-card`）、レビューモーダル（`.chat-review-modal`）を追加。
+  - `apps/web/src/main.tsx`:
+    - 通常のCoreレースカードに属性タグ（`#Codex`, `#事前参考`, `#公式未照合` 等）を表示。
+    - ChatGPTのレビュー（名古屋11R等）をレース一覧の中に `#ChatGPT` `#事後レビュー` `#Core未取込` `#公式未照合` のタグ付きカードとして並べて表示。
+    - レビューカードクリック時に、ChatGPTの事前想定（印、展開、3頭本線）、チャット内仮想購入と結果、振り返り（観察、仮説、検証計画）を閲覧できるモーダルを実装。
+    - レース詳細画面に「ChatGPT用出走馬JSONをコピー」ボタンを追加。ワンクリックで出走馬（馬番、馬名、斤量、騎手）やコース情報のJSONをクリップボードにコピー可能にした。
+- 実データ確認
+  - GitHub上の `reviews/2026-11-11/nagoya-11-chat-review-v1.json` をAPIへ同期完了。
+  - `GET /api/github-bridge/reviews?date=2026-11-11` で名古屋11Rが正常に返却されることを確認。
+  - `npm run check`（型チェック、ESLint、27テストスイート・253テスト、Vite build）全件成功。
+
+
 ## 2026-11-11 過去レースの未取得解消（コース諸元マスタ・公式結果完全取得・確定成績保存・恒久的回収）
 
 - コース諸元マスタの導入（`packages/shared/src/course-catalog.ts`）

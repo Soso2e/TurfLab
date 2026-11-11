@@ -1677,3 +1677,110 @@ button:focus-visible {
     color: #c5ded3;
   }
 }
+
+/* Race Tags & Chat Review Cards */
+.race-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.race-tag {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 4px;
+  line-height: 1.4;
+}
+.race-tag.tag-chatgpt {
+  background: #f3e8ff;
+  color: #6b21a8;
+  border: 1px solid #d8b4fe;
+}
+.race-tag.tag-codex {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+}
+.race-tag.tag-gemini {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+.race-tag.tag-post-review {
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #fed7aa;
+}
+.race-tag.tag-not-in-core {
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px dashed #94a3b8;
+}
+.race-tag.tag-unverified {
+  background: #fefce8;
+  color: #854d0e;
+  border: 1px solid #fde047;
+}
+.race-tag.tag-pre-reference {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+.race-tag.tag-locked {
+  background: #e3efdf;
+  color: #3c6c3d;
+  border: 1px solid #86efac;
+}
+.race-card.review-card {
+  border-left: 4px solid #a855f7;
+  background: #faf8ff;
+}
+.chat-review-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.chat-review-dialog {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 640px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 24px;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+}
+.chat-review-dialog h2 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 1.3rem;
+}
+.chat-review-dialog .review-section {
+  margin: 16px 0;
+  padding: 12px;
+  background: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+}
+.chat-review-dialog .review-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.95rem;
+  color: #334155;
+}
+.chat-review-dialog .disclaimer {
+  font-size: 11px;
+  color: #64748b;
+  background: #fffbeb;
+  border: 1px solid #fef08a;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-top: 16px;
+}

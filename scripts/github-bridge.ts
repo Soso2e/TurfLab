@@ -13,6 +13,7 @@ import {
 import {
   bridgeSchema,
   parseReferencePath,
+  parseReviewPath,
   raceKey,
 } from "../packages/shared/src/github-bridge";
 
@@ -86,6 +87,8 @@ interface State {
   official_results?: Record<string, ResultReceipt>;
   last_result_sync?: string;
   last_result?: Row;
+  chat_reviews?: Record<string, { sha: string; checked_at: string }>;
+  last_review_sync?: string;
   last_sync: string | null;
   last_error: string | null;
   failures: number;
@@ -138,6 +141,7 @@ export class PredictionBridge {
       this.state.daily_export_versions ??= {};
       this.state.reference_files ??= {};
       this.state.official_results ??= {};
+      this.state.chat_reviews ??= {};
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
       this.state = {
@@ -151,6 +155,7 @@ export class PredictionBridge {
         daily_export_versions: {},
         reference_files: {},
         official_results: {},
+        chat_reviews: {},
         last_sync: null,
         last_error: null,
         failures: 0,
@@ -473,6 +478,43 @@ export class PredictionBridge {
       await this.save();
     }
     this.state.last_reference_sync = now.toISOString();
+    await this.save();
+  }
+  // Chat reviews from conversations are reference-only post-race documents.
+  // They are never imported into Core formal predictions or model weights.
+  async syncChatReviews(force = false) {
+    const now = this.io.now();
+    if (
+      !force &&
+      this.state.last_review_sync &&
+      now.getTime() - Date.parse(this.state.last_review_sync) <
+        (this.config.interval_seconds ?? 300) * 1000
+    )
+      return;
+    const files = await this.io.list();
+    this.state.chat_reviews ??= {};
+    const reviewFiles = files.filter((f) => parseReviewPath(f.path));
+    for (const file of reviewFiles) {
+      const prior = this.state.chat_reviews[file.path];
+      if (prior && prior.sha === file.sha) continue;
+      try {
+        const text = await this.io.read(file);
+        const document = JSON.parse(text);
+        await this.io.api("/github-bridge/reviews", {
+          path: file.path,
+          sha: file.sha,
+          date_jst: file.path.split("/")[1],
+          document,
+        });
+        this.state.chat_reviews[file.path] = {
+          sha: file.sha,
+          checked_at: now.toISOString(),
+        };
+      } catch {
+        // Chat review failure must not block prediction flow.
+      }
+    }
+    this.state.last_review_sync = now.toISOString();
     await this.save();
   }
   // Official results are separate immutable files. They never trigger a new

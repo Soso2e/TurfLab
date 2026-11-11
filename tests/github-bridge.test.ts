@@ -405,4 +405,33 @@ describe("immutable daily state revisions", () => {
     await restarted.exportDailyStateIfDue();
     expect([...s.files.keys()].filter((p) => p.startsWith("state/"))).toHaveLength(1);
   });
+  it("reviews/配下のチャットレビューを同期し、APIへ保存する", async () => {
+    const s = await setup(0);
+    const posted: Row[] = [];
+    const origApi = s.io.api;
+    s.io.api = async (path, body) => {
+      if (path === "/github-bridge/reviews") {
+        posted.push(body as Row);
+        return { status: "saved" };
+      }
+      return origApi(path, body);
+    };
+    s.files.set("reviews/2026-11-11/nagoya-11-chat-review-v1.json", {
+      sha: "sha-review-1",
+      content: JSON.stringify({
+        schema_version: "1",
+        record_type: "chatgpt_reference_race_review",
+        core_importable: false,
+        race: { key: "2026-11-11|名古屋|11R", name: "オールワン特別" },
+      }),
+    });
+    await s.bridge.syncChatReviews(true);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].path).toBe("reviews/2026-11-11/nagoya-11-chat-review-v1.json");
+    expect(posted[0].sha).toBe("sha-review-1");
+
+    // 同一SHAでの再実行時は二重送信しない
+    await s.bridge.syncChatReviews(true);
+    expect(posted).toHaveLength(1);
+  });
 });

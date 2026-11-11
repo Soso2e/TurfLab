@@ -129,6 +129,11 @@ try {
         // Reference-only ingestion cannot block formal predictions or daily state.
       }
       try {
+        await bridge.syncChatReviews();
+      } catch {
+        // Chat reviews ingestion cannot block formal predictions or daily state.
+      }
+      try {
         await bridge.syncOfficialResults();
       } catch {
         // Result transport must not block reference/pack/prediction processing.
