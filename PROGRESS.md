@@ -1,5 +1,23 @@
 # PROGRESS.md
 
+## 2026-11-11 本番を `C:\#Project\Server\TurfLab` に一本化
+
+- 未統合ブランチの判断
+  - `feat/daily-flow-observability`（ローカルのみ、PRなし）は採用。当日GitHubのpack・正式予想・参考分析の件数を表示する、読み取り専用の観測機能。最新mainへ移植し、参考分析の版付きファイル名（`morning-reference-vN`）に対応した。
+  - Draft #63（レース後の展開比較）は不採用（Draftのまま維持）。本番フローに未接続の純関数で、PR本文でも実1R・Windows本番・許諾アダプターが未検証とされている。
+  - ほかの「未マージ」表示のブランチ（#31/#35/#37/#56/#69/#71/#72）は、squashマージ済みのため対象外。
+- main CIの修正
+  - #74：`local-codex.ts` の空catchがlintエラー。
+  - #70：モバイルでナビのラベルが非表示になり、Windows受入テストがタイムアウト。
+- 二重起動の防止：Logon・Watchdogの起動処理を名前付きmutexで直列化した。別のcheckoutから起動中のプロセスは、停止せずに警告を出す。
+- 移行の経過
+  - 停止前に論理バックアップを取得した。TurfLab-Logon・TurfLab-Watchdogを無効化してから停止し、データホーム（`%LOCALAPPDATA%\TurfLab`）を `C:\#Project\Server\TurfLab-migration-backup-20261111-161945` に複製した（638ファイル、SHA-256全件一致）。タスクXMLと`.dev.vars`も保全した。
+  - 新checkoutから `Start-AtLogon.ps1` で起動した。API・GitHub同期・予想Worker・tailnet HTTPSはすべて新パスで稼働している。
+  - 移行前後で論理バックアップのhashが一致し（`3ae594df…`）、全テーブルの件数も同じ。両Workerとも初回周期はhealthyで、結果5R・学習5Rを引き継いだ。
+  - 両タスクを新パスへ変更し、再度有効化した。同期Workerを停止してWatchdogとLogonを同時に実行し、同期Workerの自動復旧と、片方の起動処理がスキップされることを確認した。
+- 旧worktree `TurfLab-main` と上記バックアップは削除していない。ロールバック手順：両タスクを無効化して`Stop.ps1`を実行し、退避したタスクXMLを再登録してから旧checkoutの`Start-AtLogon.ps1`を実行する。データホームは共通なので移動は不要。
+- 未確認：OS再起動・実ログオン時の起動、iPhone、次の実レースの予想→結果→学習を新パスで通しで確認すること。
+
 ## 2026-11-10 公式結果の保存・GitHub同期・夜間停止の修正
 
 - 11/10の川崎1R・11Rなど3Rの公式結果は、CLIが全着順・全払戻まで取得していた。しかし、Coreが枠連・枠単の払戻を「券種不正」として結果ごと拒否していた。枠番（1〜8、同枠可）の払戻を、馬番の券種とは別の検証で保存するよう修正した。Betの券種は変更していない。
