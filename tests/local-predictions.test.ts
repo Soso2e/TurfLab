@@ -5,8 +5,10 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   immutableLocalFile,
   localFiles,
+  callBucket,
   claimLocalWorker,
   LocalPredictionWorker,
+  MAX_AUTO_RACES,
 } from "../scripts/local-prediction-worker";
 import { MemoryRepository } from "../packages/shared/src/repository";
 import { obj, str, type Row } from "../packages/shared/src/domain";
@@ -286,3 +288,41 @@ it("uses helperInfer for research/result/review tasks and infer for prediction t
   expect(infer).not.toHaveBeenCalled();
 });
 
+
+it("draws research, prediction and result jobs from separate daily budgets", () => {
+  expect(callBucket("2026-11-11-research-3")).toBe("research");
+  expect(callBucket("2026-11-11-history-abc")).toBe("research");
+  expect(callBucket("2026-11-11-going-abc-5")).toBe("research");
+  expect(callBucket("2026-11-11-prerace-abc")).toBe("research");
+  expect(callBucket("2026-11-11-abc123-context-v3")).toBe("predict");
+  expect(callBucket("2026-11-11-abc123-context-v1")).toBe("predict");
+  expect(callBucket("2026-11-11-result-abc-2")).toBe("after");
+  expect(callBucket("2026-11-11-review-abc")).toBe("after");
+});
+
+it("selects at most three races a day and reports per-race stages", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = new Date("2026-11-11T01:00:00Z");
+  vi.setSystemTime(now);
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-local-stages-"));
+  const races = [{
+    race: { race_id: "later", name: "特別", race_number: 9, race_date_jst: "2026-11-11",
+      scheduled_start_at: "2026-11-11T06:00:00Z" },
+    entries: [], predictions: [],
+  }];
+  const api = vi.fn(async (url: string): Promise<Row> =>
+    url === "/daily-state" ? { races } : {});
+  const prompts: string[] = [];
+  const infer = vi.fn(async (_dir: string, prompt: string) => {
+    prompts.push(prompt);
+    return { races: [], limitations: ["fixture"] };
+  });
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer);
+  await worker.init();
+  const report = await worker.tick(now);
+  expect(MAX_AUTO_RACES).toBe(3);
+  expect(prompts.find((p) => p.includes("最大"))).toContain(`最大${MAX_AUTO_RACES - 1}R`);
+  expect(report.race_stages).toContainEqual(expect.objectContaining({
+    race_id: "later", stage: 1, detail: "固定入力の作成待ち",
+  }));
+});

@@ -56,6 +56,18 @@ export function LocalPredictionStatus({
         {state?.success != null && <> ／ 正式予想保存 {String(state.success)}件</>}
       </p>
       {reference.path && <p>直近の調査 · 固定入力 {saved}レース</p>}
+      {rows(state?.race_stages ?? []).length > 0 && (
+        <details open>
+          <summary>レースの段階 {rows(state?.race_stages ?? []).length}R</summary>
+          {rows(state?.race_stages ?? []).map((item, i) => (
+            <p key={i}>
+              {item.race_number != null && <>{String(item.race_number)}R </>}
+              {item.name != null && <>{String(item.name)} · </>}
+              段階{String(item.stage)} {String(item.label)} — {String(item.detail)}
+            </p>
+          ))}
+        </details>
+      )}
       {state?.error && <p>{String(state.error)}</p>}
       {state?.learning != null && (
         <details>
