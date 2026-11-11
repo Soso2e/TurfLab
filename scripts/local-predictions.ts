@@ -7,12 +7,14 @@ import {
   CoreRequestError,
   LocalPredictionWorker,
 } from "./local-prediction-worker";
+import { predictWithCodex } from "./local-codex";
 
 const { values } = parseArgs({
   options: {
     "data-home": { type: "string" },
     once: { type: "boolean" },
     model: { type: "string", default: "gpt-6.1-sol" },
+    "reasoning-effort": { type: "string", default: "low" },
     origin: { type: "string", default: "http://127.0.0.1:8787" },
     "race-url": { type: "string" },
   },
@@ -65,8 +67,11 @@ try {
       path.join(process.cwd(), "prompts/prediction-method.md"),
       "utf8",
     ));
+  const effort = values["reasoning-effort"] ?? "low";
+  const infer = (dir: string, prompt: string, model: string, webSearch?: boolean) =>
+    predictWithCodex(dir, prompt, model, webSearch, effort);
   const worker = new LocalPredictionWorker(
-    home, api, factors, values.model!, undefined, undefined,
+    home, api, factors, values.model!, infer, undefined,
     (stage) => api("/local-predictions/status", {
       status: "running", stage, checked_at: new Date().toISOString(),
     }).catch(() => {}),
