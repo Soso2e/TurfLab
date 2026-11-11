@@ -11,6 +11,21 @@ import "./style.css";
 import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
+import { DatabaseExplorer } from "./DatabaseExplorer";
+import {
+  IconRace,
+  IconImport,
+  IconChart,
+  IconDatabase,
+  IconSettings,
+  IconClock,
+  IconChevronLeft,
+  IconChevronRight,
+  IconRefresh,
+  IconCheck,
+  IconClose,
+  IconArrowRight,
+} from "./Icons";
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -80,7 +95,14 @@ function Evidence({ row }: { row: Row }) {
     </div>
   );
 }
+function countdownMinutes(scheduledStart: Json | undefined): number | null {
+  if (typeof scheduledStart !== "string") return null;
+  const startMs = Date.parse(scheduledStart);
+  if (isNaN(startMs)) return null;
+  return Math.round((startMs - Date.now()) / 60000);
+}
 function App() {
+  const [trackFilter, setTrackFilter] = useState('all');
   const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
   const [tokenInput, setTokenInput] = useState("");
   const [tab, setTab] = useState("today");
@@ -88,8 +110,6 @@ function App() {
   const [data, setData] = useState<Row>();
   const [detail, setDetail] = useState<Row>();
   const [stats, setStats] = useState<Row>();
-  const [legacy, setLegacy] = useState<Row>();
-  const [legacyName, setLegacyName] = useState("Race");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -144,6 +164,11 @@ function App() {
   useEffect(() => {
     void reload();
   }, [token, date]);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(""), 4000);
+    return () => clearTimeout(timer);
+  }, [notice]);
   async function action(work: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -249,12 +274,6 @@ function App() {
       await reload();
     });
   }
-  async function fetchLegacy() {
-    await action(async () => {
-      setLegacy(await api("/legacy"));
-      setTab("legacy");
-    });
-  }
   return (
     <div className="app">
       <aside className="sidebar">
@@ -274,34 +293,33 @@ function App() {
         <div className="side-label">WORKSPACE</div>
         <nav>
           {[
-            ["today", "本日のレース", "01"],
-            ["import", "データを取り込む", "02"],
-            ["stats", "成績と検証", "03"],
-            ["legacy", "既存Sheetsを見る", "04"],
-            ["settings", "接続とバックアップ", "05"],
-          ].map(([id, title, no]) => (
-            <button
-              key={id}
-              className={tab === id ? "active" : ""}
-              onClick={() => {
-                if (id === "legacy") {
-                  void fetchLegacy();
-                } else {
-                  setTab(id);
-                  if (id === "stats")
+            { id: "today", title: "本日のレース", no: "01", icon: IconRace },
+            { id: "import", title: "データを取り込む", no: "02", icon: IconImport },
+            { id: "stats", title: "成績と検証", no: "03", icon: IconChart },
+            { id: "db", title: "データベース", no: "04", icon: IconDatabase },
+            { id: "settings", title: "接続とバックアップ", no: "05", icon: IconSettings },
+          ].map((item) => {
+            const IconComp = item.icon;
+            return (
+              <button
+                key={item.id}
+                className={tab === item.id ? "active" : ""}
+                onClick={() => {
+                  setTab(item.id);
+                  if (item.id === "stats")
                     void action(async () => setStats(await api("/stats")));
-                }
-              }}
-            >
-              <span>{no}</span>
-              {title}
-            </button>
-          ))}
+                }}
+              >
+                <IconComp size={15} className="nav-icon" />
+                <span>{item.title}</span>
+              </button>
+            );
+          })}
         </nav>
         <div className="side-bottom">
           <span className="dot" /> 個人用・仮想購入のみ
           <p>
-            ChatGPT → Sheets ↔ Web
+            ChatGPT / CLI ↔ Local DB ↔ Web
             <br />
             表示・予算は日本時間
           </p>
@@ -313,11 +331,7 @@ function App() {
             MY RESEARCH <span>/</span> {date.replaceAll("-", ".")}
           </div>
           <span className="connection">
-            {token
-              ? storage === "sheets"
-                ? "Sheets接続"
-                : "ローカル記録"
-              : "未接続"}
+            {token ? "ローカルDB (SQLite)" : "未接続"}
           </span>
         </header>
         {!token ? (
@@ -367,11 +381,7 @@ function App() {
                 <button onClick={() => setError("")}>閉じる</button>
               </div>
             )}
-            {notice && (
-              <div className="notice" role="status">
-                {notice}
-              </div>
-            )}
+            
             {tab === "today" && (
               <>
                 <div className="page-heading">
@@ -380,15 +390,48 @@ function App() {
                     <h1>本日のレース</h1>
                     <p>予想と購入を分けて、今日の判断を記録する。</p>
                   </div>
-                  <div className="toolbar">
+                  <div className="toolbar date-toolbar">
+                    <button
+                      className="secondary date-step-btn"
+                      onClick={() => {
+                        const d = new Date(date);
+                        d.setDate(d.getDate() - 1);
+                        setDate(d.toISOString().slice(0, 10));
+                      }}
+                      title="前日へ"
+                    >
+                      <IconChevronLeft size={13} /> 前日
+                    </button>
+                    <button
+                      className={`secondary date-step-btn ${date === today() ? "active-date" : ""}`}
+                      onClick={() => setDate(today())}
+                    >
+                      今日
+                    </button>
+                    <button
+                      className="secondary date-step-btn"
+                      onClick={() => {
+                        const d = new Date(date);
+                        d.setDate(d.getDate() + 1);
+                        setDate(d.toISOString().slice(0, 10));
+                      }}
+                      title="翌日へ"
+                    >
+                      翌日 <IconChevronRight size={13} />
+                    </button>
                     <input
                       aria-label="開催日"
                       type="date"
                       value={date}
                       onChange={(e) => setDate(e.target.value)}
                     />
-                    <button onClick={() => void reload()} disabled={loading}>
-                      再読み込み
+                    <button
+                      onClick={() => void reload()}
+                      disabled={loading}
+                      className="db-btn-icon"
+                    >
+                      <IconRefresh size={13} className={loading ? "spin" : ""} />
+                      <span>再読込</span>
                     </button>
                   </div>
                 </div>
@@ -427,6 +470,28 @@ function App() {
                     <h2>レース一覧</h2>
                     <span>{date} · JST</span>
                   </div>
+                  {races.length > 0 && (
+                    <div className="track-filter-chips">
+                      <button
+                        className={`track-chip ${trackFilter === "all" ? "active" : ""}`}
+                        onClick={() => setTrackFilter("all")}
+                      >
+                        全場 ({races.length})
+                      </button>
+                      {Array.from(new Set(races.map((r) => String(r.jurisdiction)).filter(Boolean))).map((jurisdiction) => {
+                        const count = races.filter((r) => String(r.jurisdiction) === jurisdiction).length;
+                        return (
+                          <button
+                            key={jurisdiction}
+                            className={`track-chip ${trackFilter === jurisdiction ? "active" : ""}`}
+                            onClick={() => setTrackFilter(jurisdiction)}
+                          >
+                            {jurisdiction} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {loading ? (
                     <div className="empty" role="status">
                       読み込んでいます…
@@ -435,32 +500,18 @@ function App() {
                     <div className="empty">
                       <span className="empty-icon">◎</span>
                       <h3>この日のレースは未登録です</h3>
-                      <p>{storage === "local"
-                        ? "出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。"
-                        : "ChatGPTの出力をSheetsに保存したら、同期してください。"}</p>
-                      <button
-                        hidden={storage !== "sheets"}
-                        className="primary"
-                        disabled={busy || storage !== "sheets"}
-                        onClick={() =>
-                          void action(async () => {
-                            setOutput(
-                              await api("/sync", { operation_id: uid() }),
-                            );
-                            await reload();
-                            setNotice("Sheetsからの取り込みを確認しました");
-                          })
-                        }
-                      >
-                        Sheets の出力を確認
-                      </button>
+                      <p>出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。</p>
                       <button onClick={() => setTab("import")}>
                         JSONを取り込む
                       </button>
                     </div>
                   ) : (
                     <div className="race-list">
-                      {races.map((r) => (
+                      {races
+    .filter((r) => trackFilter === "all" || String(r.jurisdiction) === trackFilter)
+    .map((r) => {
+      const cd = countdownMinutes(r.scheduled_start_at);
+      return (
                         <button
                           className="race-card"
                           key={String(r.race_id)}
@@ -474,6 +525,16 @@ function App() {
                             <span>
                               {String(r.race_number)}R ·{" "}
                               {raceState(r, r.result_status)}
+                              {cd !== null && cd > 0 && cd <= 120 && (
+                                <span className="countdown-pill">
+                                  <IconClock size={11} /> あと{cd}分
+                                </span>
+                              )}
+                              {cd !== null && cd <= 0 && cd >= -15 && (
+                                <span className="countdown-pill urgent">
+                                  <IconClock size={11} /> 発走直前
+                                </span>
+                              )}
                             </span>
                             <h3>{String(r.name)}</h3>
                             <p>
@@ -493,7 +554,8 @@ function App() {
                           </span>
                           <span>↗</span>
                         </button>
-                      ))}
+                      );
+                    })}
                     </div>
                   )}
                 </section>
@@ -553,11 +615,7 @@ function App() {
                       まだ Web 側の取り込み記録はありません。
                     </p>
                   )}
-                  <p className="muted">
-                    ChatGPT の実行と Web
-                    の取り込みは別処理です。未反映の出力は「Sheets
-                    の出力を確認」から再確認できます。
-                  </p>
+                  
                 </details>
               </>
             )}
@@ -994,6 +1052,7 @@ function App() {
                           <th>推奨額</th>
                           <th>推定確率 / オッズ期待値</th>
                           <th>根拠</th>
+                          <th>操作</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1013,6 +1072,26 @@ function App() {
                                   : "オッズ未取得"}
                               </td>
                               <td>{String(r.reason)}</td>
+                              <td>
+                                <button
+                                  className="secondary db-btn-icon"
+                                  style={{ padding: "4px 8px", fontSize: "11px" }}
+                                  onClick={() => {
+                                    setBetType(String(r.ticket_type));
+                                    setSelections(arr(r, "selections_json").join(", "));
+                                    if (typeof r.suggested_amount_yen === "number") {
+                                      setAmount(r.suggested_amount_yen);
+                                    }
+                                    setConfirmed(false);
+                                    setOperation(uid());
+                                    setNotice("推奨買い目をBetフォームに反映しました");
+                                  }}
+                                  title="購入フォームへ反映"
+                                >
+                                  <IconArrowRight size={11} />
+                                  <span>反映</span>
+                                </button>
+                              </td>
                             </tr>
                           ))}
                       </tbody>
@@ -1318,18 +1397,7 @@ function App() {
                     <h1>データを取り込む</h1>
                     <p>ChatGPT の出力を検証し、保存前に確認する。</p>
                   </div>
-                  <button
-                    disabled={busy || storage !== "sheets"}
-                    onClick={() =>
-                      void action(async () => {
-                        setOutput(await api("/sync", { operation_id: uid() }));
-                        setNotice("Sheetsの受信データを確認しました");
-                        await reload();
-                      })
-                    }
-                  >
-                    Sheets の出力を確認
-                  </button>
+                  
                 </div>
                 {storage === "local" && (
                   <RaceImportWizard
@@ -1388,7 +1456,7 @@ function App() {
                     検証用の数値計算を表示する
                   </label>
                   <p>
-                    予想・展開/数値シミュレーションはChatGPTが担当します。Webは結果を受け取り、本人Betを管理します。ChatGPT→Sheetsの自動受信は本番検証待ちです。
+                    予想・展開/数値シミュレーションはChatGPT / CLIが担当します。Webは結果を受け取り、本人Betを管理します。
                   </p>
                   <p className="muted">
                     {mode.startsWith("pipeline")
@@ -1615,75 +1683,12 @@ function App() {
                 )}
               </>
             )}
-            {tab === "legacy" && (
-              <>
-                <div className="page-heading">
-                  <div>
-                    <p className="eyebrow">EXISTING SHEETS · READ ONLY</p>
-                    <h1>既存 Sheets を見る</h1>
-                    <p>元の記録と集計を、そのまま確認する。</p>
-                  </div>
-                  <button disabled={busy} onClick={() => void fetchLegacy()}>
-                    再読み込み
-                  </button>
-                </div>
-                <section className="panel">
-                  <p className="muted">
-                    旧スコアを確率へ変換しません。旧 Bet
-                    は参考収支と本人購入の区別を確認してから移行します。
-                  </p>
-                  {legacy && (
-                    <>
-                      <select
-                        value={legacyName}
-                        aria-label="既存タブ"
-                        onChange={(e) => setLegacyName(e.target.value)}
-                      >
-                        {rows(legacy.tables).map((t) => (
-                          <option value={String(t.name)} key={String(t.name)}>
-                            {String(t.name)}
-                          </option>
-                        ))}
-                      </select>
-                      {rows(legacy.tables)
-                        .filter((t) => t.name === legacyName)
-                        .map((t) => (
-                          <React.Fragment key={String(t.name)}>
-                            {t.truncated && (
-                              <p>最初の500行を表示しています。</p>
-                            )}
-                            <div className="table-scroll">
-                              <table>
-                                <thead>
-                                  <tr>
-                                    {arr(t, "headers").map((h, i) => (
-                                      <th key={i}>{String(h)}</th>
-                                    ))}
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {arr(t, "rows").map((row, i) => (
-                                    <tr key={i}>
-                                      {(row as Json[]).map((v, j) => (
-                                        <td key={j}>
-                                          {v == null
-                                            ? "—"
-                                            : typeof v === "boolean"
-                                              ? String(v)
-                                              : String(v)}
-                                        </td>
-                                      ))}
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </React.Fragment>
-                        ))}
-                    </>
-                  )}
-                </section>
-              </>
+            {tab === "db" && (
+              <DatabaseExplorer
+                api={api}
+                onError={setError}
+                onNotice={setNotice}
+              />
             )}
             {tab === "settings" && (
               <>
@@ -1691,15 +1696,13 @@ function App() {
                   <div>
                     <p className="eyebrow">CONNECTION & RECORDS</p>
                     <h1>接続とバックアップ</h1>
-                    <p>Sheets を正本として使い、予想の版と根拠を保管する。</p>
+                    <p>ローカルSQLiteデータベースを正本として使い、予想の版と根拠を保管する。</p>
                   </div>
                 </div>
                 <section className="panel">
                   <h2>接続状態</h2>
                   <p>
-                    {storage === "sheets"
-                      ? "Google Sheets が正本です。"
-                      : "ローカル開発用の記録を使用しています。Sheets の接続設定はサーバー側で行います。"}
+                    ローカルSQLiteデータベースを使用しています。全29テーブルのレコードは「04 データベース」から閲覧できます。
                   </p>
                   <p>
                     分析元: 既存 ChatGPT タスク（接続検証待ち） · 有料 AI API:
@@ -1715,7 +1718,6 @@ function App() {
                       setToken("");
                       setData(undefined);
                       setDetail(undefined);
-                      setLegacy(undefined);
                       setStats(undefined);
                     }}
                   >
@@ -1768,7 +1770,20 @@ function App() {
         <footer>
           TurfLab <span>予想の根拠と、本人の判断を記録する。</span>
         </footer>
-      </main>
+            </main>
+
+      {/* Floating Toast Notification */}
+      {notice && (
+        <div className="floating-toast" role="status">
+          <div className="floating-toast-content">
+            <span className="toast-icon"><IconCheck size={14} /></span>
+            <span>{notice}</span>
+          </div>
+          <button className="toast-close" onClick={() => setNotice("")} title="閉じる">
+            <IconClose size={13} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }

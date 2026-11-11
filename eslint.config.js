@@ -7,6 +7,7 @@ export default ts.config(
       "node_modules/**",
       "**/.wrangler/**",
       "workers/api/src/import-validator.js",
+      "test-results/**",
     ],
   },
   js.configs.recommended,
