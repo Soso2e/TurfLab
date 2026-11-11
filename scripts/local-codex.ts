@@ -17,7 +17,9 @@ export function extractJson(text: string): Row {
       }
       return obj(raw);
     }
-  } catch {}
+  } catch {
+    // fall through to the next parse strategy
+  }
 
   // 2. Try markdown json block
   const blockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
@@ -28,11 +30,15 @@ export function extractJson(text: string): Row {
         if (typeof raw.document === "string") {
           try {
             return obj(JSON.parse(raw.document));
-          } catch {}
+          } catch {
+            // fall through to the next parse strategy
+          }
         }
         return obj(raw);
       }
-    } catch {}
+    } catch {
+      // fall through to the next parse strategy
+    }
   }
 
   // 3. Try finding outermost { ... }
@@ -45,11 +51,15 @@ export function extractJson(text: string): Row {
         if (typeof raw.document === "string") {
           try {
             return obj(JSON.parse(raw.document));
-          } catch {}
+          } catch {
+            // fall through to the next parse strategy
+          }
         }
         return obj(raw);
       }
-    } catch {}
+    } catch {
+      // fall through to the next parse strategy
+    }
   }
 
   throw new Error("CLAUDE_OUTPUT_INVALID_JSON");
@@ -128,7 +138,9 @@ export async function predictWithClaude(
   try {
     const parsed = JSON.parse(stdout);
     if (typeof parsed.result === "string") rawResult = parsed.result;
-  } catch {}
+  } catch {
+    // fall through to the next parse strategy
+  }
 
   const document = extractJson(rawResult);
   await writeFile(
