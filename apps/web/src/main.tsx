@@ -108,7 +108,7 @@ interface RaceTag {
 }
 function renderRaceTags(r: Row): RaceTag[] {
   const tags: RaceTag[] = [];
-  const ev = obj(r.evidence_json);
+  const ev = obj(r.evidence_json ?? {});
   const provider = String(ev.source_provider ?? r.source ?? "");
 
   // 生成元 (Source)
@@ -139,13 +139,16 @@ function renderRaceTags(r: Row): RaceTag[] {
   return tags;
 }
 
+/** Chat review JSON is free-form; a missing list renders as empty. */
+const list = (value: unknown): Row[] => (Array.isArray(value) ? (value as Row[]) : []);
+
 function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void }) {
   const doc = obj(review.document);
-  const race = obj(doc.race);
-  const pred = obj(doc.chat_prediction);
-  const purchase = obj(doc.reported_purchase);
-  const finish = obj(doc.reported_finish);
-  const rev = obj(doc.review);
+  const race = obj(doc.race ?? {});
+  const pred = obj(doc.chat_prediction ?? {});
+  const purchase = obj(doc.reported_purchase ?? {});
+  const finish = obj(doc.reported_finish ?? {});
+  const rev = obj(doc.review ?? {});
   const outcome = finish.purchase_outcome_if_report_correct ? obj(finish.purchase_outcome_if_report_correct) : null;
 
   return (
@@ -169,9 +172,9 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
 
         <div className="review-section">
           <h4>🤖 ChatGPT 事前想定（会話内）</h4>
-          <p style={{ fontSize: "12px", color: "#64748b" }}>想定本線: {rows(pred.main_forecast_order).join(" → ")}</p>
+          <p style={{ fontSize: "12px", color: "#64748b" }}>想定本線: {list(pred.main_forecast_order).join(" → ")}</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {rows(pred.ranking).map((r, i) => (
+            {list(pred.ranking).map((r, i) => (
               <div key={i} style={{ fontSize: "13px", display: "flex", gap: 8, alignItems: "center" }}>
                 <strong>{String(r.mark ?? "・")} {String(r.horse_number)}番 {String(r.horse_name)}</strong>
                 <span style={{ color: "#64748b", fontSize: "12px" }}>({String(r.jockey ?? "")})</span>
@@ -179,11 +182,11 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
               </div>
             ))}
           </div>
-          {rows(pred.pace_scenarios).length > 0 && (
+          {list(pred.pace_scenarios).length > 0 && (
             <div style={{ marginTop: 8, fontSize: "12px", color: "#475569" }}>
               <strong>ペース想定: </strong>
-              {rows(pred.pace_scenarios).map((s, idx) => (
-                <span key={idx} style={{ marginRight: 8 }}>{String(s.pace)} ({String(s.assumed_weight_pct)}%): {rows(s.forecast_order).join("-")}</span>
+              {list(pred.pace_scenarios).map((s, idx) => (
+                <span key={idx} style={{ marginRight: 8 }}>{String(s.pace)} ({String(s.assumed_weight_pct)}%): {list(s.forecast_order).join("-")}</span>
               ))}
             </div>
           )}
@@ -192,13 +195,13 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
         <div className="review-section">
           <h4>🎫 会話内での仮想購入 & 結果</h4>
           <p style={{ fontSize: "13px", margin: "4px 0" }}>
-            購入: {rows(purchase.tickets).map((t, i) => (
-              <span key={i} style={{ marginRight: 8 }}>{String(t.type)} {rows(t.numbers).join("-")} ({String(t.amount_yen)}円)</span>
+            購入: {list(purchase.tickets).map((t, i) => (
+              <span key={i} style={{ marginRight: 8 }}>{String(t.type)} {list(t.numbers).join("-")} ({String(t.amount_yen)}円)</span>
             ))}
             (計 {String(purchase.total_yen)}円)
           </p>
           <p style={{ fontSize: "13px", margin: "4px 0" }}>
-            確定着順（チャット報告）: {rows(finish.positions).slice(0, 5).map((p) => `${p.rank}着:${p.horse_number}番${p.horse_name}`).join(" / ")}
+            確定着順（チャット報告）: {list(finish.positions).slice(0, 5).map((p) => `${p.rank}着:${p.horse_number}番${p.horse_name}`).join(" / ")}
           </p>
           {outcome && (
             <p style={{ fontSize: "13px", margin: "4px 0", fontWeight: 600, color: Number(outcome.net_yen) < 0 ? "#dc2626" : "#16a34a" }}>
@@ -214,11 +217,11 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
               <strong>観察:</strong> {String(rev.observed_if_report_correct)}
             </p>
           )}
-          {rows(rev.hypotheses).length > 0 && (
+          {list(rev.hypotheses).length > 0 && (
             <div style={{ marginTop: 6 }}>
               <strong style={{ fontSize: "13px" }}>分析・仮説:</strong>
               <ul style={{ margin: "4px 0", paddingLeft: 20, fontSize: "12px", color: "#334155" }}>
-                {rows(rev.hypotheses).map((h, i) => (
+                {list(rev.hypotheses).map((h, i) => (
                   <li key={i}>{String(h)}</li>
                 ))}
               </ul>
@@ -703,10 +706,10 @@ function App() {
                       );
                     })}
                       {chatReviews.map((rev) => {
-                        const doc = obj(rev.document);
-                        const rRace = obj(doc.race);
-                        const rPurchase = obj(doc.reported_purchase);
-                        const rFinish = obj(doc.reported_finish);
+                        const doc = obj(rev.document ?? {});
+                        const rRace = obj(doc.race ?? {});
+                        const rPurchase = obj(doc.reported_purchase ?? {});
+                        const rFinish = obj(doc.reported_finish ?? {});
                         const rOutcome = rFinish.purchase_outcome_if_report_correct ? obj(rFinish.purchase_outcome_if_report_correct) : null;
                         const timeStr = rRace.scheduled_start_jst ? time(rRace.scheduled_start_jst).split(" ").at(-1) : "--:--";
                         return (
@@ -1059,7 +1062,7 @@ function App() {
                                 : "数値試行は実行していません"}
                             </p>
                             <h3>ペース3シナリオ</h3>
-                            {rows(s.scenarios_json).map((scenario) => (
+                            {list(s.scenarios_json).map((scenario) => (
                               <article
                                 className="scenario-card"
                                 key={String(scenario.pace)}

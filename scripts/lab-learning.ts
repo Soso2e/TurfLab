@@ -325,8 +325,14 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
     const outcome = obj(f);
     return [{ stake: 100, returned: Number(outcome.payout) + Number(outcome.refund) }];
   });
-  const planBets = plans.filter((p) => p.settled).map((p) => obj(p.settled) as unknown as { stake: number; returned: number });
+  // race-flow-v2: the 600-yen hit lane and the 400-yen EV lane are settled apart.
+  const lane = (hit: boolean) => plans.filter((p) => (p.plan_lane === "hit") === hit);
+  const settledOf = (list: Row[]) =>
+    list.filter((p) => p.settled).map((p) => obj(p.settled) as unknown as { stake: number; returned: number });
+  const planBets = settledOf(lane(false));
   const planReturn = returnRate(planBets.filter((b) => b.stake > 0));
+  const hitBets = settledOf(lane(true));
+  const hitReturn = returnRate(hitBets.filter((b) => b.stake > 0));
   const win = returnRate(bets("win"));
   const count = judged.length;
   return {
@@ -341,8 +347,15 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
     top1_top3_rate: count ? round(judged.filter((o) => o.top1_top3).length / count) : null,
     top1_flat_win: { ...win, verdict: roiVerdict(win) },
     top1_flat_place: returnRate(bets("place")),
+    hit_plans: {
+      fixed: lane(true).length,
+      settled: hitBets.length,
+      hit_races: hitBets.filter((b) => b.returned > 0).length,
+      ...hitReturn,
+      verdict: roiVerdict(hitReturn),
+    },
     ev_plans: {
-      fixed: plans.length,
+      fixed: lane(false).length,
       settled: planBets.length,
       skipped: planBets.filter((b) => b.stake === 0).length,
       ...planReturn,

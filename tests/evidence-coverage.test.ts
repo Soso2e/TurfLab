@@ -110,6 +110,13 @@ it("holds back a formal-looking answer without evidence, and stays stable across
   const { home, worker, infer, day } = await workerFor(pack, {
     horse_evaluations: [{ horse_number: 1, components: { ability: 60, going: 90 } }],
   }, now, api)();
+  // Stage 2 spends the first tick on one gap-fill search; prediction follows.
+  const filling = await worker.tick(new Date(now));
+  expect(filling.race_stages).toContainEqual(expect.objectContaining({ race_id: "r1", stage: 2 }));
+  expect(String(infer.mock.calls)).toContain("不足している資料だけ");
+  // Stage 3 reads other forecasts once on the helper lane before predicting.
+  const reading = await worker.tick(new Date(now));
+  expect(reading.race_stages).toContainEqual(expect.objectContaining({ race_id: "r1", stage: 3, detail: "外部予想を確認。次の周期で予想" }));
   const report = await worker.tick(new Date(now));
   expect(posted).not.toContain("/github-bridge/convert");
   expect(report.provisional_predictions).toEqual([expect.objectContaining({ race_id: "r1" })]);
@@ -123,7 +130,8 @@ it("holds back a formal-looking answer without evidence, and stays stable across
   expect(second.job_issues).not.toContainEqual(expect.objectContaining({ reason: "LOCAL_FILE_CONFLICT" }));
   expect(second.provisional_predictions).toHaveLength(1);
   expect(await readdir(dir)).toHaveLength(1);
-  expect(infer).toHaveBeenCalledTimes(2);
+  expect(infer).toHaveBeenCalledTimes(4);
+  expect(String(infer.mock.calls)).toContain("external_forecasts");
 });
 
 it("does not ask for going before the 3-hour window", async () => {
@@ -200,9 +208,13 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   const prerace = JSON.parse(await readFile(path.join(home, "exchange/prerace/2026-11-10", (await readdir(path.join(home, "exchange/prerace/2026-11-10")))[0]), "utf8"));
   expect(prerace).toMatchObject({ odds_complete: true, race_id: "r1" });
   const planDir = path.join(home, "exchange/plans/2026-11-10");
-  const plan = JSON.parse(await readFile(path.join(planDir, (await readdir(planDir))[0]), "utf8"));
-  expect(plan).toMatchObject({ real_money: false, adopted: false, race_id: "r1" });
+  const planFiles = await readdir(planDir);
+  const plan = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => !f.includes("-hit"))!), "utf8"));
+  expect(plan).toMatchObject({ real_money: false, adopted: false, race_id: "r1", plan_lane: "ev", budget_yen: 400 });
   expect(plan.lines.length).toBe(2);
+  // The 600-yen hit lane is fixed alongside and never reads odds.
+  const hit = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => f.includes("-hit"))!), "utf8"));
+  expect(hit).toMatchObject({ plan_lane: "hit", budget_yen: 600, odds_used: false });
   expect(issues).not.toContain("LOCAL_FILE_CONFLICT");
   // The six-factor prompt received the pack, never the odds file.
   const analysis = prompts.find((p) => p.includes("固定pack.research"))!;

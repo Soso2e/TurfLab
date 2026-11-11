@@ -1,3 +1,5 @@
+import { entityMemory, saveEntityMemory } from "./entity-memory";
+import { raceTrends } from "./race-trends";
 import {
   canonical,
   DomainError,
@@ -218,6 +220,18 @@ export async function route(
   if (path === "/local-predictions/baseline") {
     requireCondition(!sheets, "調査ベースラインはlocal保存専用です");
     return saveResearchBaseline(repo, input, now);
+  }
+  if (path === "/local-predictions/entity-memory/save") {
+    requireCondition(!sheets, "個体メモリはlocal保存専用です");
+    return saveEntityMemory(repo, input, now);
+  }
+  if (path === "/local-predictions/trends") {
+    requireCondition(!sheets, "傾向集計はlocal保存専用です");
+    return raceTrends(repo, input, now);
+  }
+  if (path === "/local-predictions/entity-memory") {
+    requireCondition(!sheets, "個体メモリはlocal保存専用です");
+    return entityMemory(repo, input, now);
   }
   if (path.startsWith("/race-import/")) {
     requireCondition(
