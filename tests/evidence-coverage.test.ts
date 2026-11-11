@@ -110,6 +110,10 @@ it("holds back a formal-looking answer without evidence, and stays stable across
   const { home, worker, infer, day } = await workerFor(pack, {
     horse_evaluations: [{ horse_number: 1, components: { ability: 60, going: 90 } }],
   }, now, api)();
+  // Stage 2 spends the first tick on one gap-fill search; prediction follows.
+  const filling = await worker.tick(new Date(now));
+  expect(filling.race_stages).toContainEqual(expect.objectContaining({ race_id: "r1", stage: 2 }));
+  expect(String(infer.mock.calls)).toContain("不足している資料だけ");
   const report = await worker.tick(new Date(now));
   expect(posted).not.toContain("/github-bridge/convert");
   expect(report.provisional_predictions).toEqual([expect.objectContaining({ race_id: "r1" })]);
@@ -123,7 +127,7 @@ it("holds back a formal-looking answer without evidence, and stays stable across
   expect(second.job_issues).not.toContainEqual(expect.objectContaining({ reason: "LOCAL_FILE_CONFLICT" }));
   expect(second.provisional_predictions).toHaveLength(1);
   expect(await readdir(dir)).toHaveLength(1);
-  expect(infer).toHaveBeenCalledTimes(2);
+  expect(infer).toHaveBeenCalledTimes(3);
 });
 
 it("does not ask for going before the 3-hour window", async () => {
