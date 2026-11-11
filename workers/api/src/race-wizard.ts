@@ -728,7 +728,9 @@ export async function inputPack(
         note: soft
           ? snapshot.source === "chatgpt_reference"
             ? "ChatGPT参考値。名前一致のみ・公式未照合。同名馬の誤統合、全頭/取消の欠測リスクあり"
-            : "Codex CLI参考入力。名前一致のみ・公式個体未照合。同名馬の誤統合、全頭/取消の欠測リスクあり"
+            : snapshot.source === "ai_reference"
+              ? `外部AI(${String(obj(snapshot.evidence_json).source_producer)})参考値。名前一致のみ・公式未照合。同名馬の誤統合、全頭/取消の欠測リスクあり`
+              : "Codex CLI参考入力。名前一致のみ・公式個体未照合。同名馬の誤統合、全頭/取消の欠測リスクあり"
           : "本人が公式・利用許諾済み出馬表と照合。過去走の根拠ではありません",
       },
     ],

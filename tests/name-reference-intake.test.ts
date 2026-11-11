@@ -1,4 +1,6 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
+import exampleJson from "../docs/examples/ai-daily-reference-v1.json";
+const example = exampleJson as unknown as Row;
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -13,6 +15,7 @@ import {
 } from "../workers/api/src/race-wizard";
 import { runRace } from "../workers/api/src/race-pipeline";
 import { route } from "../workers/api/src/index";
+import { withFormalStatus } from "../workers/api/src/name-reference-intake";
 import { PredictionBridge, type BridgeIO } from "../scripts/github-bridge";
 import { wizardAnswer, wizardDraft } from "./wizard-fixture";
 import { referenceAnswer } from "../packages/shared/src/reference-answer";
@@ -359,5 +362,127 @@ describe("name-only reference intake (isolated fixtures)", () => {
     await restarted.sync(true);
     expect((await backup(repo)).hash).toBe(before.hash);
     expect(files.size).toBe(4);
+  });
+  it("Claude等の外部AIは自分のフォルダで登録され、来歴にproducerが残る", async () => {
+    const repo = new MemoryRepository(),
+      source = nameReference();
+    source.path = "daily/2026-11-04/claude/morning-reference-v1.json";
+    Object.assign(obj(source.document), {
+      report_type: "ai_daily_reference",
+      producer: "claude",
+      model: "claude-opus-5-5",
+    });
+    const receipt = await importNameReference(repo, source, NOW);
+    expect(obj(receipt.provenance)).toMatchObject({
+      source_provider: "claude_github",
+      source_producer: "claude",
+      source_model: "claude-opus-5-5",
+    });
+    const snapshot = (await repo.list("race_snapshots"))[0];
+    expect(snapshot.source).toBe("ai_reference");
+    const model = (await repo.list("model_versions"))[0];
+    expect(model).toMatchObject({ provider: "Claude", model_identifier: "claude_reference" });
+    const pack = await inputPack(repo, str(rows(receipt.races)[0], "snapshot_id"), NOW);
+    expect(str(rows(pack.evidence)[0], "note")).toMatch(/外部AI\(claude\)/);
+  });
+
+  it("同じレースを複数AIが予想しても正式は先着1件、後着は参考として完了扱い", async () => {
+    const repo = new MemoryRepository();
+    const chatgpt = nameReference();
+    const claude = nameReference();
+    claude.path = "daily/2026-11-04/claude/morning-reference-v1.json";
+    claude.sha = "c".repeat(40);
+    Object.assign(obj(claude.document), {
+      report_type: "ai_daily_reference",
+      producer: "claude",
+    });
+    const probe = new MemoryRepository();
+    const probeReceipt = await importNameReference(probe, chatgpt, NOW);
+    const pack = await inputPack(probe, str(rows(probeReceipt.races)[0], "snapshot_id"), NOW);
+    for (const source of [chatgpt, claude]) {
+      const answer = wizardAnswer(pack, NOW);
+      delete answer.pack_hash;
+      rows(obj(source.document).races)[0].answer = answer;
+    }
+    const files = new Map(
+      [chatgpt, claude].map((s) => [
+        str(s, "path"),
+        { sha: str(s, "sha"), content: JSON.stringify(s.document) },
+      ]),
+    );
+    // A stale catalog from an earlier run must not block the retry forever.
+    files.set(`catalog/2026-11-04/name-only-${"c".repeat(40)}.json`, {
+      sha: "f".repeat(40),
+      content: "{\"earlier\":true}",
+    });
+    let putSeq = 0;
+    const io: BridgeIO = {
+      now: () => new Date(NOW),
+      list: async () => [...files].map(([path, v]) => ({ path, sha: v.sha })),
+      read: async (file) => files.get(file.path)!.content,
+      put: async (name, content) => {
+        const prior = files.get(name);
+        if (prior && prior.content !== content) throw new Error("immutable conflict");
+        files.set(name, { content, sha: String(++putSeq).padStart(40, "0") });
+      },
+      api: async (p, body) =>
+        p === "/github-bridge/reference-report"
+          ? {}
+          : obj(
+              await route(
+                repo,
+                new Request(`http://local/api${p}`, {
+                  method: body ? "POST" : "GET",
+                  body: body ? JSON.stringify(body) : undefined,
+                  headers: { "Content-Type": "application/json" },
+                }),
+                NOW,
+              ),
+            ),
+    };
+    const home = await mkdtemp(path.join(tmpdir(), "turflab-multi-"));
+    const bridge = new PredictionBridge(home, { repository: "fixture/private", branch: "test" }, io);
+    await bridge.init();
+    for (let round = 0; round < 2; round++) {
+      await bridge.syncReferences(true);
+      await bridge.sync(true);
+    }
+    const locked = (await repo.list("predictions")).filter((p) => p.status === "locked");
+    expect(locked).toHaveLength(1);
+    expect(await repo.list("reference_adoptions")).toHaveLength(1);
+    const state = JSON.parse(
+      await readFile(path.join(home, "state.json"), "utf8"),
+    );
+    const receipts = Object.values(state.reference_files) as Row[];
+    expect(receipts.map((r) => r.status)).toEqual(["complete", "complete"]);
+    expect(receipts.map((r) => r.producer).sort()).toEqual(["chatgpt", "claude"]);
+    const answers = receipts.flatMap((r) => rows(r.races).map((x) => x.answer_status)).sort();
+    expect(answers).toEqual(["formal_exists", "submitted"]);
+    // Both AIs' references are kept in the catalog; the stale one is untouched.
+    expect(files.get(`catalog/2026-11-04/name-only-${"c".repeat(40)}.json`)!.content).toBe("{\"earlier\":true}");
+    expect([...files.keys()].filter((p) => p.startsWith("catalog/"))).toHaveLength(2);
+    expect(await repo.list("virtual_bets")).toHaveLength(0);
+    // The flag is not baked into stored receipts; it reflects current Core state.
+    const replay = await withFormalStatus(repo, await importNameReference(repo, chatgpt, NOW));
+    expect(rows(replay.races)[0].formal_prediction_id).toBe(locked[0]!.prediction_id);
+  });
+  it("契約文書の記入例JSONが実際の登録・正式answer投影を通る", async () => {
+    const repo = new MemoryRepository();
+    const now = "2026-11-12T00:15:00.000Z";
+    const receipt = await importNameReference(repo, {
+      path: "daily/2026-11-12/claude/morning-reference-v1.json",
+      sha: "b".repeat(40),
+      repository: "fixture/private",
+      document: structuredClone(example),
+    }, now);
+    const race = rows(receipt.races)[0];
+    expect(race.status).toBe("pack_ready");
+    const pack = await inputPack(repo, str(race, "snapshot_id"), now);
+    const answer = referenceAnswer(rows(example.races)[0]!, pack, str(example, "generated_at"));
+    expect(answer).not.toBeNull();
+    const converted = await convertAnswer(repo, {
+      snapshot_id: pack.snapshot_id, operation_id: "contract-example", answer: answer!,
+    }, now);
+    expect((await runRace(repo, obj(converted.pipeline), now)).status).toBe("complete");
   });
 });

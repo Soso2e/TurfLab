@@ -29,14 +29,18 @@ export function referenceAnswer(
   )
     return null;
   const active = rows(pack.entries).filter((e) => e.status === "active");
+  // Producers may write a JST offset; Core stores UTC instants.
+  const generated = Number.isFinite(Date.parse(generatedAt))
+    ? new Date(generatedAt).toISOString()
+    : generatedAt;
   return {
     pack_hash: pack.pack_hash,
-    generated_at: generatedAt,
+    generated_at: generated,
     rationale: reference.rationale ?? reference.main_pace_reason,
     main_pace: reference.main_pace,
     main_pace_reason: reference.main_pace_reason,
     limitations:
-      "ChatGPT参考推定・名前一致のみ。公式個体/出典/取消/全頭完全性未照合。同名混同リスクあり。未観測情報はunknown",
+      "AI参考推定（producerは来歴参照）・名前一致のみ。公式個体/出典/取消/全頭完全性未照合。同名混同リスクあり。未観測情報はunknown",
     horse_evaluations: active.map((e) => {
       const h = horses.find((h) => h.horse_number === e.horse_number)!;
       return {

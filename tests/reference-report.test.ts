@@ -24,3 +24,27 @@ describe("reference mirror is only a bounded immutable display artifact",()=>{
     expect(()=>validateReferenceMirror({...input,document:{...report,core_importable:true}},now)).toThrow();
   });
 });
+
+describe("any AI can file a daily reference under its own producer folder", () => {
+  it("root-level files stay ChatGPT; folders name the producer", () => {
+    expect(validateReferenceMirror(input, now).producer).toBe("chatgpt");
+    const claude = validateReferenceMirror({
+      ...input,
+      path: "daily/2026-11-03/claude/morning-reference-v1.json",
+      document: { ...report, report_type: "ai_daily_reference", producer: "claude", model: "claude-opus-5-5" },
+    }, now);
+    expect(claude.producer).toBe("claude");
+    // Folder alone is enough; producer may be omitted.
+    expect(validateReferenceMirror({
+      ...input, path: "daily/2026-11-03/gemini/morning-reference-v2.json",
+    }, now).producer).toBe("gemini");
+  });
+  it("rejects a producer that disagrees with its folder or an invalid folder name", () => {
+    const doc = { ...report, report_type: "ai_daily_reference", producer: "claude" };
+    expect(() => validateReferenceMirror({ ...input, path: "daily/2026-11-03/gemini/morning-reference-v1.json", document: doc }, now)).toThrow(/一致しません/);
+    expect(() => validateReferenceMirror({ ...input, document: doc }, now)).toThrow(/claude/);
+    expect(() => validateReferenceMirror({ ...input, path: "daily/2026-11-03/Claude_AI/morning-reference-v1.json" }, now)).toThrow();
+    expect(() => validateReferenceMirror({ ...input, path: "daily/2026-11-03/a/b/morning-reference-v1.json" }, now)).toThrow();
+    expect(() => validateReferenceMirror({ ...input, document: { ...report, report_type: "other" } }, now)).toThrow();
+  });
+});

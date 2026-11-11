@@ -1,0 +1,64 @@
+{
+  "schema_version": "1",
+  "report_type": "ai_daily_reference",
+  "producer": "claude",
+  "model": "claude-opus-5-5",
+  "date_jst": "2026-11-12",
+  "generated_at": "2026-11-12T09:05:00+09:00",
+  "core_importable": false,
+  "source_urls": ["https://www.keiba.go.jp/"],
+  "limitations": "架空の記入例。実在のレース・馬ではありません。",
+  "races": [
+    {
+      "race_key_human": "2026-11-12|サンプル競馬場|11R",
+      "track": "サンプル競馬場",
+      "race_no": 11,
+      "race_name": "記入例ステークス",
+      "scheduled_start_at_jst": "2026-11-12T16:30:00+09:00",
+      "distance_m": 1600,
+      "surface": "ダート",
+      "main_pace": "middle",
+      "main_pace_reason": "逃げ候補が1頭で、前半は平均ペースを想定。",
+      "horses": [
+        {
+          "horse_number": 1,
+          "horse_name": "サンプルアルファ",
+          "jockey": "記入例騎手一",
+          "draw_number": 1,
+          "weight_kg": 56,
+          "estimated_components": { "ability": 72, "course": 60, "pace": 65, "going": 58, "draw_weight": 62, "horse_jockey_course": 55 },
+          "expected_position": "front",
+          "evidence_note": "近3走で同距離2着2回（出典URLを記載）。"
+        },
+        {
+          "horse_number": 2,
+          "horse_name": "サンプルブラボー",
+          "jockey": "記入例騎手二",
+          "draw_number": 2,
+          "weight_kg": 55,
+          "estimated_components": { "ability": 64, "course": 70, "pace": 60, "going": 66, "draw_weight": 58, "horse_jockey_course": 61 },
+          "expected_position": "middle",
+          "evidence_note": "当コース成績が良い。"
+        },
+        {
+          "horse_number": 3,
+          "horse_name": "サンプルチャーリー",
+          "jockey": "記入例騎手三",
+          "draw_number": 3,
+          "weight_kg": 54,
+          "estimated_components": { "ability": 55, "course": 52, "pace": 70, "going": 50, "draw_weight": 60, "horse_jockey_course": 48 },
+          "expected_position": "rear",
+          "evidence_note": "末脚型。前崩れなら浮上。"
+        }
+      ],
+      "scenarios": [
+        { "pace": "slow", "positions": { "front": [1], "middle": [2], "rear": [3] }, "favored": [1], "unfavored": [3], "narrative": "1番が楽に逃げる。" },
+        { "pace": "middle", "positions": { "front": [1], "middle": [2], "rear": [3] }, "favored": [2], "unfavored": [], "narrative": "平均ペースで2番が好位から抜け出す。" },
+        { "pace": "high", "positions": { "front": [1, 2], "rear": [3] }, "favored": [3], "unfavored": [1], "narrative": "先行争いで3番の差しが届く。" }
+      ],
+      "reference_bets": [
+        { "ticket_type": "wide", "selections": [1, 2], "suggested_amount_yen": 300, "reason": "能力上位2頭の組合せ。" }
+      ]
+    }
+  ]
+}

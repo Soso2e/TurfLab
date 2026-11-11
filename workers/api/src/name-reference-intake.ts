@@ -23,6 +23,10 @@ import {
 import { StagedRepository } from "./storage";
 import { inputPack } from "./race-wizard";
 import { validateReferenceMirror } from "./reference-report";
+import {
+  LEGACY_REFERENCE_PRODUCER,
+  referenceProducerLabel,
+} from "../../../packages/shared/src/github-bridge";
 import { officialResearchUrl, validatePastRunSource } from "../../../packages/shared/src/race-research";
 
 export const normalizeName = (v: unknown) =>
@@ -147,6 +151,8 @@ export async function importNameReference(
   }
   const staged = new StagedRepository(repo);
   const localCli = input.repository === "local/codex";
+  const producer = str(mirror, "producer");
+  const aiGithub = !localCli && producer !== LEGACY_REFERENCE_PRODUCER;
   const provenance: Row = {
     identity_confidence: "name_only",
     official_identity_verified: false,
@@ -154,7 +160,9 @@ export async function importNameReference(
     external_id: null,
     identity_risk: identityRisk,
     source_sha: sourceSha,
-    source_provider: localCli ? "codex_cli" : "chatgpt_github",
+    source_provider: localCli ? "codex_cli" : `${producer}_github`,
+    source_producer: localCli ? "codex_cli" : producer,
+    source_model: typeof document.model === "string" ? document.model : null,
     source_path: input.path!,
     source_created_at: generated,
     official_source_verified: false,
@@ -164,7 +172,11 @@ export async function importNameReference(
   const base: Row = {
     schema_version: "0.2",
     created_at: generated,
-    source: localCli ? "codex_cli_reference" : "chatgpt_reference",
+    source: localCli
+      ? "codex_cli_reference"
+      : aiGithub
+        ? "ai_reference"
+        : "chatgpt_reference",
     source_url: localCli ? `urn:turflab:local:blob:${sourceSha}` : `https://api.github.com/repos/${str(input, "repository")}/git/blobs/${sourceSha}`,
     retrieved_at: generated,
     available_at: generated,
@@ -401,10 +413,20 @@ export async function importNameReference(
         const model = await entity(
           "model_versions",
           "model_version",
-          research ? ["codex-research-v1", document.model] : "chatgpt-name-v1",
+          research
+            ? ["codex-research-v1", document.model]
+            : aiGithub
+              ? ["ai-name-v1", producer]
+              : "chatgpt-name-v1",
           {
-            provider: research ? "Codex CLI" : "ChatGPT",
-            model_identifier: research ? str(document, "model") : "chatgpt_reference",
+            provider: research
+              ? "Codex CLI"
+              : referenceProducerLabel(producer),
+            model_identifier: research
+              ? str(document, "model")
+              : aiGithub
+                ? `${producer}_reference`
+                : "chatgpt_reference",
             prompt_version: research ? "research-v1" : "name-only-v1",
             feature_version: SCORE_VERSION,
             weights_json: scoreWeights,
@@ -483,4 +505,25 @@ export async function importNameReference(
   });
   for (const c of staged.changes.values()) await repo.put(c.table, c.after);
   return receipt;
+}
+
+/** First complete prediction wins: once a race has an adopted prediction (from
+ * any AI), later references stay catalog/reference history only. Computed per
+ * call, never stored, so a replayed receipt still reflects the current Core. */
+export async function withFormalStatus(
+  repo: Repository,
+  receipt: Row,
+): Promise<Row> {
+  const adoptions = await repo.list("reference_adoptions");
+  return {
+    ...receipt,
+    races: rows(receipt.races).map((race) => {
+      const adopted = race.race_id
+        ? adoptions.find((a) => a.race_id === race.race_id)
+        : undefined;
+      return adopted
+        ? { ...race, formal_prediction_id: adopted.prediction_id }
+        : race;
+    }),
+  };
 }

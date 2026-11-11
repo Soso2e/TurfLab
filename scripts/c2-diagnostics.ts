@@ -100,12 +100,14 @@ export function diagnoseC2(
     races.set(key, discovered);
     return discovered;
   }
-  const records = (value: unknown, prefix: string, pattern: RegExp) =>
+  // `nested` admits one producer folder (daily/DATE/{producer}/file.json).
+  const records = (value: unknown, prefix: string, pattern: RegExp, nested = false) =>
     Object.entries(obj(value ?? {}))
       .flatMap(([path, data]) => {
         if (!path.startsWith(`${prefix}/${day}/`)) return [];
         const match = pattern.exec(path.split("/").at(-1) ?? "");
-        return match && path.split("/").length === 3
+        const depth = path.split("/").length;
+        return match && (depth === 3 || (nested && depth === 4))
           ? [{ path, match, data }]
           : [];
       })
@@ -116,6 +118,7 @@ export function diagnoseC2(
     state?.reference_files,
     "daily",
     /^morning-reference-v[1-9]\d*\.json$/,
+    true,
   )) {
     const data = obj(raw);
     const seen = receipt(path, data, "checked_at", observedAt);
