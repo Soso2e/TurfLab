@@ -10,7 +10,11 @@ import {
   str,
   type Row,
 } from "../packages/shared/src/domain";
-import { bridgeSchema, raceKey } from "../packages/shared/src/github-bridge";
+import {
+  bridgeSchema,
+  parseReferencePath,
+  raceKey,
+} from "../packages/shared/src/github-bridge";
 
 import { referenceAnswer } from "../packages/shared/src/reference-answer";
 
@@ -53,6 +57,7 @@ interface ReferenceReceipt {
   races: Row[];
   conflict_sha?: string;
   intake_mode?: "name_only";
+  producer?: unknown;
 }
 interface ResultReceipt {
   sha: string;
@@ -332,11 +337,9 @@ export class PredictionBridge {
     )
       return;
     const files = await this.io.list();
-    const pattern =
-      /^daily\/\d{4}-\d{2}-\d{2}\/morning-reference-v[1-9]\d*\.json$/;
     this.state.reference_files ??= {};
     for (const file of files
-      .filter((f) => pattern.test(f.path))
+      .filter((f) => parseReferencePath(f.path))
       .sort((a, b) => a.path.localeCompare(b.path, "en", { numeric: true }))) {
       const prior = this.state.reference_files[file.path];
       if (prior && prior.sha !== file.sha) {
@@ -373,10 +376,14 @@ export class PredictionBridge {
           },
         );
         report.intake_mode = "name_only";
-        await this.io.put(
-          `catalog/${file.path.split("/")[1]}/name-only-${file.sha}.json`,
-          JSON.stringify(response, null, 2),
-        );
+        report.producer = response.provenance
+          ? obj(response.provenance).source_producer
+          : undefined;
+        // The catalog is the immutable first receipt for this blob SHA. A retry
+        // after the race has started yields a different receipt; keep the first.
+        const catalog = `catalog/${file.path.split("/")[1]}/name-only-${file.sha}.json`;
+        if (!files.some((f) => f.path === catalog))
+          await this.io.put(catalog, JSON.stringify(response, null, 2));
         // UI can display all reference races even when Core has zero matches.
         // This mirror never creates Core predictions or owner bets.
         if (file.path.split("/")[1] === jst(now))
@@ -390,6 +397,11 @@ export class PredictionBridge {
         for (const race of report.races.filter(
           (r) => r.status === "pack_ready",
         )) {
+          if (race.formal_prediction_id) {
+            // Another (earlier) prediction is already official for this race.
+            race.answer_status = "formal_exists";
+            continue;
+          }
           try {
             const output = await this.exportPack(str(race, "snapshot_id"));
             const source = rows(document.races).find(
@@ -607,11 +619,7 @@ export class PredictionBridge {
             f.path.startsWith(`predictions/${day}/`) &&
             f.path.endsWith(".json"),
         ).length,
-        reference: files.some(
-          (f) =>
-            f.path.startsWith(`daily/${day}/morning-reference-v`) &&
-            f.path.endsWith(".json"),
-        ),
+        reference: files.some((f) => parseReferencePath(f.path)?.date === day),
       };
       let transportError = false;
       for (const file of files

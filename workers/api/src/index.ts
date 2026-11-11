@@ -54,7 +54,7 @@ import {
 import { adoptModel, analytics, backtest, saveReview } from "./analytics";
 import { bridgeConvert } from "./github-bridge";
 import { dailyStateExport } from "./daily-export";
-import { importNameReference } from "./name-reference-intake";
+import { importNameReference, withFormalStatus } from "./name-reference-intake";
 import { reconcileReference } from "./reference-intake";
 import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
@@ -237,7 +237,7 @@ export async function route(
   }
   if (path === "/github-bridge/reference-register") {
     requireCondition(!sheets, "名前登録はlocal保存専用です");
-    return importNameReference(repo, input, now);
+    return withFormalStatus(repo, await importNameReference(repo, input, now));
   }
   if (path === "/github-bridge/reference-preview") {
     requireCondition(!sheets, "参考分析の照合はlocal保存専用です");
@@ -465,19 +465,30 @@ export class TurfCoordinator {
           if (request.method === "GET" && bridgePath.endsWith("/control"))
             return response({ commands });
           if (bridgePath.endsWith("/reference-report")) {
+            // `github-reference` keeps the latest mirror (older clients);
+            // `github-references` keeps the latest mirror of each producer.
+            const latestMirror =
+              await this.state.storage.get<Row>("github-reference");
+            const byProducer =
+              (await this.state.storage.get<Row>("github-references")) ?? {};
+            const producerOf = (m: Row) =>
+              String(m.producer ?? obj(m.document).producer ?? "chatgpt");
+            if (latestMirror && !byProducer[producerOf(latestMirror)])
+              byProducer[producerOf(latestMirror)] = latestMirror;
             if (request.method === "GET")
               return response(
-                (await this.state.storage.get<Row>("github-reference")) ?? {
-                  status: "empty",
-                },
+                latestMirror
+                  ? { ...latestMirror, by_producer: byProducer }
+                  : { status: "empty" },
               );
             requireCondition(request.method === "POST", "POSTが必要です", 405);
             const incoming = validateReferenceMirror(
               await readBody(request),
               new Date().toISOString(),
             );
-            const existing =
-              await this.state.storage.get<Row>("github-reference");
+            const existing = byProducer[String(incoming.producer)] as
+              | Row
+              | undefined;
             if (existing?.path === incoming.path) {
               requireCondition(
                 existing.sha === incoming.sha,
@@ -495,7 +506,13 @@ export class TurfCoordinator {
               "過去の参考レポートで最新を置き換えられません",
               409,
             );
-            await this.state.storage.put("github-reference", incoming);
+            byProducer[String(incoming.producer)] = incoming;
+            await this.state.storage.put("github-references", byProducer);
+            if (
+              !latestMirror ||
+              String(incoming.date_jst) >= String(latestMirror.date_jst)
+            )
+              await this.state.storage.put("github-reference", incoming);
             return response({ status: "saved", path: incoming.path });
           }
           requireCondition(request.method === "POST", "POSTが必要です", 405);

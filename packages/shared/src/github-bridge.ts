@@ -31,3 +31,64 @@ export const bridgeSchema = {
 };
 
 export const raceKey = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, "_");
+
+// Any AI may deliver a daily reference into its own folder:
+//   daily/YYYY-MM-DD/{producer}/morning-reference-vN.json
+// The original root-level file name stays valid and means ChatGPT.
+export const LEGACY_REFERENCE_PRODUCER = "chatgpt";
+export const REFERENCE_REPORT_TYPES = [
+  "chatgpt_daily_reference",
+  "ai_daily_reference",
+];
+const referencePath =
+  /^daily\/(\d{4}-\d{2}-\d{2})\/(?:([a-z][a-z0-9-]{1,31})\/)?morning-reference-v([1-9]\d*)\.json$/;
+
+export function parseReferencePath(
+  path: string,
+): { date: string; producer: string; version: number; legacy: boolean } | null {
+  const m = referencePath.exec(path);
+  return m
+    ? {
+        date: m[1]!,
+        producer: m[2] ?? LEGACY_REFERENCE_PRODUCER,
+        version: Number(m[3]),
+        legacy: !m[2],
+      }
+    : null;
+}
+
+// The folder decides the producer; a declared `producer` must agree with it so
+// one AI cannot file its output under another's name. Root-level files keep the
+// historical ChatGPT meaning (and the local Codex worker's own label).
+export function referenceProducer(path: string, document: unknown): string {
+  const parsed = parseReferencePath(path);
+  if (!parsed) throw new Error("参考JSONのパスが不正です");
+  const declared =
+    document && typeof document === "object"
+      ? (document as Record<string, unknown>).producer
+      : undefined;
+  if (declared === undefined || declared === null) return parsed.producer;
+  if (parsed.legacy) {
+    if (declared === LEGACY_REFERENCE_PRODUCER || declared === "codex_cli")
+      return String(declared);
+    throw new Error(
+      `producer "${String(declared)}" は daily/日付/${String(declared)}/ に保存してください`,
+    );
+  }
+  if (declared !== parsed.producer)
+    throw new Error(
+      `producer "${String(declared)}" と保存フォルダ "${parsed.producer}" が一致しません`,
+    );
+  return parsed.producer;
+}
+
+export function referenceProducerLabel(producer: unknown): string {
+  const labels: Record<string, string> = {
+    chatgpt: "ChatGPT",
+    claude: "Claude",
+    gemini: "Gemini",
+    codex_cli: "Codex CLI",
+  };
+  const key = typeof producer === "string" ? producer : LEGACY_REFERENCE_PRODUCER;
+  return labels[key] ?? key;
+}

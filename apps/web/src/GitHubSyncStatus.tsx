@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { obj, rows, type Row } from "../../../packages/shared/src/domain";
+import { referenceProducerLabel } from "../../../packages/shared/src/github-bridge";
 
 export function GitHubSyncStatus({
   api,
@@ -52,6 +53,17 @@ export function GitHubSyncStatus({
     timeZone: "Asia/Tokyo",
   }).format(new Date());
   const currentInventory = inventory?.date_jst === today ? inventory : null;
+  // One mirror per producer (ChatGPT, Claude, ...); show the latest day's set.
+  const references = (() => {
+    if (!reference) return [];
+    const stored = Object.values(obj(reference.by_producer ?? {})).map(obj);
+    const all = stored.length ? stored : [reference];
+    const day = all.reduce(
+      (d, r) => (String(r.date_jst) > d ? String(r.date_jst) : d),
+      "",
+    );
+    return all.filter((r) => String(r.date_jst) === day);
+  })();
   return (
     <section className="sync-status">
       <h2>ChatGPT同期状態</h2>
@@ -101,6 +113,9 @@ export function GitHubSyncStatus({
           {rows(obj(state.last_reference).races ?? []).map((r) => (
             <p key={String(r.race_key_human)}>
               {String(r.race_key_human)} · {String(r.status)} · 
+              {r.answer_status === "formal_exists"
+                ? "正式予想は先着分を採用済み（参考として保存） · "
+                : ""}
               {Array.isArray(r.issues) ? r.issues.join(" / ") : ""}
             </p>
           ))}
@@ -120,9 +135,9 @@ export function GitHubSyncStatus({
           )}
         </p>
       )}
-      {reference && (
-        <details>
-          <summary>{obj(reference.document).producer === "codex_cli" ? "Codex CLI" : "ChatGPT"} の参考予想を見る（Core未取込も表示）</summary>
+      {references.map((reference) => (
+        <details key={String(reference.path)}>
+          <summary>{referenceProducerLabel(reference.producer ?? obj(reference.document).producer)} の参考予想を見る（Core未取込も表示）</summary>
           <p>保存日: {String(reference.date_jst)} · Core正式予想とは別管理</p>
           {rows(obj(reference.document).races ?? []).map((r) => (
             <section key={String(r.race_key_human)} className="reference-daily-race">
@@ -151,7 +166,7 @@ export function GitHubSyncStatus({
           ))}
           <p>名前一致でカタログへ自動登録します。同名馬・騎手の誤統合リスクがあり、公式IDとは別管理です。正式予想・本人仮想Bet・公式精算の状況は同期履歴で確認してください。</p>
         </details>
-      )}
+      ))}
       {error && <p role="status">{error}</p>}
       <button
         disabled={busy}

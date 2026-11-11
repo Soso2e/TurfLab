@@ -479,7 +479,7 @@ export function validateRow(table: Table, row: Row): void {
 }
 
 export function isNameReference(row: Row): boolean {
-  return ["chatgpt_reference", "codex_cli_reference"].includes(String(row.source)) &&
+  return ["chatgpt_reference", "codex_cli_reference", "ai_reference"].includes(String(row.source)) &&
     obj(row.evidence_json ?? {}).identity_confidence === "name_only" &&
     obj(row.evidence_json ?? {}).official_identity_verified === false;
 }

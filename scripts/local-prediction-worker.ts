@@ -148,6 +148,13 @@ export async function claimLocalWorker(directory: string) {
   };
 }
 
+export type InferFn = (
+  directory: string,
+  prompt: string,
+  model: string,
+  webSearch?: boolean,
+) => Promise<Row>;
+
 export class LocalPredictionWorker {
   private blockedJobs = 0;
   private jobIssues: Row[] = [];
@@ -160,10 +167,12 @@ export class LocalPredictionWorker {
     private api: BridgeIO["api"],
     private factors: string,
     private model: string,
-    private infer = predictWithCodex,
+    private infer: InferFn = predictWithCodex,
     private maxCallsPerDay = 24,
     private onProgress?: (stage: string) => Promise<unknown>,
     private maxResultCallsPerDay = 10,
+    private helperInfer?: InferFn,
+    private helperModel?: string,
   ) {
     this.exchange = path.join(home, "exchange");
     this.bridge = new PredictionBridge(
@@ -272,7 +281,10 @@ export class LocalPredictionWorker {
       : key.includes("-going-") ? "公式の馬場発表を確認"
       : "固定入力から1レースを分析";
     await this.onProgress?.(stage);
-    const document = await this.infer(dir, prompt, this.model, webSearch);
+    const isPrediction = stage === "固定入力から1レースを分析";
+    const inferFn = isPrediction ? this.infer : (this.helperInfer ?? this.infer);
+    const modelName = isPrediction ? this.model : (this.helperModel ?? this.model);
+    const document = await inferFn(dir, prompt, modelName, webSearch);
     if (document.blocked) {
       this.blockedJobs++;
       this.jobIssues.push({

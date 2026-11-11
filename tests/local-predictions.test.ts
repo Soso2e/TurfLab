@@ -263,3 +263,26 @@ it("re-submits a stored complete result after Core rejected it, without another 
   expect((await readdir(path.join(home, "jobs"))).filter((j) => j.includes("-result-"))).toHaveLength(1);
   expect(obj(posted[1].document)).toEqual(answer);
 });
+
+it("uses helperInfer for research/result/review tasks and infer for prediction tasks", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = new Date("2026-11-09T05:00:00Z");
+  vi.setSystemTime(now);
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-local-helper-"));
+  const races = [{
+    race: { race_id: "done", race_date_jst: "2026-11-09", scheduled_start_at: "2026-11-09T03:00:00Z" },
+    entries: [], predictions: [],
+  }];
+  const api = vi.fn(async (url: string): Promise<Row> =>
+    url === "/daily-state" ? { races } : {});
+  const infer = vi.fn(async () => ({ blocked: true, reason: "prediction mock" }));
+  const helperInfer = vi.fn(async () => ({ blocked: true, reason: "helper mock" }));
+  const worker = new LocalPredictionWorker(
+    home, api, "", "fixture-model", infer, 0, undefined, 1, helperInfer, "gemini-3.8-flash-medium",
+  );
+  await worker.init();
+  await worker.tick(now);
+  expect(helperInfer).toHaveBeenCalled();
+  expect(infer).not.toHaveBeenCalled();
+});
+

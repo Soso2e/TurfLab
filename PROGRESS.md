@@ -1,5 +1,18 @@
 # PROGRESS.md
 
+## 2026-11-11 AI役割分担の分離（予想: Codex/Claude Code、細かい作業: Gemini 3.8 Flash）
+
+- 役割の分離
+  - 予想タスク（固定パックからの1レース本番分析・6評価・展開・買い目）：Codex（`gpt-6.1-sol`）が担当し、失敗時は Claude Code へ自動フォールバック。
+  - 細かい作業（出馬表調査、近走・通過順調査、馬場確認、発走前再調査、公式結果確認、翌日振り返り）：軽量・高速な Gemini 3.8 Flash（`gemini-3.8-flash-medium`、agy CLI経由）が担当（`scripts/local-gemini.ts`）。Gemini失敗時は自動的にCodex/Claudeへフォールバックする二重の安全弁を保持。
+- 実装と連携
+  - `LocalPredictionWorker` に `helperInfer` / `helperModel` を追加し、ジョブ種別に応じて推論先を分岐。未指定時は既存の `infer` を共用するため後方互換性を維持。
+  - `scripts/local-predictions.ts` に `--helper-model` オプションを追加し、`predictWithHelper` を接続。
+  - `scripts/windows/Start-LocalPredictions.ps1` に `-HelperModel` パラメータを追加。
+  - 単体テスト `tests/local-gemini.test.ts` を追加し、`tests/local-predictions.test.ts` に呼び分けテストを追加。
+- 検証
+  - `npm run check`（型チェック、ESLint、25テストスイート・246テスト、Vite build）全件成功。
+
 ## 2026-11-11 本番を `C:\#Project\Server\TurfLab` に一本化
 
 - 未統合ブランチの判断
