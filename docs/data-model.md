@@ -45,7 +45,6 @@ Google Sheetsを初期正本とし、1論理テーブルを原則1タブにし�
 
 | テーブル | PK / 参照 | 用途 |
 |---|---|---|
-| course_segments | segment_id / course_id | 版別の区間順、開始/終了位置、勾配、曲率。Phase 5で数値利用 |
 | entity_features | feature_id / horse_idまたはjockey_id | feature_version, evaluation_at, cutoff_at, sample_size, confidence, features_json, performance_ids_json。騎手条件別成績・脚質分布・コンビ成績、馬の能力・適性を時点保存 |
 | odds_snapshots | odds_snapshot_id / race_id | captured_at, ticket_type, selections_json, odds, available_at, retrieved_at。予想時点と最終値を分離 |
 | prediction_adoptions | adoption_id / race_id, prediction_id | adopted_at, selection_rule_version。当日採用は発走前固定、後から最善版を選ばない |

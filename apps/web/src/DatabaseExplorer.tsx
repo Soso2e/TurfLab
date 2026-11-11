@@ -93,7 +93,6 @@ const PRESET_QUERIES: Record<string, { label: string; table: string; sql: string
 const TABLE_LABELS: Record<string, string> = {
   tracks: "競馬場マスター",
   course_layouts: "コース設計",
-  course_segments: "コース区間",
   horses: "競走馬マスター",
   jockeys: "騎手マスター",
   races: "レース情報",

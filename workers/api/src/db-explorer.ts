@@ -19,7 +19,7 @@ export const tableCategories: TableCategory[] = [
     id: "master",
     name: "基本マスター・コース",
     description: "競馬場・コース形状・馬・騎手などの基盤データ",
-    tables: ["tracks", "course_layouts", "course_segments", "horses", "jockeys"],
+    tables: ["tracks", "course_layouts", "horses", "jockeys"],
   },
   {
     id: "races",

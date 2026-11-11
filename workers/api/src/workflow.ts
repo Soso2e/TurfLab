@@ -38,7 +38,6 @@ const masterTables: Table[] = [
   "odds_snapshots",
   "race_snapshots",
   "model_versions",
-  "course_segments",
   "entity_features",
 ];
 export async function refreshEntries(

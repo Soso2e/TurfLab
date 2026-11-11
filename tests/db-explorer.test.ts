@@ -13,7 +13,7 @@ describe("db-explorer", () => {
     const meta = await getTablesMetadata(repo);
 
     expect(meta.categories.length).toBeGreaterThan(0);
-    expect(meta.tables.length).toBe(29);
+    expect(meta.tables.length).toBe(28);
     expect(meta.totalRows).toBe(0);
 
     const raceMeta = meta.tables.find((t) => t.name === "races");

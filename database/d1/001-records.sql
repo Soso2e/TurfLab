@@ -188,14 +188,6 @@ CREATE TABLE run_logs (
   FOREIGN KEY (race_id) REFERENCES races(race_id) DEFERRABLE INITIALLY DEFERRED
 );
 
-CREATE TABLE course_segments (
-  segment_id TEXT PRIMARY KEY NOT NULL,
-  data_json TEXT NOT NULL CHECK(json_valid(data_json)),
-  course_id TEXT GENERATED ALWAYS AS (json_extract(data_json, '$.course_id')) STORED,
-  CHECK(json_extract(data_json, '$.segment_id') = segment_id),
-  FOREIGN KEY (course_id) REFERENCES course_layouts(course_id) DEFERRABLE INITIALLY DEFERRED
-);
-
 CREATE TABLE entity_features (
   feature_id TEXT PRIMARY KEY NOT NULL,
   data_json TEXT NOT NULL CHECK(json_valid(data_json)),

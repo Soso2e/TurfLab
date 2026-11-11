@@ -76,10 +76,6 @@ export const tableDefinitions = {
     "log_id",
     "daily_run_id race_id operation_id stage attempt status error_code safe_message expected_hash actual_hash",
   ],
-  course_segments: [
-    "segment_id",
-    "course_id sequence start_m end_m gradient curvature",
-  ],
   entity_features: [
     "feature_id",
     "horse_id jockey_id feature_version evaluation_at cutoff_at sample_size confidence features_json performance_ids_json",
@@ -329,7 +325,6 @@ export const references: Partial<Record<Table, Record<string, Table>>> = {
     result_id: "race_results",
     model_version_id: "model_versions",
   },
-  course_segments: { course_id: "course_layouts" },
   entity_features: { horse_id: "horses", jockey_id: "jockeys" },
   odds_snapshots: { race_id: "races" },
   prediction_adoptions: { race_id: "races", prediction_id: "predictions" },
