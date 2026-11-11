@@ -3,7 +3,8 @@ param([string]$DataHome, [string]$Model = 'gpt-6.1-sol', [string]$ReasoningEffor
 $runtimeHome = Get-TurfHome $DataHome
 $workerHome = Join-Path $runtimeHome 'local-predictions'
 $manifestHome = Join-Path $workerHome 'process'
-if (Get-TurfProcess $manifestHome) { Write-Output 'Local prediction worker is running.'; return }
+$runningWorker = Get-TurfProcess $manifestHome
+if ($runningWorker) { Write-Output 'Local prediction worker is running.'; Test-TurfCheckout $runningWorker 'Prediction worker'; return }
 if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw 'Codex CLI is required.' }
 if ($Model -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid model name.' }
 if ($ReasoningEffort -notmatch '^(low|medium|high)$') { throw 'Invalid reasoning effort.' }

@@ -311,7 +311,7 @@ function App() {
                 }}
               >
                 <IconComp size={15} className="nav-icon" />
-                <span>{item.title}</span>
+                {item.title}
               </button>
             );
           })}

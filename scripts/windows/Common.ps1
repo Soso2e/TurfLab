@@ -26,6 +26,14 @@ function Get-TurfProcess([string]$HomePath) {
     }
     return $process
 }
+function Test-TurfCheckout($Process, [string]$Label) {
+    # A running instance is always reused, never stopped. Make it visible when
+    # it was started from another checkout so a stale directory is not missed.
+    if ($Process -and $Process.CommandLine -and
+        $Process.CommandLine.IndexOf($RepoRoot, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        Write-Warning "[TurfLab] $Label (PID $($Process.ProcessId)) runs from another checkout, not $RepoRoot. Stop it and start again from this checkout to switch."
+    }
+}
 function Test-TurfPort([int]$Port) {
     return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
 }

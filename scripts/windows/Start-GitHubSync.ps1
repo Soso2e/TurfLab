@@ -16,6 +16,7 @@ if (Test-Path -LiteralPath $manifest) {
     if ($live) {
         if ($live.CommandLine -eq $record.command_line -and $live.CreationDate.ToUniversalTime() -eq ([datetime]$record.created_at).ToUniversalTime()) {
             Write-Output '[TurfLab] GitHub sync worker is already running.'
+            Test-TurfCheckout $live 'GitHub sync worker'
             return
         }
         # Only a later creation time proves the old process is gone. Never stop the reused PID.

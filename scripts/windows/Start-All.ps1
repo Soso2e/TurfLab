@@ -16,6 +16,7 @@ $localUrl = 'http://127.0.0.1:8787'
 $running = Get-TurfProcess $runtimeHome
 if ($running) {
     Write-Output "[TurfLab] Existing server detected (PID $($running.ProcessId))."
+    Test-TurfCheckout $running 'Web/API server'
 } else {
     if (-not (Get-Command node -ErrorAction SilentlyContinue) -or
         -not (Get-Command npm.cmd -ErrorAction SilentlyContinue)) {

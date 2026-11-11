@@ -47,6 +47,11 @@ export function GitHubSyncStatus({
   const stale =
     !state?.worker_seen_at ||
     Date.now() - Date.parse(String(state.worker_seen_at)) > 30000;
+  const inventory = state?.daily_inventory ? obj(state.daily_inventory) : null;
+  const today = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Tokyo",
+  }).format(new Date());
+  const currentInventory = inventory?.date_jst === today ? inventory : null;
   return (
     <section className="sync-status">
       <h2>ChatGPT同期状態</h2>
@@ -72,6 +77,20 @@ export function GitHubSyncStatus({
           state?.last_prediction ? obj(state.last_prediction).path : "未受信",
         )}
       </p>
+      {currentInventory ? (
+        <p>
+          本日のGitHub確認（{time(currentInventory.checked_at)}）: 入力パック{" "}
+          {String(currentInventory.packs)}件 · 正式予想ファイル{" "}
+          {String(currentInventory.predictions)}件 · 参考分析{" "}
+          {currentInventory.reference ? "あり" : "なし"}。
+          {Number(currentInventory.packs) === 0 &&
+            " 入力パックがないため正式予想を作成できません。"}
+          {currentInventory.reference === true &&
+            " 参考分析はCoreに自動取込されません。"}
+        </p>
+      ) : (
+        <p>本日の入力パック・予想ファイルは未確認です。</p>
+      )}
       {state?.last_error && <p role="alert">{String(state.last_error)}</p>}
       {state?.last_result && (
         <p>公式結果同期: {String(obj(state.last_result).status)} · {String(obj(state.last_result).reason)} · 未処理 {String(state.results_waiting ?? 0)}件</p>
@@ -88,7 +107,10 @@ export function GitHubSyncStatus({
         </section>
       )}
       {state?.last_daily_export && (
-        <p>翌朝引継ぎ: {String(obj(state.last_daily_export).reason)} · {String(obj(state.last_daily_export).path ?? "未保存")}</p>
+        <p>
+          翌朝引継ぎ: {String(obj(state.last_daily_export).reason)} ·{" "}
+          {String(obj(state.last_daily_export).path ?? "未保存")}
+        </p>
       )}
       {state?.last_export && (
         <p>
