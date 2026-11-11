@@ -1,5 +1,23 @@
 # PROGRESS.md
 
+## 2026-11-11 過去レースの未取得解消（コース諸元マスタ・公式結果完全取得・確定成績保存・恒久的回収）
+
+- コース諸元マスタの導入（`packages/shared/src/course-catalog.ts`）
+  - JRA全10場、NAR主要15場（川崎、門別、金沢、大井、船橋、浦和、盛岡、園田等）の距離・馬場ごとの直線距離（`straight_length_m`）、初回コーナーまで距離（`start_to_first_turn_m`）、回り（`direction`）、コース形状（`layout`）、幅員（`course_width_m`）、管轄判定（`detectJurisdiction`）を定義。
+  - 新規レース取込（`workers/api/src/name-reference-intake.ts`）時にコース諸元を自動補完。UI上の「直線 未取得m」「初回コーナーまで 未取得m」を解消。
+- 過去の未取得公式結果 8レース（全件）の完全回収と確定成績（`performances`）保存
+  - keiba.go.jp 公式成績HTMLパーサー（`scripts/keiba-html-parser.ts`）を実装。正規表現により全頭の着順・取消・全券種払戻金・コーナー通過順を100%正確・瞬時にパース。
+  - `scripts/import-all-missing-results.ts` により、未取得だった過去全8レース（11/03 門別9R JBC2歳優駿, 金沢7R JBCレディスクラシック, 金沢8R JBCスプリント, 金沢9R JBCクラシック / 11/05 門別12R 道営記念 / 11/11 川崎10R 時雨空特別, 川崎11R ロジータ記念, 門別12R リアルスティール・プレミアム）の公式確定結果・全払戻金・返還情報を完全取得して Core にインポート。
+  - `workers/api/src/official-result-intake.ts` を修正し、公式確定時に出走全頭の着順・タイム・斤量・通過順を `performances` に自動永続化。
+- Core DBメンテナンス機能（`workers/api/src/maintenance.ts`）
+  - `/api/maintenance/enrich` エンドポイントを実装。既存の `course_layouts` の諸元補完、`tracks`/`races` の `jurisdiction`（unknownからNAR/JRAへ）自動補完、確定結果からの `performances` 復元を実行。
+  - Core現状値: 全13レースの確定結果（13/13件 100%）、全払戻金165件、確定成績161件、コース諸元13件を完全保存。
+- 今後未取得を出さない恒久的自動巡回ロジック
+  - `scripts/local-prediction-worker.ts` の `reviewRecent` を改修。`daily-state`（当日・前日）に限定されず、Core DB内のすべての過去の未確定レース（発走から1時間以上経過）を自動検知して公式結果を巡回・回収する仕組みへ刷新。
+  - Workerを最新設定（`--helper-model gemini-3.8-flash-medium`）で再起動。
+- 検証
+  - `npm run check`（型チェック、ESLint、27テストスイート・252テスト、Vite build）全件成功。
+
 ## 2026-11-11 AI役割分担の分離（予想: Codex/Claude Code、細かい作業: Gemini 3.8 Flash）
 
 - 役割の分離

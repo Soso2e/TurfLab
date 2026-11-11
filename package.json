@@ -21,6 +21,7 @@
     "c2:status": "node scripts/run-tool.mjs tsx scripts/c2-status.ts",
     "predictions:local": "node scripts/run-tool.mjs tsx scripts/local-predictions.ts",
     "nar:check": "node scripts/run-tool.mjs tsx scripts/nar-csv-check.ts",
+    "results:import": "tsx scripts/import-all-missing-results.ts",
     "generate:d1": "tsx scripts/generate-d1.ts"
   },
   "dependencies": {

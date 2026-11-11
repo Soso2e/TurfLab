@@ -79,6 +79,51 @@ export async function importOfficialResult(
   const saved = await saveResult(repo, {
     result, payouts, payouts_complete: true,
   }, now);
+
+  const raceEntries = (await repo.list("race_entries")).filter((e) => e.race_id === race.race_id);
+  const positionMap = new Map<number, number>();
+  let ahead = 0;
+  for (const group of (Array.isArray(result.finish_order_json) ? result.finish_order_json : [])) {
+    const tied = (Array.isArray(group) ? group : [group]).map(Number);
+    for (const n of tied) positionMap.set(n, ahead + 1);
+    ahead += tied.length;
+  }
+  const pace = obj(doc.pace_observation ?? {});
+  for (const entry of raceEntries) {
+    const horseNum = Number(entry.horse_number);
+    const perfId = `performance:auto:${race.race_id}:${horseNum}`;
+    const existing = await repo.get("performances", perfId);
+    if (!existing) {
+      const perf: Row = {
+        schema_version: "0.2",
+        created_at: now,
+        valid_as_of: race.scheduled_start_at,
+        source: "official_race_result",
+        source_url: sourceUrl,
+        is_estimated: false,
+        performance_id: perfId,
+        horse_id: entry.horse_id,
+        race_id: race.race_id,
+        jockey_id: entry.jockey_id,
+        finish_position: positionMap.get(horseNum) ?? null,
+        finish_time_s: null,
+        last_3f_s: null,
+        corner_positions_json: Array.isArray(pace.corners) ? pace.corners : [],
+        draw_number: entry.draw_number ?? null,
+        horse_number: horseNum,
+        carried_weight_kg: entry.carried_weight_kg ?? null,
+        body_weight_kg: null,
+        body_weight_change_kg: null,
+        going: null,
+        margin: null,
+        pace_observed: Array.isArray(pace.laps_s) && pace.laps_s.length ? pace.laps_s.join(",") : null,
+        running_style_observed: null,
+        trouble_notes: null,
+      };
+      await repo.put("performances", perf);
+    }
+  }
+
   const entries = await settle(repo, str(saved, "result_id"), now);
   return {
     status: "complete",

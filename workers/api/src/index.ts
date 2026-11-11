@@ -32,6 +32,7 @@ import {
   type Change,
 } from "./storage";
 import { adopt, lockPrediction, preview, saveImport } from "./imports";
+import { enrichCoursesAndPerformances } from "./maintenance";
 import { prepareRace, runBatch, runRace, safeFailure } from "./race-pipeline";
 import {
   previewMaster,
@@ -270,6 +271,9 @@ export async function route(
   if (path === "/reviews") return saveReview(repo, input, now);
   if (path === "/backtests") return backtest(repo, input);
   if (path === "/models/adopt") return adoptModel(repo, input, now);
+  if (path === "/maintenance/enrich") {
+    return enrichCoursesAndPerformances(repo, now);
+  }
   if (path === "/restore") {
     await restoreEmpty(repo, input as unknown as Backup);
     return { status: "restored" };

@@ -28,6 +28,7 @@ import {
   referenceProducerLabel,
 } from "../../../packages/shared/src/github-bridge";
 import { officialResearchUrl, validatePastRunSource } from "../../../packages/shared/src/race-research";
+import { lookupCourseSpecs } from "../../../packages/shared/src/course-catalog";
 
 export const normalizeName = (v: unknown) =>
   typeof v === "string" ? v.normalize("NFKC").replace(/\s+/gu, " ").trim() : "";
@@ -330,12 +331,16 @@ export async function importNameReference(
         typeof reference.distance_m === "number" && reference.distance_m > 0,
         "距離未観測。カタログのみ保存",
       );
+      const specs = lookupCourseSpecs(trackName, reference.surface ?? "ダート", reference.distance_m);
       const course = await entity("course_layouts", "course", key, {
         track_id: track.track_id,
         surface: reference.surface ?? "unknown",
         distance_m: reference.distance_m,
-        direction: "unknown",
-        layout: "unknown",
+        direction: specs?.direction ?? "unknown",
+        layout: specs?.layout ?? "unknown",
+        straight_length_m: specs?.straight_length_m ?? null,
+        start_to_first_turn_m: specs?.start_to_first_turn_m ?? null,
+        course_width_m: specs?.course_width_m ?? null,
         revision: 1,
       });
       const raceId = await synthetic("race", key);
