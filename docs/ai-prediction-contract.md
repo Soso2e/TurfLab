@@ -4,6 +4,8 @@
 
 TurfLab側（Windowsの同期Worker）は5分ごとにrepoを読み、受け取ったJSONを登録する。AIがTurfLabのAPIを直接呼ぶことはない。
 
+既存の予想・結果・レビュー等を読む場合は、読取ごとに `main` の最新状態を同期してから参照する。ローカルcheckoutを使う場合は `scripts/windows/Sync-TurfLabData.ps1` を実行し、出力されたcommit SHAを記録する。GitHub APIを使う場合は `main` を明示して取得したcommit/blob SHAを記録する。同期またはSHA確認に失敗した場合は、古いローカルデータで続行しない。
+
 ## 1. 保存先
 
 ```text

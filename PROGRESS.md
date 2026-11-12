@@ -1,5 +1,11 @@
 # PROGRESS.md
 
+## 2026-11-13 TurfLab-dataのAI参照前main同期
+
+- `TurfLab-data` を `C:\#Project\Server\TurfLab-data` にローカルcheckoutした。
+- AIがローカルデータを読む前にmainをfetch/fast-forwardし、clean tree・branch main・`HEAD == origin/main` を検査する `scripts/windows/Sync-TurfLabData.ps1` を追加。
+- `docs/local-cli-operation.md` とAI向け `docs/ai-prediction-contract.md` に毎回同期、SHA記録、失敗時は読取停止の規則を追記。GitHub API直接参照ではmainを指定しcommit/blob SHAを記録する。
+- スクリプトを実行し、`TurfLab-data` の `HEAD == origin/main`、SHA `d2fe65029059dd9b349f5af010d011b111b87386` を確認。AIの全読取経路へのコード上の自動強制は未実装で、AI向け契約・運用手順上の必須条件。
 ## 2026-11-11 ChatGPT予想・事後レビューの可視化とタグ運用ルール・JSON出し入れ整備
 
 - 目的
