@@ -63,6 +63,7 @@ import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
 import { rankPerformance } from "./rank-analytics";
 import { saveResearchBaseline } from "./local-research-baseline";
+import { emitOperationalEvent } from "../../../packages/shared/src/operational-event";
 import {
   getTablesMetadata,
   getTableData,
@@ -699,11 +700,36 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (!/^\/api(?:\/|$)/.test(url.pathname)) return env.ASSETS.fetch(request);
-    if (!(await authenticated(request, env.API_TOKEN)))
-      return response({ error: "本人用認証が必要です" }, 401);
-    return env.COORDINATOR.get(env.COORDINATOR.idFromName("owner")).fetch(
-      request,
-    );
+    const started = Date.now();
+    const operation = url.pathname
+      .replace(/^\/api/, "")
+      .replace(/\/(races|bets|results|predictions)\/[^/]+/g, "/$1/:id");
+    let status = 500;
+    let authenticatedRequest = false;
+    try {
+      if (!(await authenticated(request, env.API_TOKEN))) {
+        status = 401;
+        return response({ error: "本人用認証が必要です" }, 401);
+      }
+      authenticatedRequest = true;
+      const result = await env.COORDINATOR.get(
+        env.COORDINATOR.idFromName("owner"),
+      ).fetch(request);
+      status = result.status;
+      return result;
+    } finally {
+      emitOperationalEvent({
+        event: "api.request.completed",
+        component: "api",
+        request_id: crypto.randomUUID(),
+        method: request.method,
+        operation,
+        authenticated: authenticatedRequest,
+        status,
+        outcome: status >= 500 ? "error" : status >= 400 ? "rejected" : "success",
+        duration_ms: Date.now() - started,
+      });
+    }
   },
   async scheduled(
     _event: ScheduledController,

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { obj, type Row } from "../packages/shared/src/domain";
+import { emitOperationalEvent } from "../packages/shared/src/operational-event";
 import {
   claimLocalWorker,
   CoreRequestError,
@@ -58,6 +59,14 @@ const api = async (route: string, body?: unknown) => {
   return obj(await response.json());
 };
 const release = await claimLocalWorker(home);
+emitOperationalEvent({
+  event: "worker.started",
+  component: "local-prediction-worker",
+  main_model: values.model!,
+  reasoning_effort: values["reasoning-effort"]!,
+  helper_model: values["helper-model"]!,
+  once: values.once ?? false,
+});
 try {
   let factors = await readFile(
     path.join(process.cwd(), "prompts/prediction-factors.md"),
@@ -90,6 +99,7 @@ try {
     stopping = true;
   });
   do {
+    const cycleStarted = Date.now();
     let status;
     try {
       if ((await api("/status")).storage_mode !== "local")
@@ -113,16 +123,25 @@ try {
       path.join(home, "status.json"),
     );
     await api("/local-predictions/status", status).catch(() => {});
-    console.log(
-      // Keep the sanitized error code in the log; status.json is overwritten
-      // by the next healthy cycle, so the log is the only failure history.
-      JSON.stringify({ status: status.status, at: status.checked_at,
-        ...("error" in status ? { error: status.error } : {}) }),
-    );
+    // status.json is overwritten by the next cycle, so this is the durable
+    // per-cycle history in the process stdout log.
+    emitOperationalEvent({
+      event: "worker.cycle.completed",
+      component: "local-prediction-worker",
+      status: status.status,
+      checked_at: status.checked_at,
+      duration_ms: Date.now() - cycleStarted,
+      ...("error" in status ? { error_code: status.error } : {}),
+    });
     if (values.once || stopping) break;
     for (let i = 0; i < 60 && !stopping; i++)
       await new Promise((resolve) => setTimeout(resolve, 5000));
   } while (!stopping);
 } finally {
+  emitOperationalEvent({
+    event: "worker.stopped",
+    component: "local-prediction-worker",
+    at: new Date().toISOString(),
+  });
   await release();
 }

@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { obj, type Row } from "../packages/shared/src/domain";
 import { extractJson, predictWithCodex } from "./local-codex";
+import { emitOperationalEvent } from "../packages/shared/src/operational-event";
 
 export async function predictWithGemini(
   directory: string,
@@ -159,9 +160,15 @@ export async function predictWithHelper(
     return await geminiRunner(directory, prompt, model, webSearch);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(
-      `[predictWithHelper] Gemini failed (${message}), falling back to Codex / Claude...`,
-    );
+    emitOperationalEvent({
+      event: "ai.fallback",
+      component: "local-prediction-worker",
+      run_id: path.basename(directory),
+      model,
+      from_provider: "gemini",
+      to_provider: "codex-cli",
+      error_code: /^[A-Z][A-Z0-9_]{0,79}$/.test(message) ? message : "AI_INVOKE_FAILED",
+    });
     return await codexRunner(directory, prompt, "gpt-6.1-sol", webSearch);
   }
 }

@@ -9,6 +9,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import path from "node:path";
+import { emitOperationalEvent } from "../packages/shared/src/operational-event";
 import {
   jstDate,
   obj,
@@ -334,7 +335,54 @@ export class LocalPredictionWorker {
     const isPrediction = stage === "固定入力から1レースを分析";
     const inferFn = isPrediction ? this.infer : (this.helperInfer ?? this.infer);
     const modelName = isPrediction ? this.model : (this.helperModel ?? this.model);
-    const document = await inferFn(dir, prompt, modelName, webSearch);
+    const invocationStarted = Date.now();
+    const invocationAt = new Date(invocationStarted).toISOString();
+    emitOperationalEvent({
+      event: "ai.invoke.started",
+      component: "local-prediction-worker",
+      run_id: key,
+      operation: stage,
+      provider: isPrediction ? "codex-cli" : "gemini-cli",
+      model: modelName,
+      web_search: webSearch,
+      started_at: invocationAt,
+    });
+    let document: Row;
+    try {
+      document = await inferFn(dir, prompt, modelName, webSearch);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "";
+      emitOperationalEvent({
+        event: "ai.invoke.failed",
+        component: "local-prediction-worker",
+        run_id: key,
+        operation: stage,
+        provider: isPrediction ? "codex-cli" : "gemini-cli",
+        model: modelName,
+        error_code: /^[A-Z][A-Z0-9_]{0,79}$/.test(message) ? message : "AI_INVOKE_FAILED",
+        duration_ms: Date.now() - invocationStarted,
+      });
+      throw error;
+    }
+    const receipt = await readFile(path.join(dir, "receipt.json"), "utf8")
+      .then((raw) => obj(JSON.parse(raw)))
+      .catch(() => ({} as Row));
+    const actualProvider = ["codex", "claude", "gemini"].includes(String(receipt.provider))
+      ? String(receipt.provider)
+      : undefined;
+    emitOperationalEvent({
+      event: "ai.invoke.completed",
+      component: "local-prediction-worker",
+      run_id: key,
+      operation: stage,
+      provider: actualProvider ?? (isPrediction ? "codex-cli" : "gemini-cli"),
+      model: typeof receipt.model === "string" ? receipt.model : modelName,
+      ...(typeof receipt.fallback_from === "string" ? { fallback_from: receipt.fallback_from } : {}),
+      started_at: invocationAt,
+      finished_at: new Date().toISOString(),
+      duration_ms: Date.now() - invocationStarted,
+      result: document.blocked ? "blocked" : "returned",
+    });
     if (document.blocked) {
       this.blockedJobs++;
       this.jobIssues.push({

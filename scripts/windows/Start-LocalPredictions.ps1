@@ -26,7 +26,7 @@ if (Test-Path -LiteralPath $lock) {
     }
 }
 $null = New-Item -ItemType Directory -Force -Path $manifestHome, (Join-Path $runtimeHome 'logs')
-$stamp = Get-Date -Format yyyyMMdd-HHmmss
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss-fff'
 $scriptFile = Join-Path $RepoRoot 'scripts/local-predictions.ts'
 $child = Start-Process -FilePath (Get-Command node).Source -ArgumentList @('--import','tsx',"`"$scriptFile`"", '--data-home', "`"$runtimeHome`"", '--model', $Model, '--reasoning-effort', $ReasoningEffort, '--helper-model', $HelperModel) -WorkingDirectory $RepoRoot -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $runtimeHome "logs/predictions-$stamp.out.log") -RedirectStandardError (Join-Path $runtimeHome "logs/predictions-$stamp.err.log")
 Start-Sleep -Seconds 2

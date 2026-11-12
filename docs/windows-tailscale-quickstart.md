@@ -62,6 +62,10 @@ cd 'C:\#Project\Server\TurfLab'
 | `process.json`               | PID・作成時刻・コマンド。停止前に再照合し別プロセスを停止しない                  |
 | `wrangler.json`, `.dev.vars` | 既存設定から生成したlocal専用設定と本人キー                                      |
 
+GitHub同期とローカル予想Workerの標準出力・エラーは同じ `logs` に `github-*.out/err.log`・`predictions-*.out/err.log` として保存され、ログオン起動記録は `logon-start.log` に残る。`Status.ps1 -Logs` はAPIログ用なので、Workerの最新状態は `github-bridge/health.json` と `local-predictions/status.json` を確認する。
+
+APIログと予想Workerログには、`event` フィールドを持つ1行1 JSONの運用記録も出力される（`api.request.completed`、`worker.*`、`ai.invoke.*`、`ai.fallback*`）。操作名・HTTP結果・所要時間・AI provider/model・結果だけを記録し、リクエスト本文、プロンプト、認証情報は記録しない。
+
 Startは既存のWorker/ASSETS/DO binding/class/migrationを再利用し、`STORAGE_MODE=local`、`AUTOMATION_ENABLED=false`を固定する。Google資格情報とCronは運用設定に引き継がない。Wrangler Local Explorer・ローカル観測APIを無効化し、アプリAPIのBearer認証を保つ。Inspectorもloopbackの9230番だけ。8787/9230番が使用中なら既存プロセスを止めず失敗する。
 
 ```powershell

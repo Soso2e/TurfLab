@@ -1,6 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { emitOperationalEvent } from "../packages/shared/src/operational-event";
 import { obj, str, type Row } from "../packages/shared/src/domain";
 
 export function extractJson(text: string): Row {
@@ -297,11 +298,27 @@ export async function predictWithCodex(
     return await executeCodex(directory, prompt, model, webSearch, reasoningEffort);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[predictWithCodex] Codex failed (${message}), falling back to Claude Code...`);
+    emitOperationalEvent({
+      event: "ai.fallback",
+      component: "local-prediction-worker",
+      run_id: path.basename(directory),
+      model,
+      from_provider: "codex",
+      to_provider: "claude",
+      error_code: /^[A-Z][A-Z0-9_]{0,79}$/.test(message) ? message : "AI_INVOKE_FAILED",
+    });
     try {
       return await predictWithClaude(directory, prompt);
     } catch (fallbackError) {
-      console.error("[predictWithCodex] Claude Code fallback failed:", fallbackError);
+      const fallbackMessage = fallbackError instanceof Error ? fallbackError.message : "";
+      emitOperationalEvent({
+        event: "ai.fallback.failed",
+        component: "local-prediction-worker",
+        run_id: path.basename(directory),
+        model: "claude-code",
+        provider: "claude",
+        error_code: /^[A-Z][A-Z0-9_]{0,79}$/.test(fallbackMessage) ? fallbackMessage : "AI_INVOKE_FAILED",
+      });
       throw error;
     }
   }
