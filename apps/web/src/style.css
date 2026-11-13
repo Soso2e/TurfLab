@@ -1785,6 +1785,22 @@ button:focus-visible {
   margin-top: 16px;
 }
 
+/* Past runs (run-record-v1) */
+.link-button { background: none; border: 0; padding: 0; color: inherit; cursor: pointer; text-align: left; font: inherit; text-decoration: underline dotted; }
+.run-dialog { max-width: min(1100px, 96vw); }
+.run-table { font-size: 0.82rem; }
+.run-table td, .run-table th { white-space: nowrap; padding: 4px 6px; }
+.run-table small { opacity: 0.75; }
+.run-table .warn { color: #c2410c; }
+.run-incomplete { background: rgba(234, 88, 12, 0.06); }
+.coverage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px 12px; margin: 8px 0 12px; }
+.coverage-cell { font-size: 0.78rem; }
+.coverage-cell.optional { opacity: 0.7; }
+.coverage-bar { height: 6px; background: rgba(127, 127, 127, 0.2); border-radius: 3px; overflow: hidden; margin: 2px 0; }
+.coverage-bar i { display: block; height: 100%; background: #16a34a; }
+.horse-runs { margin: 6px 0; }
+.horse-runs summary { cursor: pointer; }
+.muted { opacity: 0.7; }
 /* ===== 競馬向け表示（枠色・印・確率・レースカード） ===== */
 :root {
   --ink: #1e302a;

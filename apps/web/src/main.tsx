@@ -13,6 +13,7 @@ import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
 import { DatabaseExplorer } from "./DatabaseExplorer";
+import { HorseRunsModal, RacePastRuns } from "./PastRuns";
 import {
   IconRace,
   IconImport,
@@ -283,6 +284,7 @@ function App() {
   const [date, setDate] = useState(today());
   const [data, setData] = useState<Row>();
   const [detail, setDetail] = useState<Row>();
+  const [horseRuns, setHorseRuns] = useState<string | null>(null);
   const [stats, setStats] = useState<Row>();
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -1053,6 +1055,12 @@ function App() {
                     />
                   </details>
                 </section>
+                <RacePastRuns api={api} raceId={String(obj(detail.race).race_id)} />
+                {horseRuns && (
+                  <HorseRunsModal api={api} horseId={horseRuns}
+                    before={String(obj(detail.race).race_date_jst ?? "") || null}
+                    onClose={() => setHorseRuns(null)} />
+                )}
                 <section className="panel">
                   <h2>出走馬と過去5走</h2>
                   <div className="table-scroll">
@@ -1077,7 +1085,9 @@ function App() {
                               <HorseNo n={e.horse_number} fieldSize={fieldSize} />
                             </td>
                             <td>
-                              <strong>{String(obj(e.horse).horse_name)}</strong>
+                              <button className="link-button" title="過去走を表示" onClick={() => setHorseRuns(String(e.horse_id))}>
+                                <strong>{String(obj(e.horse).horse_name)}</strong>
+                              </button>
                               <small>{String(obj(e.jockey).jockey_name)}</small>
                               {profile && <small>過去の位置取り · {String(obj(profile.features_json).early_position_group)}</small>}
                             </td>

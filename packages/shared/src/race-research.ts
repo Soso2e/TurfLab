@@ -63,7 +63,58 @@ export function sourcedPastRun(run: Row, raceDay: string): boolean {
       (key) => run[key] == null || positive(run[key]),
     ) &&
     (run.margin == null ||
-      (typeof run.margin === "string" && run.margin.length <= 24))
+      (typeof run.margin === "string" && run.margin.length <= 24)) &&
+    optionalRunFields(run) &&
+    (!url.hostname.endsWith("keiba.go.jp") || run.race_no == null ||
+      String(run.race_no) === url.searchParams.get("k_raceNo"))
+  );
+}
+
+const shortText = (value: unknown, max: number) =>
+  value == null || (typeof value === "string" && value.length <= max);
+
+/** Fields added in run-record-v1; all optional, but validated when present. */
+function optionalRunFields(run: Row): boolean {
+  const int = (value: unknown, max: number) =>
+    value == null || (typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= max);
+  const pace = run.pace;
+  return (
+    int(run.race_no, 12) &&
+    int(run.horse_number, Number(run.field_size ?? 18)) &&
+    int(run.draw_number, 8) &&
+    shortText(run.race_name, 60) &&
+    shortText(run.surface, 8) &&
+    shortText(run.weather, 8) &&
+    shortText(run.jockey, 20) &&
+    (pace == null || (typeof pace === "object" && !Array.isArray(pace) && JSON.stringify(pace).length <= 600))
+  );
+}
+
+/** A run read only from the owner's NAR CSV: no page URL, but the content
+ * hash of the CSV file and a field-level source map marking every value. */
+export function sourcedCsvRun(run: Row, raceDay: string): boolean {
+  const date = run.date_jst;
+  const sources = run.field_sources;
+  return (
+    run.source_url == null &&
+    typeof run.csv_file_sha256 === "string" &&
+    /^[0-9a-f]{64}$/.test(run.csv_file_sha256) &&
+    typeof date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+    date < raceDay &&
+    typeof run.track === "string" &&
+    run.track.length <= 12 &&
+    typeof run.distance_m === "number" &&
+    Number.isInteger(run.distance_m) &&
+    run.distance_m > 0 &&
+    !!sources &&
+    typeof sources === "object" &&
+    !Array.isArray(sources) &&
+    Object.values(sources).every((v) => v === "nar_csv") &&
+    Array.isArray(run.corners) &&
+    run.corners.length <= 4 &&
+    (run.finish == null || (typeof run.finish === "number" && Number.isInteger(run.finish) && run.finish > 0)) &&
+    optionalRunFields(run)
   );
 }
 

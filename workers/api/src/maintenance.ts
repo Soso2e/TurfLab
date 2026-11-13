@@ -106,7 +106,9 @@ export async function enrichCoursesAndPerformances(
     for (const entry of raceEntries) {
       const horseNum = Number(entry.horse_number);
       const perfId = `performance:auto:${raceId}:${horseNum}`;
-      const existing = await repo.get("performances", perfId);
+      const existing = await repo.get("performances", perfId) ??
+        (await repo.list("performances")).find((p) =>
+          p.horse_id === entry.horse_id && (p.race_id === raceId || p.run_date_jst === race.race_date_jst));
       if (!existing) {
         const perf: Row = {
           schema_version: "0.2",
