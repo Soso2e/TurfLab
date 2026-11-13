@@ -4,6 +4,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BridgeError,
+  blobSha,
   PredictionBridge,
   type BridgeIO,
   type FileRef,
@@ -16,12 +17,75 @@ import {
   confirmMaster,
 } from "../workers/api/src/race-wizard";
 import { MemoryRepository, backup } from "../packages/shared/src/repository";
-import { obj, str, rows, type Row } from "../packages/shared/src/domain";
+import { hash, obj, str, rows, type Row } from "../packages/shared/src/domain";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { wizardDraft, wizardRequest, wizardAnswer } from "./wizard-fixture";
 import { diagnoseC2 } from "../scripts/c2-diagnostics";
 
 const NOW = "2026-10-27T01:00:00.000Z";
+it("retries CLI pack read-back, preserves conflicts and requires a Core snapshot", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-research-sync-"));
+  const race = { race_id: "fixture", race_date_jst: "2026-10-27", scheduled_start_at: "2026-10-27T02:00:00Z" };
+  const research = { source_url: "https://www.keiba.go.jp/", going: "良" };
+  const snapshot = {
+    source: "codex_cli_reference", race_id: race.race_id, snapshot_id: "fixed",
+    input_hash: "input", captured_at: NOW, evidence_json: { research },
+  };
+  const body = {
+    race, research, snapshot_id: snapshot.snapshot_id, input_hash: snapshot.input_hash,
+    information_cutoff_at: NOW, evidence: [{ source: "codex_cli_reference" }],
+  };
+  const pack_hash = await hash(body);
+  const content = JSON.stringify({ pack: { ...body, pack_hash } });
+  const file = { path: `packs/2026-10-27/fixture-${pack_hash}.json`, sha: blobSha(content) };
+  let remote: { file: FileRef; content: string } | undefined;
+  let uploads = 0;
+  let reads = 0;
+  let readBackAvailable = false;
+  let snapshots = [snapshot];
+  const config = { repository: "fixture/private", branch: "main" };
+  const io: BridgeIO = {
+    api: async () => ({ race, snapshots }),
+    list: async () => remote ? [remote.file] : [],
+    read: async () => {
+      reads++;
+      if (!readBackAvailable) throw new Error("connection lost");
+      return remote!.content;
+    },
+    put: async (name, text) => {
+      uploads++;
+      remote = { file: { path: name, sha: blobSha(text) }, content: text };
+    },
+    now: () => new Date(NOW),
+  };
+  const bridge = new PredictionBridge(home, config, io);
+  await bridge.init();
+  const readLocal = async () => content;
+  await bridge.syncResearchPacks([file], readLocal);
+  expect(bridge.status().research_pack_sync).toMatchObject({ confirmed: 0, failed: 1 });
+  expect(uploads).toBe(1);
+
+  readBackAvailable = true;
+  const restarted = new PredictionBridge(home, config, io);
+  await restarted.init();
+  await restarted.syncResearchPacks([file], readLocal);
+  expect(restarted.status().research_pack_sync).toMatchObject({ confirmed: 1, failed: 0 });
+  await restarted.syncResearchPacks([file], readLocal);
+  expect(reads).toBe(2);
+  expect(uploads).toBe(1);
+
+  remote = { file: { ...file, sha: blobSha("other") }, content: "other" };
+  await restarted.syncResearchPacks([file], readLocal);
+  expect(restarted.status().research_pack_sync).toMatchObject({ confirmed: 0, failed: 1 });
+  expect(uploads).toBe(1);
+
+  remote = undefined;
+  snapshots = [];
+  await restarted.syncResearchPacks([file], readLocal);
+  expect(restarted.status().research_pack_sync).toMatchObject({ confirmed: 0, failed: 1 });
+  expect(uploads).toBe(1);
+});
+
 async function setup(count = 1) {
   const repo = new MemoryRepository();
   const files = new Map<string, { sha: string; content: string }>();
