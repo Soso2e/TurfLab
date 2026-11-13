@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -209,9 +209,19 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   expect(prerace).toMatchObject({ odds_complete: true, race_id: "r1" });
   const planDir = path.join(home, "exchange/plans/2026-11-10");
   const planFiles = await readdir(planDir);
-  const plan = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => !f.includes("-hit"))!), "utf8"));
+  const plan = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => !/-(hit|evm)\.json$/.test(f))!), "utf8"));
   expect(plan).toMatchObject({ real_money: false, adopted: false, race_id: "r1", plan_lane: "ev", budget_yen: 400 });
   expect(plan.lines.length).toBe(2);
+  // The market-anchored lane is recorded from the same odds and buys nothing
+  // while no earlier race has shown the six factors add to the market.
+  const anchored = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => f.endsWith("-evm.json"))!), "utf8"));
+  expect(anchored).toMatchObject({
+    plan_lane: "evm", real_money: false, adopted: false, picks: [],
+    blend: { alpha: 0, beta: 1, fitted: false, evidence: false },
+  });
+  expect(anchored.lines).toHaveLength(2);
+  // At the market's own probabilities every win line has the same EV: the payout rate.
+  expect(anchored.lines.every((l: Row) => Math.abs(Number(l.ev) - anchored.payout_rate) < 1e-3)).toBe(true);
   // The 600-yen hit lane is fixed alongside and never reads odds.
   const hit = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => f.includes("-hit"))!), "utf8"));
   expect(hit).toMatchObject({ plan_lane: "hit", budget_yen: 600, odds_used: false });
@@ -220,4 +230,20 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   const analysis = prompts.find((p) => p.includes("固定pack.research"))!;
   expect(analysis).not.toContain("win_odds");
   expect(report.learning).toBeDefined();
+  expect(obj(report.learning).races).toBe(0);
+
+  // An immutable file that already holds other content is refused by name.
+  const fixed = `prerace/2026-11-10/${(await readdir(path.join(home, "exchange/prerace/2026-11-10")))[0]}`;
+  await expect(immutableLocalFile(path.join(home, "exchange"), fixed, "{}"))
+    .rejects.toMatchObject({ message: "LOCAL_FILE_CONFLICT", file: fixed });
+  // The learning report is bookkeeping: an unreadable record there is listed
+  // as an issue and the cycle (and everything it predicted) still completes.
+  await mkdir(path.join(home, "exchange/outcomes/2026-11-10"), { recursive: true });
+  await writeFile(path.join(home, "exchange/outcomes/2026-11-10/broken.json"), "{not json");
+  const later = new LocalPredictionWorker(home, api, "", "fixture", infer);
+  await later.init();
+  const after = await later.tick(new Date(now));
+  expect(after.job_issues).toContainEqual(expect.objectContaining({ job: "learning-report" }));
+  expect(after.learning).toBeNull();
+  expect(after.race_stages).toBeDefined();
 });

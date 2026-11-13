@@ -120,7 +120,15 @@ export async function predictWithGemini(
     // fall through to extractJson
   }
 
-  const document = extractJson(rawResult);
+  let document: Row;
+  try {
+    document = extractJson(rawResult);
+  } catch (error) {
+    // Keep what the CLI actually printed (local job folder only), so a parse
+    // failure can be diagnosed instead of silently falling back every time.
+    await writeFile(path.join(directory, "gemini-raw.txt"), stdout.slice(0, 20_000)).catch(() => {});
+    throw error;
+  }
   await writeFile(
     output,
     JSON.stringify({ document: JSON.stringify(document) }),

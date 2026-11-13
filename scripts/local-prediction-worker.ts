@@ -27,10 +27,10 @@ import { loadNarCsvDir, mergeRuns, narStats, normGoing } from "./nar-csv-stats";
 import { importNarCsvInbox } from "./nar-csv-import";
 import { evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
 import {
-  fitScale, fitWeights, features, labOutcome, learningReport, MIN_TRAIN_RACES,
-  planOutcome, PRIOR_WEIGHTS, type Sample,
+  fitBlend, fitScale, fitWeights, labOutcome, latestPerRace, learningReport, MIN_TRAIN_RACES,
+  outcomeSamples, planOutcome, PRIOR_WEIGHTS, walkForwardBlend, type Sample,
 } from "./lab-learning";
-import { evCandidates, evPlan, hitPlan, ticketKey } from "./bet-plans";
+import { evCandidates, evPlan, hitPlan, marketAnchoredPlan, ticketKey } from "./bet-plans";
 import { csvRecordsFor, gapHints, jockeysCoveredByCsv, mergeResearchRun, statRunsFromCsv } from "./csv-run-fill";
 import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
 import type { NarRun } from "./nar-csv-stats";
@@ -120,7 +120,15 @@ export async function immutableLocalFile(
       (error as NodeJS.ErrnoException).code !== "EEXIST" ||
       (await readFile(target, "utf8")) !== content
     )
-      throw new Error("LOCAL_FILE_CONFLICT");
+      throw new LocalFileConflict(name);
+  }
+}
+
+/** An immutable file already holds different content. Carries the path, so a
+ * failed cycle names the file instead of only the error code. */
+export class LocalFileConflict extends Error {
+  constructor(readonly file: string) {
+    super("LOCAL_FILE_CONFLICT");
   }
 }
 
@@ -240,6 +248,7 @@ export class LocalPredictionWorker {
     this.blockedJobs++;
     this.jobIssues.push({
       job,
+      ...(error instanceof LocalFileConflict ? { file: error.file } : {}),
       reason: error instanceof CoreRequestError && error.detail
         ? error.detail
         : /^(CORE_HTTP_\d+|CODEX_[A-Z_]+|LOCAL_[A-Z_]+)$/.test(message)
@@ -696,7 +705,12 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           !this.stages.has(String(race.race_id)))
         this.mark(race, 1, "固定入力の作成待ち");
     }
-    const learning = await this.learn(now);
+    // The learning report is read-only bookkeeping: a failure there is listed
+    // as an issue and must not turn a cycle that predicted correctly into "failed".
+    const learning = await this.learn(now).catch((error) => {
+      this.failedJob("learning-report", error);
+      return null;
+    });
     const diagnostics = await this.api("/analytics/ranks");
     await writeFile(
       path.join(this.home, "rank-evaluation.json.tmp"),
@@ -1135,12 +1149,12 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     return output;
   }
 
+  /** One sample per finished race (re-predictions are not extra races), with
+   * the pre-race win odds when they were saved complete. */
   private async outcomeSamples(): Promise<Sample[]> {
-    return (await this.exchangeJson("outcomes")).map(({ value }) => ({
-      race_id: String(value.race_id), date: String(value.race_date_jst),
-      horses: features(rows(value.evaluations ?? [])),
-      winners: (value.actual_winners ?? []) as number[],
-    }));
+    const odds = new Map((await this.exchangeJson("prerace")).filter(({ value }) => value.odds_complete)
+      .map(({ value }) => [String(value.race_id), value]));
+    return outcomeSamples(latestPerRace((await this.exchangeJson("outcomes")).map(({ value }) => value)), odds);
   }
 
   /** Fixes a virtual plan before the start from the latest record and the odds.
@@ -1163,12 +1177,21 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             hitPlan(record, weights, calibrated, new Date().toISOString())));
         // Stage 4 lane: 400 yen from the time-stamped pre-race odds.
         const name = `plans/${day}/${key}.json`;
+        const odds = await readFile(path.join(this.exchange, "prerace", day, `${key}.json`), "utf8")
+          .then((raw) => obj(JSON.parse(raw))).catch(() => null);
+        // Market-anchored lane, recorded beside it from the same odds. It buys
+        // only after earlier races showed the six factors add to the market.
+        const anchoredName = `plans/${day}/${key}-evm.json`;
+        if (odds?.odds_complete && !(await exists(anchoredName))) {
+          const earlier = (await this.outcomeSamples()).filter((s) => s.date < day);
+          await immutableLocalFile(this.exchange, anchoredName, JSON.stringify(marketAnchoredPlan(
+            record, odds, fitBlend(earlier), walkForwardBlend(earlier).evidence === true,
+            new Date().toISOString())));
+        }
         if (await exists(name)) {
           this.mark(race, 4, "的中狙い600円・期待値買い400円を固定済み");
           continue;
         }
-        const odds = await readFile(path.join(this.exchange, "prerace", day, `${key}.json`), "utf8")
-          .then((raw) => obj(JSON.parse(raw))).catch(() => null);
         if (!odds?.odds_complete) {
           this.mark(race, 4, "的中狙い600円を固定済み。発走60〜10分前に期待値買い400円");
           continue;
@@ -1234,8 +1257,13 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       const output = `outcomes/${name.split("/")[1]}/${base}-r${result.revision}.json`;
       if (existing.has(output)) continue;
       const outcome = labOutcome(value, result, name, paceOf.get(`${value.race_id}:${result.revision}`) ?? null);
-      await immutableLocalFile(this.exchange, output, JSON.stringify(outcome));
-      outcomes.push({ name: output, value: outcome });
+      try {
+        await immutableLocalFile(this.exchange, output, JSON.stringify(outcome));
+        outcomes.push({ name: output, value: outcome });
+      } catch (error) {
+        // One comparison that cannot be saved must not hide all the others.
+        this.failedJob(output, error);
+      }
     }
     const newest = new Map<string, Row>();
     for (const { value } of outcomes) {
@@ -1255,6 +1283,15 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     return {
       races: report.races!, by_status: report.by_status!, top1_win_rate: report.top1_win_rate!,
       top1_flat_win: report.top1_flat_win!, hit_plans: report.hit_plans!, ev_plans: report.ev_plans!,
+      market_anchored_plans: report.market_anchored_plans!,
+      market_blend: {
+        races_with_odds: obj(report.market_blend).races_with_odds!, holdout_races: obj(report.market_blend).holdout_races!,
+        blend_minus_market: obj(report.market_blend).blend_minus_market!, verdict: obj(report.market_blend).verdict!,
+      },
+      recorded_probabilities: {
+        races: obj(report.recorded_probabilities).races!, log_loss: obj(report.recorded_probabilities).log_loss!,
+        versus_market: obj(report.recorded_probabilities).versus_market!,
+      },
       holdout_races: obj(report.learning).holdout_races!, candidate_ready: obj(report.learning).candidate_ready!,
     };
   }

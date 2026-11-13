@@ -7,6 +7,7 @@ import {
   claimLocalWorker,
   CoreRequestError,
   LocalPredictionWorker,
+  LocalFileConflict,
 } from "./local-prediction-worker";
 import { predictWithCodex } from "./local-codex";
 import { predictWithHelper } from "./local-gemini";
@@ -113,6 +114,8 @@ try {
         error: /^(CORE_HTTP_\d+|CODEX_[A-Z_]+|LOCAL_[A-Z_]+)$/.test(message)
           ? message
           : "LOCAL_WORKER_FAILED",
+        // The immutable file that refused the write, when that is the cause.
+        ...(error instanceof LocalFileConflict ? { detail: error.file } : {}),
       };
       if (/CORE_HTTP_40[13]/.test(message)) stopping = true;
     }
