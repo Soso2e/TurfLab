@@ -1,3 +1,5 @@
+import { cornersByHorse, saveResultRuns } from "./run-records";
+import { cleanPace } from "../../../packages/shared/src/run-record";
 import {
   hash, instant, num, obj, requireCondition, rows, str, type Row,
 } from "../../../packages/shared/src/domain";
@@ -89,40 +91,12 @@ export async function importOfficialResult(
     ahead += tied.length;
   }
   const pace = obj(doc.pace_observation ?? {});
-  for (const entry of raceEntries) {
-    const horseNum = Number(entry.horse_number);
-    const perfId = `performance:auto:${race.race_id}:${horseNum}`;
-    const existing = await repo.get("performances", perfId);
-    if (!existing) {
-      const perf: Row = {
-        schema_version: "0.2",
-        created_at: now,
-        valid_as_of: race.scheduled_start_at,
-        source: "official_race_result",
-        source_url: sourceUrl,
-        is_estimated: false,
-        performance_id: perfId,
-        horse_id: entry.horse_id,
-        race_id: race.race_id,
-        jockey_id: entry.jockey_id,
-        finish_position: positionMap.get(horseNum) ?? null,
-        finish_time_s: null,
-        last_3f_s: null,
-        corner_positions_json: Array.isArray(pace.corners) ? pace.corners : [],
-        draw_number: entry.draw_number ?? null,
-        horse_number: horseNum,
-        carried_weight_kg: entry.carried_weight_kg ?? null,
-        body_weight_kg: null,
-        body_weight_change_kg: null,
-        going: null,
-        margin: null,
-        pace_observed: Array.isArray(pace.laps_s) && pace.laps_s.length ? pace.laps_s.join(",") : null,
-        running_style_observed: null,
-        trouble_notes: null,
-      };
-      await repo.put("performances", perf);
-    }
-  }
+  // One run row per started horse, merged with research rows of the same day.
+  const statuses = obj(result.entry_status_json ?? {});
+  const started = raceEntries.filter((e) =>
+    !["scratched", "cancelled", "excluded"].includes(String(statuses[String(e.horse_number)] ?? "")));
+  await saveResultRuns(repo, race, started, positionMap, cornersByHorse(pace.corners ?? []),
+    cleanPace({ laps_s: pace.laps_s ?? [] }), sourceUrl, checked, now);
 
   const entries = await settle(repo, str(saved, "result_id"), now);
   return {

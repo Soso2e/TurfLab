@@ -21,7 +21,46 @@ export type NarRun = {
   jockey: string;
   /** Finishing position; null = started but not placed (中止・失格等). */
   finish: number | null;
+  /** Optional columns: read only when the CSV has a header of that exact name. */
+  horse_name?: string | null;
+  finish_time_s?: number | null;
+  last_3f_s?: number | null;
+  carried_weight_kg?: number | null;
+  body_weight_kg?: number | null;
+  margin?: string | null;
+  race_name?: string | null;
+  weather?: string | null;
+  /** Horses that started in the race (rows of the race minus 取消・除外). */
+  field_size?: number | null;
 };
+
+/** "1:25.3" / "85.3" / "1.25.3" → seconds; anything else → null. */
+export function csvSeconds(v: unknown): number | null {
+  const s = normName(v);
+  const m = s.match(/^(?:(\d{1,2})[:.])?(\d{1,2}\.\d)$/u);
+  if (!m) return null;
+  const sec = (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);
+  return sec > 0 && sec < 600 ? Math.round(sec * 10) / 10 : null;
+}
+const decimal = (v: unknown) => {
+  const n = Number(normName(v));
+  return normName(v) && Number.isFinite(n) && n > 0 ? n : null;
+};
+const textCell = (v: unknown, max: number) => {
+  const s = String(v ?? "").normalize("NFKC").trim();
+  return s && s.length <= max ? s : null;
+};
+/** Header names tried for the optional columns (official manual names first). */
+export const OPTIONAL_CSV_COLUMNS = {
+  horse_name: ["馬名"],
+  finish_time_s: ["タイム", "走破タイム"],
+  last_3f_s: ["上り", "上がり", "上り3F", "上がり3F", "推定上り"],
+  carried_weight_kg: ["負担重量", "斤量"],
+  body_weight_kg: ["馬体重"],
+  margin: ["着差"],
+  race_name: ["レース名", "競走名"],
+  weather: ["天候"],
+} as const;
 
 export type NarTarget = {
   track: string;
@@ -123,6 +162,10 @@ export function buildRuns(
         col(t, "距離"),
         col(t, "馬場"),
       ];
+      const [rn, wt] = [
+        col(t, ...OPTIONAL_CSV_COLUMNS.race_name),
+        col(t, ...OPTIONAL_CSV_COLUMNS.weather),
+      ];
       for (const r of t.rows) {
         const date = normDate(r[dt]);
         if (!date) continue;
@@ -130,6 +173,8 @@ export function buildRuns(
           surface: normSurface(r[sf]),
           distance_m: int(r[ds]),
           going: normGoing(r[gg]),
+          race_name: rn >= 0 ? textCell(r[rn], 60) : null,
+          weather: wt >= 0 ? textCell(r[wt], 8) : null,
         });
       }
     }
@@ -146,6 +191,15 @@ export function buildRuns(
       col(t, "騎手名"),
       col(t, "着順"),
     ];
+    const opt = {
+      horse_name: col(t, ...OPTIONAL_CSV_COLUMNS.horse_name),
+      finish_time_s: col(t, ...OPTIONAL_CSV_COLUMNS.finish_time_s),
+      last_3f_s: col(t, ...OPTIONAL_CSV_COLUMNS.last_3f_s),
+      carried_weight_kg: col(t, ...OPTIONAL_CSV_COLUMNS.carried_weight_kg),
+      body_weight_kg: col(t, ...OPTIONAL_CSV_COLUMNS.body_weight_kg),
+      margin: col(t, ...OPTIONAL_CSV_COLUMNS.margin),
+    };
+    const cell = (r: string[], i: number) => (i >= 0 ? r[i] : undefined);
     for (const r of t.rows) {
       const date = normDate(r[dt]);
       const raw = normName(r[fin]);
@@ -172,10 +226,30 @@ export function buildRuns(
         horse_number: int(r[hn]),
         jockey: normName(r[jk]),
         finish,
+        horse_name: opt.horse_name >= 0 ? normName(r[opt.horse_name]) || null : null,
+        finish_time_s: csvSeconds(cell(r, opt.finish_time_s)),
+        last_3f_s: (() => {
+          const v = csvSeconds(cell(r, opt.last_3f_s));
+          return v != null && v < 60 ? v : null;
+        })(),
+        carried_weight_kg: opt.carried_weight_kg >= 0 ? decimal(r[opt.carried_weight_kg]) : null,
+        body_weight_kg: opt.body_weight_kg >= 0 ? int(String(r[opt.body_weight_kg]).split(/[(（]/u)[0]) : null,
+        margin: opt.margin >= 0 ? textCell(r[opt.margin], 24) : null,
+        race_name: (race?.race_name as string | null) ?? null,
+        weather: (race?.weather as string | null) ?? null,
       });
     }
   }
-  return { runs: mergeRuns(runs), unrecognized: [...unrecognized].sort() };
+  // Field size = starters of the same race, counted after duplicate removal.
+  const merged = mergeRuns(runs);
+  const starters = new Map<string, number>();
+  const raceOf = (r: NarRun) => `${r.track}|${r.date}|${r.race_no}`;
+  for (const r of merged) starters.set(raceOf(r), (starters.get(raceOf(r)) ?? 0) + 1);
+  for (const r of merged) {
+    const n = starters.get(raceOf(r)) ?? 0;
+    r.field_size = n >= 1 && n <= 18 ? n : null;
+  }
+  return { runs: merged, unrecognized: [...unrecognized].sort() };
 }
 
 /** One row per (track, day, race, horse number): overlapping monthly CSVs and

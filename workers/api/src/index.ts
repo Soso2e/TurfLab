@@ -1,4 +1,5 @@
 import { entityMemory, saveEntityMemory } from "./entity-memory";
+import { backfillRunRecords, horseRunView, raceRunView, saveCsvRuns, saveJockeyStats, statRuns } from "./run-records";
 import { raceTrends } from "./race-trends";
 import {
   canonical,
@@ -172,6 +173,10 @@ export async function route(
       url.searchParams.get("date") ??
         new Date(Date.parse(now) + 9 * 3600000).toISOString().slice(0, 10),
     );
+  if (method === "GET" && /^\/races\/[^/]+\/runs$/.test(path))
+    return raceRunView(repo, decodeURIComponent(path.split("/")[2]));
+  if (method === "GET" && /^\/horses\/[^/]+\/runs$/.test(path))
+    return horseRunView(repo, decodeURIComponent(path.split("/")[2]), url.searchParams.get("before"));
   if (method === "GET" && /^\/races\/[^/]+$/.test(path))
     return detail(repo, decodeURIComponent(path.split("/")[2]));
   if (method === "GET" && path === "/stats")
@@ -233,6 +238,22 @@ export async function route(
   if (path === "/local-predictions/entity-memory/save") {
     requireCondition(!sheets, "個体メモリはlocal保存専用です");
     return saveEntityMemory(repo, input, now);
+  }
+  if (path === "/local-predictions/run-records/csv") {
+    requireCondition(!sheets, "過去走の保存はlocal保存専用です");
+    return saveCsvRuns(repo, input, now);
+  }
+  if (path === "/local-predictions/run-records/stat-runs") {
+    requireCondition(!sheets, "過去走の集計はlocal保存専用です");
+    return statRuns(repo, input);
+  }
+  if (path === "/local-predictions/jockey-stats/save") {
+    requireCondition(!sheets, "騎手統計はlocal保存専用です");
+    return saveJockeyStats(repo, input, now);
+  }
+  if (path === "/maintenance/run-records/backfill") {
+    requireCondition(!sheets, "過去走の移行はlocal保存専用です");
+    return backfillRunRecords(repo, now);
   }
   if (path === "/local-predictions/trends") {
     requireCondition(!sheets, "傾向集計はlocal保存専用です");

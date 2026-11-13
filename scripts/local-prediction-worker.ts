@@ -31,6 +31,9 @@ import {
   planOutcome, PRIOR_WEIGHTS, type Sample,
 } from "./lab-learning";
 import { evCandidates, evPlan, hitPlan, ticketKey } from "./bet-plans";
+import { csvRecordsFor, gapHints, jockeysCoveredByCsv, mergeResearchRun, statRunsFromCsv } from "./csv-run-fill";
+import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
+import type { NarRun } from "./nar-csv-stats";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -40,7 +43,7 @@ export const scoringRules = `6項目の根拠の定義:
 - pace: 過去の通過順から見た脚質と、今回の先行馬の数。
 - going: pack.research.going は公式出馬表の表示を history_checked_at に確認した観測値として使ってよい（別途の観測時刻は不要）。null のときだけ欠測。
 - draw_weight: 枠・馬番の傾向（pack.research.local_stats.draw の期間・標本付き集計、または出典付きの資料）と斤量。枠の傾向資料が無いときは欠測。
-- horse_jockey_course: 騎手の今回の競馬場での成績（local_stats.jockeys か jockey_notes の公式騎手リーディング）と、馬の今回のコース・距離での近走。人馬コンビの過去実績が0例なのは「経験なし」という事実で、欠測ではない（その場合は騎手と馬それぞれの根拠で採点）。騎手の成績も馬の近走も無いときだけ欠測。`;
+- horse_jockey_course: 騎手の今回の競馬場での成績（research.jockey_stats の標本数付き統計＝同場・距離帯・馬場別成績、先行率、コーナーでの順位変化、人馬コンビ／local_stats.jockeys／jockey_notes の公式騎手リーディング）と、馬の今回のコース・距離での近走。人馬コンビの過去実績が0例なのは「経験なし」という事実で、欠測ではない（その場合は騎手と馬それぞれの根拠で採点）。騎手の成績も馬の近走も無いときだけ欠測。`;
 const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整数またはnull(全馬共通), component:6項目名, detail:何が無いか}], lab_evaluations:[{horse_number, horse_name, components:{6項目:0〜100またはnull(根拠なし)}, rationale}]} を返す。lab_evaluations は正式予想ではない研究用記録。根拠のある項目だけ数値にし、根拠の無い項目は必ずnull。`;
 
 const BIAS_PREFIX = "[当日傾向] ";
@@ -153,7 +156,9 @@ export function withMemory(answer: Row, known: Row[]): Row {
     const fresh = found.find((f) => f.horse_number === h.horse_number);
     const runs = new Map<string, Row>();
     for (const run of rows(h.saved_runs ?? [])) runs.set(String(run.date_jst), run);
-    for (const run of rows(fresh?.recent_runs ?? [])) runs.set(String(run.date_jst), run);
+    // A search only fills fields the store lacks; stored values are kept.
+    for (const run of rows(fresh?.recent_runs ?? []))
+      runs.set(String(run.date_jst), mergeResearchRun(runs.get(String(run.date_jst)), run));
     return {
       horse_number: h.horse_number!, horse_name: fresh?.horse_name ?? h.horse_name!,
       recent_runs: [...runs.values()]
@@ -215,8 +220,18 @@ export class LocalPredictionWorker {
       },
     );
   }
+  private backfilled = false;
   async init() {
     await this.bridge.init();
+  }
+
+  /** Once per process: legacy horse-run-v1 features and race-only result rows
+   * become run records in performances (idempotent). */
+  private async backfillRuns() {
+    if (this.backfilled) return;
+    this.backfilled = true;
+    await this.api("/maintenance/run-records/backfill", {})
+      .catch((error) => this.failedJob("run-records-backfill", error));
   }
 
   private failedJob(job: string, error: unknown) {
@@ -565,10 +580,13 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           }
         }
         let coverage = pack.research ? evidenceCoverage(pack) : null;
-        // Stage 2: search only for what the coverage says is missing, at most
+        // Stage 2: search only for what is missing — factors without evidence
+        // and past-run fields without a value or source — at most
         // MAX_FILL_ROUNDS times per race; then predict with what there is.
-        if (coverage && !coverage.formal_allowed && !prechecked) {
-          const refreshed = await this.fillGaps(pack, coverage, day);
+        const runMemory = coverage && !prechecked ? await this.memoryWithCsv(pack, day) : null;
+        const runsIncomplete = runMemory != null && runMemory.runs_complete !== true;
+        if (coverage && (!coverage.formal_allowed || runsIncomplete) && !prechecked) {
+          const refreshed = await this.fillGaps(pack, coverage, day, runMemory);
           if (spent()) {
             this.mark(race, 2, refreshed
               ? "不足資料を補完。次の周期で再評価"
@@ -716,37 +734,38 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
   }
 
   private async collectHistory(pack: Row, day: string, now: Date) {
-    const race = obj(pack.race);
     const key = `${day}-history-${str(pack, "pack_hash")}`;
     const research = obj(pack.research);
-    // Stage 1: runs and jockey notes already in the per-entity store are reused.
-    const memory = await this.api("/local-predictions/entity-memory", { snapshot_id: pack.snapshot_id })
-      .catch(() => null);
+    // Stage 1: runs in the store are reused; the owner's NAR CSV comes next;
+    // the CLI is asked only for the fields that are still missing.
+    const memory = await this.memoryWithCsv(pack, day);
     const known = rows(memory?.horses ?? []);
-    if (memory?.complete) {
+    const csv = await this.csvRuns();
+    const covered = csv
+      ? jockeysCoveredByCsv(csv.runs, str(obj(pack.track), "name"), day, known.map((h) => String(h.jockey_name ?? "")))
+      : new Set<string>();
+    const hints = gapHints(known, covered);
+    const nothingToFind = memory?.runs_complete === true && hints.every((h) => !h.jockey_leaderboard_needed);
+    if (nothingToFind) {
       return this.saveEnriched(pack, withMemory({
         weather: research.weather ?? null, going: research.going ?? null,
         track_notes: research.track_notes ?? [],
-        limitations: ["保存済みの近走・騎手成績を再利用（再検索なし）"],
+        limitations: [csv ? "保存済みの近走・NAR CSVで全項目が揃ったため再検索なし" : "保存済みの近走・騎手成績を再利用（再検索なし）"],
         horses: [],
       }, known), day, now.toISOString());
     }
-    const saved = known.map((h) => ({
-      horse_number: h.horse_number, horse_name: h.horse_name,
-      saved_run_dates: rows(h.saved_runs ?? []).map((r) => r.date_jst),
-      runs_to_find: h.runs_missing, jockey_notes_saved: rows(h.jockey_notes ?? []).length > 0,
-    }));
+    const race = obj(pack.race);
     const answer = await this.generate(
       key,
       `現在UTC ${new Date().toISOString()}。\n${historyPrompt}\n` +
         (known.length
-          ? "保存済みの近走と騎手成績は調べ直さない。saved_run_dates の走は返さなくてよい。runs_to_find が0の馬は近走を調べない。jockey_notes_saved がtrueの騎手は騎手リーディングを調べない。不足分だけ調べる。\n"
+          ? "need は各馬の不足分。saved_runs の日付の走は missing_fields に挙げた項目だけ調べ、その走は日付と見つけた項目と出典URLだけ返す（他の項目は保存済みなので返さなくてよい）。runs_to_find の数だけ新しい走を探す（0なら探さない）。jockey_leaderboard_needed がfalseの騎手は騎手リーディングを調べない（保存済みかCSVで足りている）。\n"
           : "") +
         JSON.stringify({
           race, course: pack.course, track: pack.track, research: pack.research,
           entries: rows(pack.entries).map(({ horse_number, horse_name, jockey_name, status }) =>
             ({ horse_number, horse_name, jockey_name, status })),
-          ...(known.length ? { saved } : {}),
+          ...(known.length ? { need: hints } : {}),
         }),
     );
     if (!answer || answer.blocked) return null;
@@ -754,6 +773,73 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       .then((raw) => obj(JSON.parse(raw))).catch(() => null);
     const captured = receipt ? str(receipt, "finished_at") : now.toISOString();
     return this.saveEnriched(pack, withMemory(answer, known), day, captured);
+  }
+
+  /** Owner-saved NAR CSVs, read at most every 10 minutes. Raw files stay local;
+   * values reach the store with the content hash of the CSV set. */
+  private csvCache: { at: number; value: { runs: NarRun[]; sha256: string; files: number } | null } | null = null;
+  private async csvRuns() {
+    if (this.csvCache && Date.now() - this.csvCache.at < 10 * 60_000) return this.csvCache.value;
+    let value: { runs: NarRun[]; sha256: string; files: number } | null = null;
+    try {
+      const loaded = await loadNarCsvDir(path.join(this.home, "nar-csv"));
+      if (loaded) {
+        const shas = loaded.files.map((f) => String(f.sha256)).sort();
+        value = { runs: loaded.runs, files: shas.length, sha256: createHash("sha256").update(shas.join("\n")).digest("hex") };
+      }
+    } catch (error) {
+      this.failedJob("nar-csv", error);
+    }
+    this.csvCache = { at: Date.now(), value };
+    return value;
+  }
+
+  /** Entity memory after the CSV has filled what it can (no CLI call). */
+  private async memoryWithCsv(pack: Row, day: string): Promise<Row | null> {
+    const ask = () => this.api("/local-predictions/entity-memory", { snapshot_id: pack.snapshot_id }).catch(() => null);
+    await this.backfillRuns();
+    const memory = await ask();
+    // TURFLAB_CSV_RUN_VALUES=off keeps CSV values out of per-run records (stats only).
+    if (!memory || obj(pack.race).jurisdiction !== "NAR" || process.env.TURFLAB_CSV_RUN_VALUES === "off") return memory;
+    const csv = await this.csvRuns();
+    if (!csv) return memory;
+    const records = csvRecordsFor(rows(memory.horses ?? []), csv.runs, day, csv.sha256, new Date().toISOString());
+    if (!records.length) return memory;
+    const saved = await this.api("/local-predictions/run-records/csv", { records: records.slice(0, 500) })
+      .catch((error) => { this.failedJob(`${day}-csv-runs`, error); return null; });
+    return saved && Number(saved.filled_fields ?? 0) > 0 ? ask() : memory;
+  }
+
+  /** jockey-stats-v1 for one race from stored runs (with corners) and the CSV. */
+  private async jockeyStatsFor(pack: Row, day: string): Promise<Row | null> {
+    try {
+      const entries = rows(pack.entries).filter((e) => e.status === "active");
+      const stored = await this.api("/local-predictions/run-records/stat-runs", {
+        before_date: day,
+        jockeys: entries.map((e) => String(e.jockey_name ?? "")),
+        horse_ids: entries.map((e) => String(e.horse_id ?? "")),
+      });
+      const csv = await this.csvRuns();
+      const runs: StatRun[] = [
+        ...(rows(stored.runs ?? []) as unknown as StatRun[]),
+        ...(csv ? statRunsFromCsv(csv.runs, entries) : []),
+      ];
+      if (!runs.length) return null;
+      const stats = jockeyStats(runs, {
+        date: day,
+        track: str(obj(pack.track), "name"),
+        surface: (obj(pack.course).surface as string) ?? null,
+        distance_m: (obj(pack.course).distance_m as number) ?? null,
+        going: (obj(pack.research ?? {}).going as string) ?? null,
+        rides: entries.map((e) => ({
+          jockey: String(e.jockey_name ?? ""), horse: (e.horse_id as string) ?? null, horse_number: Number(e.horse_number),
+        })),
+      });
+      return JSON.stringify(stats).length <= 60_000 ? stats : null;
+    } catch (error) {
+      this.failedJob(`${day}-jockey-stats`, error);
+      return null;
+    }
   }
 
   /** Stage 3: up to five independent public forecasts for one race, stored apart
@@ -806,10 +892,15 @@ JSON: {sources:[{site,source_url,published_at:ISOまたはnull,method:"記者|�
 
   /** Stage 2: one Web search for exactly the factors the coverage marks missing
    * (or weak, except a horse new to the course). Going has its own check. */
-  private async fillGaps(pack: Row, coverage: Row, day: string) {
+  private async fillGaps(pack: Row, coverage: Row, day: string, memory: Row | null = null) {
     const race = obj(pack.race);
-    const gaps = rows(coverage.missing).filter((m) => m.component !== "going" &&
+    const gaps: Row[] = rows(coverage.missing).filter((m) => m.component !== "going" &&
       (m.status === "missing" || m.component !== "course"));
+    // Past-run fields still missing in the store (run-coverage-v1), not only factors.
+    for (const h of gapHints(rows(memory?.horses ?? []), new Set()))
+      if (Number(h.runs_to_find) > 0 || rows(h.missing_fields ?? []).length)
+        gaps.push({ horse_number: h.horse_number!, component: "past_runs",
+          detail: JSON.stringify({ runs_to_find: h.runs_to_find, missing_fields: h.missing_fields, saved_runs: h.saved_runs }).slice(0, 600) });
     if (!gaps.length) return null;
     const prefix = `${day}-fill-${raceKey(str(race, "race_id"))}-`;
     const key = prefix + str(pack, "pack_hash").slice(0, 16);
@@ -824,11 +915,11 @@ JSON: {sources:[{site,source_url,published_at:ISOまたはnull,method:"記者|�
   ...g, horse_name: entries.find((e) => e.horse_number === g.horse_number)?.horse_name ?? null,
   jockey: entries.find((e) => e.horse_number === g.horse_number)?.jockey_name ?? null,
 })))}
-- ability / pace / course: その馬の過去走を公式の競走成績表で確認し recent_runs に（日付・場・距離・馬場・頭数・着順・通過順・時計・上がり・着差・斤量・騎手・出典URL）。
+- ability / pace / course / past_runs: その馬の過去走を公式の競走成績表で確認し recent_runs に（日付・競走番号・レース名・場・芝ダ・距離・馬場・天候・頭数・当時の馬番/枠番・着順・通過順・時計・上がり・着差・斤量・騎手・ペース・出典URL）。past_runs の detail に missing_fields がある走は、その項目だけ調べて日付と出典URLを付けて返す。
 - horse_jockey_course: 騎手の今回の競馬場での成績（公式の騎手リーディング等、集計期間付き）を jockey_notes に。今回の場で絞れない場合は「全国集計の代用」と明記。
 - draw_weight: 今回の競馬場・距離の枠番別成績（出典・期間・標本数付き）を track_notes に「枠」を含む文で。
 見つからない項目は limitations に理由を書く。
-JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_number,horse_name,jockey_notes:[{source_url,note}],recent_runs:[{date_jst,track,distance_m,going,field_size,finish,corners:[],finish_time_s,last_3f_s,margin,carried_weight_kg,body_weight_kg,jockey,source_url}]}]}`,
+JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_number,horse_name,jockey_notes:[{source_url,note}],recent_runs:[{date_jst,track,race_no,race_name,surface,distance_m,going,weather,field_size,horse_number,draw_number,finish,corners:[],finish_time_s,last_3f_s,margin,carried_weight_kg,body_weight_kg,jockey,pace:{first_3f_s,race_last_3f_s,laps_s:[]},source_url}]}]}`,
     );
     if (!found || found.blocked) return null;
     const fresh = rows(found.horses ?? []);
@@ -843,9 +934,13 @@ JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_
     carried.limitations = [...strings(found.limitations), ...strings(research.limitations)].slice(0, 10);
     carried.horses = rows(carried.horses).map((h) => {
       const f = fresh.find((x) => x.horse_number === h.horse_number);
+      const merged = new Map<string, Row>();
+      for (const run of rows(h.recent_runs ?? [])) merged.set(String(run.date_jst), run);
+      for (const run of rows(f?.recent_runs ?? []))
+        merged.set(String(run.date_jst), mergeResearchRun(merged.get(String(run.date_jst)), run));
       return {
         ...h,
-        recent_runs: rows(f?.recent_runs ?? []),
+        recent_runs: [...merged.values()].sort((a, b) => String(b.date_jst).localeCompare(String(a.date_jst))).slice(0, 5),
         jockey_notes: rows(f?.jockey_notes ?? []).length ? f!.jockey_notes! : h.jockey_notes!,
       };
     });
@@ -936,8 +1031,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     const race = obj(pack.race);
     if (jstDate(captured) !== day || Date.parse(str(race, "scheduled_start_at")) <= Date.now())
       throw new Error("LOCAL_RESEARCH_CUTOFF");
+    const jockeyStatsDoc = await this.jockeyStatsFor(pack, day);
     const reference = enrichedReference(
-      pack, answer, day, captured, await this.localStats(pack, day),
+      pack, answer, day, captured, await this.localStats(pack, day), jockeyStatsDoc,
     );
     // Race number keeps files apart when one track-wide going check feeds several races.
     await immutableLocalFile(
@@ -961,6 +1057,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       await this.api("/local-predictions/entity-memory/save", {
         snapshot_id: stored.snapshot_id, pack_hash: stored.pack_hash,
       }).catch((error) => this.failedJob(`${day}-entity-memory`, error));
+    if (jockeyStatsDoc)
+      await this.api("/local-predictions/jockey-stats/save", { race_id: race.race_id, stats: jockeyStatsDoc })
+        .catch((error) => this.failedJob(`${day}-jockey-stats-save`, error));
     return output;
   }
 

@@ -1,6 +1,7 @@
 import { obj, rows, str, type Row } from "../packages/shared/src/domain";
 import {
   officialResearchUrl,
+  sourcedCsvRun,
   sourcedPastRun,
 } from "../packages/shared/src/race-research";
 
@@ -9,7 +10,8 @@ export const historyPrompt = `固定された1レースについてWebで資料�
 出馬表の前走欄から開催日・場・競走番号をたどり、公式の競走成績表で馬名と当時の馬番を照合する。
 地方競馬は keiba.go.jp の RaceMarkTable。個別欄の通過順が空なら「全馬コーナー通過順」で当時の馬番を照合する。
 括弧や並走表示から厳密な順位を決められない区間は推定しない。番号の羅列を順位として転記しない。
-着順、頭数、距離、馬場、時計（秒）、上がり3F（秒）、着差原文、斤量、騎手を成績表から確認。
+1走ごとに成績表から確認する項目: 競走番号(race_no)、レース名、芝ダ、距離、馬場、天候、頭数、当時の馬番・枠番、騎手、斤量、着順、時計（秒）、上がり3F（秒）、着差原文、各コーナーの通過順、馬体重。
+展開（pace）は同じ成績表のラップ・前半3F・レースの上がり3F（秒）を表示どおりに書く。表示が無ければnull。
 今回の馬場・天候も公式出馬表を再確認し、表示どおりに返す（表示が無ければnull）。
 地方競馬の騎手は keiba.go.jp の騎手リーディング（DataRoom/RiderLeading、今回の競馬場を集計対象に選択）で、今回の競馬場での騎乗数・1着・2着・3着を確認し、jockey_notes に集計期間付きで書く。今回の競馬場で絞れないときだけ、全国集計を「全国集計の代用」と本文に明記して集計期間付きで書く（同場成績として書かない）。
 コース形状・脚質傾向は見つけた公式URLと期間・標本を添える。
@@ -18,7 +20,7 @@ export const historyPrompt = `固定された1レースについてWebで資料�
 JSON:
 {weather,going,track_notes:[{source_url,note}], limitations:[文字列],
 horses:[{horse_number,horse_name,jockey_notes:[{source_url,note}],
-recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,field_size,finish,corners:[],finish_time_s,last_3f_s,margin,carried_weight_kg,body_weight_kg,jockey,source_url}]}]}
+recent_runs:[{date_jst:"YYYY-MM-DD",track,race_no,race_name,surface,distance_m,going,weather,field_size,horse_number,draw_number,finish,corners:[],finish_time_s,last_3f_s,margin,carried_weight_kg,body_weight_kg,jockey,pace:{first_3f_s,race_last_3f_s,laps_s:[]},source_url}]}]}
 出典URLは実際に開いたJRA・地方競馬のHTTPSページ。馬名・日付・距離が曖昧な走は除外する。`;
 
 const name = (value: unknown) =>
@@ -42,12 +44,21 @@ const notes = (value: unknown, captured: string): Row[] =>
       source_checked_at: captured,
     }));
 
+/** run-record-v1 fields carried through to the fixed input when present. */
+function extraFields(run: Row): Row {
+  const out: Row = {};
+  for (const key of ["race_no", "race_name", "surface", "weather", "horse_number", "draw_number", "pace", "field_sources", "csv_file_sha256"])
+    if (run[key] != null) out[key] = run[key]!;
+  return out;
+}
+
 export function enrichedReference(
   pack: Row,
   answer: Row,
   day: string,
   captured: string,
   localStats: Row | null = null,
+  jockeyStats: Row | null = null,
 ): Row {
   const race = obj(pack.race);
   const track = str(obj(pack.track), "name");
@@ -80,6 +91,7 @@ export function enrichedReference(
       history_checked_at: captured,
       track_notes: notes(answer.track_notes, captured),
       ...(localStats ? { local_stats: localStats } : {}),
+      ...(jockeyStats ? { jockey_stats: jockeyStats } : {}),
       limitations: (Array.isArray(answer.limitations) ? answer.limitations : [])
         .filter((v): v is string => typeof v === "string")
         .slice(0, 10)
@@ -98,6 +110,14 @@ export function enrichedReference(
       );
       const confirmedDates = new Set();
       for (const run of rows(found?.recent_runs ?? []).slice(0, 5)) {
+        // Runs read only from the owner's NAR CSV keep their file hash and
+        // field-level sources; they are not re-searched on the Web.
+        if (sourcedCsvRun(run, day)) {
+          if (confirmedDates.has(run.date_jst) || recent.has(run.date_jst)) continue;
+          confirmedDates.add(run.date_jst);
+          recent.set(run.date_jst, { ...extraFields(run), ...run, source_checked_at: captured });
+          continue;
+        }
         if (!sourcedPastRun(run, day)) continue;
         if (confirmedDates.has(run.date_jst)) continue;
         const existing = recent.get(run.date_jst);
@@ -126,6 +146,7 @@ export function enrichedReference(
           margin: run.margin ?? null,
           body_weight_kg: run.body_weight_kg ?? null,
           jockey: run.jockey ?? null,
+          ...extraFields(run),
           source_url: run.source_url!,
           source_checked_at: captured,
           ...(!(run.corners as number[]).length &&

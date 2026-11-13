@@ -168,3 +168,31 @@ describe("Sheets Repository", () => {
     expect(columnLetter(52)).toBe("AZ");
   });
 });
+
+describe("performances additive columns", () => {
+  it("legacy TL_performances without run columns is readable; run values need provision first", async () => {
+    const { requiredHeaderColumns } = await import("../packages/shared/src/domain");
+    const client = new GoogleSheetsClient({ SHEETS_ID: "test-only", GOOGLE_CLIENT_EMAIL: "", GOOGLE_PRIVATE_KEY: "" });
+    const legacy = requiredHeaderColumns("performances");
+    expect(legacy).not.toContain("run_date_jst");
+    const row = legacy.map((k) =>
+      k === "performance_id" ? "p1" : k === "schema_version" ? "0.2" : k === "horse_id" ? "h1" : k === "race_id" ? "r1" : k === "jockey_id" ? "j1" : null);
+    vi.spyOn(client, "batchRead").mockImplementation(async (ranges) =>
+      ranges.map((range) => {
+        const table = range.match(/'TL_([^']+)'/)?.[1] as Table;
+        if (table !== "performances") return { range, values: range.endsWith("A1:AZ1") ? [columns(table)] : [] };
+        return { range, values: range.endsWith("A1:AZ1") ? [legacy] : [row] };
+      }));
+    const write = vi.spyOn(client, "batchWrite").mockResolvedValue();
+    const repo = new SheetsRepository(client);
+    expect(await repo.list("performances")).toHaveLength(1);
+    await expect(repo.put("performances", {
+      schema_version: "0.2", performance_id: "p2", horse_id: "h1", run_date_jst: "2026-10-20", track: "名古屋",
+    })).rejects.toThrow("追加列");
+    vi.spyOn(repo, "inspect").mockResolvedValue({ sheets: tables.map((t) => ({ properties: { title: "TL_" + t } })) });
+    await repo.provision();
+    const appended = write.mock.calls.flatMap(([w]) => w).find((w) => w.range.startsWith("'TL_performances'"));
+    expect(appended?.range).toBe(`'TL_performances'!${columnLetter(legacy.length + 1)}1`);
+    expect(appended?.values[0]).toContain("run_date_jst");
+  });
+});

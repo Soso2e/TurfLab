@@ -56,16 +56,20 @@ it("buys only positive-EV lines within 400 yen before the start", () => {
   expect(none.skip_reason).toContain("見送り");
 });
 
-it("merges stored runs into a history answer, preferring fresh findings", () => {
+it("merges stored runs into a history answer; a search only fills empty fields", () => {
   const merged = withMemory({ horses: [{ horse_number: 1, horse_name: "A", recent_runs: [
-    { date_jst: "2026-10-01", finish: 2 },
+    { date_jst: "2026-10-01", finish: 2, corners: [3, 2], source_url: "https://www.keiba.go.jp/p" },
   ] }] }, [
     { horse_number: 1, horse_name: "A", saved_runs: [{ date_jst: "2026-10-01", finish: 9 }, { date_jst: "2026-09-01", finish: 1 }],
       jockey_notes: [{ source_url: "https://www.keiba.go.jp/x", note: "n" }] },
     { horse_number: 2, horse_name: "B", saved_runs: [], jockey_notes: [] },
   ]);
   const horses = merged.horses as Row[];
-  expect(horses[0].recent_runs).toEqual([{ date_jst: "2026-10-01", finish: 2 }, { date_jst: "2026-09-01", finish: 1 }]);
+  expect(horses[0].recent_runs).toEqual([
+    { date_jst: "2026-10-01", finish: 9, corners: [3, 2], source_url: "https://www.keiba.go.jp/p",
+      field_sources: { corner_positions_json: "official_page" } },
+    { date_jst: "2026-09-01", finish: 1 },
+  ]);
   expect(horses[0].jockey_notes).toHaveLength(1);
   expect(horses[1]).toMatchObject({ horse_number: 2, recent_runs: [] });
 });

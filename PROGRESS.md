@@ -1,5 +1,18 @@
 # PROGRESS.md
 
+## 2026-11-13 前走3走のDB化（performances拡張・項目別充足率・CSV優先・騎手統計）
+
+- 過去走は `performances` に一本化（1行＝1頭×1開催日）。新テーブルは作らず、`run_date_jst / track / race_number / race_name / surface / distance_m / field_size / horse_name / jockey_name / weather / pace_json / run_version` を追加列として拡張。`race_id`・`jockey_id` は任意化（TurfLab未登録のレースの走も保存できる）。公式結果取込の行（`performance:auto:*`）と調査・CSVの行は「馬×開催日」で同じ走として統合する。
+- 項目ごとの出典を `evidence_json.fields` に保持（`nar_csv` / `official_page` / `official_result`）。既存の値は上書きせず空欄だけ埋め、出典間の食い違いは `evidence_json.conflicts` に残す。
+- Sheets互換: 既存の `TL_performances` は追加列が無くても読める。追加列に値を書く前に provision が既存ヘッダーの右に列を追記する（既存セルは動かさない）。Durable Object の行キーは従来どおり。
+- 完了判定を項目別に変更（`run-coverage-v1`）。必須13項目（開催日・場・R・レース名・芝ダ・距離・馬場・頭数・馬番・騎手・着順・時計・通過順）が値と出典の両方を持つ走が3走そろって完了。3走あっても時計・騎手・出典が欠ければ未完了で、欠けた項目だけを段階2で再検索する。
+- NAR CSVを先に使う: 既知の走（場・日・R・馬番）にCSVの値を入れ、CSVに `馬名` 列があれば馬名で直近走を見つける。CSVで埋まった項目と、CSVで同場10騎乗以上ある騎手のリーディングはGeminiに依頼しない。任意列（馬名・タイム・上り・負担重量・馬体重・着差・レース名・天候）はヘッダー名が一致したときだけ読み、頭数は重複除去後の出走数。`TURFLAB_CSV_RUN_VALUES=off` でCSVの値を走の記録に入れない（集計だけに使う）。
+- 調査プロンプトに競走番号・レース名・芝ダ・天候・当時の馬番/枠番・ペース（前半3F・レース上がり3F・ラップ）を追加。公式URLの `k_raceNo` と異なる競走番号は拒否。
+- 騎手統計 `jockey-stats-v1`（DBの過去走＋CSV、標本数付き、対象日の前日まで）: 全体・同場・同コース、距離帯別・馬場別、先行率／逃げ率、道中（最初→最後のコーナー）と直線（最後のコーナー→着順）の順位変化、人馬コンビ（同コンビと他騎手時の比較）。レースごとに `entity_features` へ時点保存し、固定入力 `research.jockey_stats` に入れる。6評価の horse_jockey_course は同場10騎乗以上で observed。
+- Web: レース詳細に「前3走（全頭）」と項目別充足率、騎手の傾向表。馬名を押すと過去走一覧（レース名・距離・馬場・馬番・騎手・着順・時計・上がり・通過順・脚質・順位変化・出典）を表示。
+- API: `GET /races/:id/runs`、`GET /horses/:id/runs?before=`、`POST /local-predictions/run-records/csv`、`/run-records/stat-runs`、`/jockey-stats/save`、`/maintenance/run-records/backfill`（旧 `horse-run-v1` を移行。Workerが起動後に1回実行）。
+- 型・lint・285テスト・Webビルド確認済み。実CSVのヘッダー名と実レースでの通し確認は未実施。
+
 ## 2026-11-13 CLI調査パックの自動転送と結果比較の復旧
 
 - GitHub同期WorkerがローカルCLIの固定パックをCoreのスナップショットと照合し、設定済みの非公開GitHubリポジトリへ追記する。GitHubのblobを読み返してハッシュの一致を記録し、件数と失敗を同期画面に表示する。

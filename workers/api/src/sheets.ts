@@ -1,4 +1,5 @@
 import {
+  requiredHeaderColumns,
   columns,
   DomainError,
   idOf,
@@ -186,7 +187,7 @@ export class SheetsRepository implements Repository {
         })
       )[0]?.values?.[0]?.map(String) ?? [];
     requireCondition(
-      columns(table).every((c) => headers.includes(c)) &&
+      requiredHeaderColumns(table).every((c) => headers.includes(c)) &&
         new Set(headers).size === headers.length,
       `${sheetName(table)}: 列が不足または重複しています`,
       503,
@@ -252,6 +253,13 @@ export class SheetsRepository implements Repository {
       `${sheetName(table)}: Core用タブがありません。Sheets移行・provisionを先に実行してください`,
       503,
     );
+    for (const row of records)
+      for (const [key, value] of Object.entries(row))
+        requireCondition(
+          value == null || data.headers.includes(key),
+          `${sheetName(table)}.${key}: 追加列がありません。Sheetsのprovisionを先に実行してください`,
+          503,
+        );
     let next = Math.max(1, ...data.physical) + 1;
     const writes = records.flatMap((row) => {
       const index = data.rows.findIndex(
@@ -314,7 +322,19 @@ export class SheetsRepository implements Repository {
         await this.client.batchWrite([
           { range: `'${sheetName(t)}'!A1`, values: [columns(t)] },
         ]);
-      else
+      else if (
+        requiredHeaderColumns(t).every((c) => header.includes(c)) &&
+        columns(t).some((c) => !header.includes(c))
+      ) {
+        // Append additive columns after the existing header; rows keep their cells.
+        const added = columns(t).filter((c) => !header.includes(c));
+        await this.client.batchWrite([
+          {
+            range: `'${sheetName(t)}'!${columnLetter(header.length + 1)}1`,
+            values: [added],
+          },
+        ]);
+      } else
         requireCondition(
           columns(t).every((c) => header.includes(c)),
           `${sheetName(t)}: 既存列を移行してから接続してください`,

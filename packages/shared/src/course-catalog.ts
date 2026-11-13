@@ -169,3 +169,27 @@ export function lookupCourseSpecs(
     course_width_m: general.course_width_m,
   };
 }
+
+/** keiba.go.jp の k_babaCode と競馬場名の対応（公式URLから場を確定するのに使う）。 */
+export const NAR_BABA_CODES: Record<string, string> = {
+  門別: "36",
+  金沢: "22",
+  川崎: "21",
+  大井: "20",
+  船橋: "19",
+  浦和: "18",
+  盛岡: "10",
+  水沢: "11",
+  園田: "27",
+  姫路: "28",
+  笠松: "23",
+  名古屋: "24",
+  高知: "31",
+  佐賀: "32",
+  帯広: "03",
+};
+
+export function trackFromBabaCode(code: unknown): string | null {
+  const c = String(code ?? "").padStart(2, "0");
+  return Object.entries(NAR_BABA_CODES).find(([, v]) => v === c)?.[0] ?? null;
+}
