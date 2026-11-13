@@ -27,7 +27,7 @@ import {
   LEGACY_REFERENCE_PRODUCER,
   referenceProducerLabel,
 } from "../../../packages/shared/src/github-bridge";
-import { officialResearchUrl, validatePastRunSource } from "../../../packages/shared/src/race-research";
+import { officialResearchUrl, sourcedCsvRun, validatePastRunSource } from "../../../packages/shared/src/race-research";
 import { lookupCourseSpecs } from "../../../packages/shared/src/course-catalog";
 
 export const normalizeName = (v: unknown) =>
@@ -107,6 +107,20 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
       validLocalStats(research.local_stats, reference.jurisdiction, day),
       "ローカル集計の版・管轄・期間が不正です",
     );
+  if (research.jockey_stats != null) {
+    const stats = obj(research.jockey_stats);
+    requireCondition(
+      stats.version === "jockey-stats-v1" &&
+        obj(stats.computed_for ?? {}).date === day &&
+        JSON.stringify(stats).length <= 60_000 &&
+        (obj(stats.period ?? {}).to == null || String(obj(stats.period).to) < day),
+      "騎手統計の版・対象日・期間が不正です",
+    );
+  }
+  for (const horse of horses)
+    for (const run of rows(horse.recent_runs))
+      if (run.source_url == null && run.field_sources != null)
+        requireCondition(sourcedCsvRun(run, day), "CSV由来の近走の出典（ファイルハッシュ）が不正です");
   return {
     ...research,
     horses: horses.map((horse) => ({

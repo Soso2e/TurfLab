@@ -1,26 +1,11 @@
+import { NAR_BABA_CODES } from "../packages/shared/src/course-catalog";
 import fs from "node:fs";
 import path from "node:path";
 import { parseKeibaMarkTable } from "./keiba-html-parser";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { obj, rows, type Row } from "../packages/shared/src/domain";
 
-const BABA_CODES: Record<string, string> = {
-  門別: "36",
-  金沢: "22",
-  川崎: "21",
-  大井: "20",
-  船橋: "19",
-  浦和: "18",
-  盛岡: "10",
-  水沢: "11",
-  園田: "27",
-  姫路: "28",
-  笠松: "23",
-  名古屋: "24",
-  高知: "31",
-  佐賀: "32",
-  帯広: "03",
-};
+const BABA_CODES = NAR_BABA_CODES;
 
 const dataHome = path.join(process.env.LOCALAPPDATA!, "TurfLab");
 const vars = fs.readFileSync(path.join(dataHome, ".dev.vars"), "utf8");

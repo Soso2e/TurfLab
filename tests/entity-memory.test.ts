@@ -53,6 +53,15 @@ it("stores sourced past runs once per horse and reuses them", async () => {
   // Unsourced runs never enter the store, so horse 2 still needs a search.
   expect(b).toMatchObject({ runs_missing: 3, jockey_notes: [] });
   expect(memory.complete).toBe(false);
+  // Three runs are stored, but time, jockey, race name etc. are not: not complete.
+  expect(memory.runs_complete).toBe(false);
+  expect((a.fields_missing as Row[])[0].missing).toEqual(expect.arrayContaining(["finish_time_s", "jockey_name", "race_name"]));
+  const fields = (memory.coverage as Row).fields as Row[];
+  expect(fields.find((f) => f.key === "finish_position")).toMatchObject({ filled: 3, total: 3 });
+  expect(fields.find((f) => f.key === "finish_time_s")).toMatchObject({ filled: 0 });
+  // Runs live in performances (one row per horse and day), not in entity_features.
+  expect(await r.list("performances")).toHaveLength(3);
+  expect((await r.list("entity_features")).filter((f) => f.feature_version === "horse-run-v1")).toHaveLength(0);
 });
 
 it("rejects a pack that does not match", async () => {

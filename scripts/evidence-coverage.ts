@@ -32,9 +32,13 @@ function horseEvidence(pack: Row, entry: Row): Record<Factor, Evidence> {
   const drawEnough = drawRaces >= (core ? CORE_MIN_DRAW_RACES : 1);
   const drawNote = rows(research.track_notes ?? []).some((n) => /枠|馬番/u.test(String(n.note)));
   const jockey = rows(stats.jockeys ?? []).find((j) => normName(j.jockey) === normName(entry.jockey_name));
-  const jockeyStarts = Number(obj(jockey?.at_track ?? {}).starts ?? 0);
-  const jockeyEnough = jockeyStarts >= (core ? CORE_MIN_JOCKEY_STARTS : 1);
-  const label = core ? "保存済み公式結果" : "CSV";
+  // jockey-stats-v1 (stored runs + CSV, sample sizes attached) takes precedence.
+  const profile = rows(obj(research.jockey_stats ?? {}).jockeys ?? [])
+    .find((j) => j.horse_number === entry.horse_number && normName(j.jockey) === normName(entry.jockey_name));
+  const profileStarts = Number(obj(profile?.at_track ?? {}).starts ?? 0);
+  const jockeyStarts = Math.max(Number(obj(jockey?.at_track ?? {}).starts ?? 0), profileStarts);
+  const jockeyEnough = jockeyStarts >= (core || profileStarts ? CORE_MIN_JOCKEY_STARTS : 1);
+  const label = profileStarts ? "騎手統計" : core ? "保存済み公式結果" : "CSV";
   const notes = rows(horse?.jockey_notes ?? []);
   const local = notes.some((n) => !/全国|代用/u.test(String(n.note)));
   return {

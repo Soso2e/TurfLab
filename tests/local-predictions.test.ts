@@ -366,3 +366,36 @@ it("selects at most three races a day and reports per-race stages", async () => 
     race_id: "later", stage: 1, detail: "固定入力の作成待ち",
   }));
 });
+
+it("fills past runs from the owner's NAR CSV before any CLI call", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-csv-first-"));
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  await mkdir(path.join(home, "nar-csv"), { recursive: true });
+  await writeFile(path.join(home, "nar-csv", "results.csv"),
+    "競馬場,競走年月日,レース番号,枠番,馬番,騎手名,着順,馬名\n名古屋,2026/10/20,5,3,3,騎手一,2,アルファ\n");
+  const memory = (filled: boolean) => ({
+    runs_complete: false,
+    horses: [{ horse_number: 1, horse_id: "h1", horse_name: "アルファ", jockey_name: "騎手一", runs_missing: filled ? 2 : 3,
+      saved_runs: filled ? [{ date_jst: "2026-10-20" }] : [], fields_missing: [], jockey_notes: [] }],
+  });
+  let saved = false;
+  const posted: Row[] = [];
+  const api = vi.fn(async (url: string, body?: unknown): Promise<Row> => {
+    if (url === "/local-predictions/entity-memory") return memory(saved);
+    if (url === "/local-predictions/run-records/csv") {
+      posted.push(obj(body));
+      saved = true;
+      return { filled_fields: 6 };
+    }
+    return {};
+  });
+  const infer = vi.fn(async () => ({}));
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer, 0, undefined, 5);
+  const pack = { snapshot_id: "s1", race: { jurisdiction: "NAR" } };
+  const after = await (worker as unknown as { memoryWithCsv(p: Row, d: string): Promise<Row> }).memoryWithCsv(pack, "2026-11-13");
+  expect(infer).not.toHaveBeenCalled();
+  const record = (posted[0].records as Row[])[0];
+  expect(record).toMatchObject({ horse_id: "h1", before_date: "2026-11-13", run: { date_jst: "2026-10-20", finish: 2, horse_number: 3, jockey: "騎手一", field_size: 1 } });
+  expect(String(record.file_sha256)).toMatch(/^[0-9a-f]{64}$/);
+  expect((after.horses as Row[])[0].runs_missing).toBe(2);
+});

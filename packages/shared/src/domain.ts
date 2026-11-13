@@ -22,7 +22,7 @@ export const tableDefinitions = {
   ],
   performances: [
     "performance_id",
-    "horse_id race_id jockey_id finish_position finish_time_s last_3f_s corner_positions_json draw_number horse_number carried_weight_kg body_weight_kg body_weight_change_kg going margin pace_observed running_style_observed trouble_notes",
+    "horse_id race_id jockey_id finish_position finish_time_s last_3f_s corner_positions_json draw_number horse_number carried_weight_kg body_weight_kg body_weight_change_kg going margin pace_observed running_style_observed trouble_notes run_date_jst track race_number race_name surface distance_m field_size horse_name jockey_name weather pace_json run_version",
   ],
   race_snapshots: [
     "snapshot_id",
@@ -110,6 +110,29 @@ export const tableDefinitions = {
   ],
 } as const;
 export type Table = keyof typeof tableDefinitions;
+/** Columns added after a table first shipped. Existing Sheets tabs may lack
+ * them: reads treat them as null, writes refuse non-null values until
+ * provision appends the header (no data is moved). */
+export const additiveColumns: Partial<Record<Table, string[]>> = {
+  performances: [
+    "run_date_jst",
+    "track",
+    "race_number",
+    "race_name",
+    "surface",
+    "distance_m",
+    "field_size",
+    "horse_name",
+    "jockey_name",
+    "weather",
+    "pace_json",
+    "run_version",
+  ],
+};
+export function requiredHeaderColumns(table: Table): string[] {
+  const extra = new Set(additiveColumns[table] ?? []);
+  return columns(table).filter((c) => !extra.has(c));
+}
 export const tables = Object.keys(tableDefinitions) as Table[];
 export const commonColumns = [
   "schema_version",
@@ -378,7 +401,9 @@ export function validateRow(table: Table, row: Row): void {
       "horse_number",
       "status",
     ],
-    performances: ["horse_id", "race_id", "jockey_id"],
+    // A past run of a horse may come from a race TurfLab never registered
+    // (CLI research / NAR CSV). Such rows carry date and track instead.
+    performances: ["horse_id"],
     race_snapshots: [
       "race_id",
       "captured_at",
@@ -446,6 +471,35 @@ export function validateRow(table: Table, row: Row): void {
         typeof value === "number" && Number.isFinite(value) && value > 0,
         `${key}: 正の数です`,
       );
+  }
+  if (table === "performances") {
+    requireCondition(
+      row.race_id != null ||
+        (typeof row.run_date_jst === "string" &&
+          /^\d{4}-\d\d-\d\d$/.test(row.run_date_jst) &&
+          typeof row.track === "string" &&
+          row.track.length > 0),
+      "過去走はレースIDか開催日・競馬場が必要です",
+    );
+    const size = row.field_size;
+    requireCondition(
+      size == null ||
+        (typeof size === "number" && Number.isInteger(size) && size >= 1 && size <= 18),
+      "過去走の頭数が不正です",
+    );
+    const limit = typeof size === "number" ? size : 18;
+    const rank = (v: Json) =>
+      typeof v === "number" && Number.isInteger(v) && v >= 1 && v <= limit;
+    requireCondition(
+      row.finish_position == null || rank(row.finish_position),
+      "過去走の着順が不正です",
+    );
+    const corners = row.corner_positions_json;
+    requireCondition(
+      corners == null ||
+        (Array.isArray(corners) && corners.length <= 4 && corners.every(rank)),
+      "過去走の通過順が不正です",
+    );
   }
   if (table === "races") {
     requireCondition(
