@@ -8,6 +8,7 @@ import {
   type Json,
 } from "../../../packages/shared/src/domain";
 import "./style.css";
+import { HorseNo, Mark, ProbBar, TicketChip, countdownInfo, ticketTypeName } from "./RaceUi";
 import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
@@ -53,6 +54,30 @@ function raceState(race: Row, result: Json | undefined) {
     ? "発走予定時刻を経過 · 結果待ち"
     : "発走前";
 }
+const hhmm = (n: Json | undefined) =>
+  typeof n === "string" ? time(n).split(" ").at(-1) ?? "--:--" : "--:--";
+const signedYen = (n: Json | undefined) =>
+  typeof n === "number"
+    ? `${n > 0 ? "+" : n < 0 ? "−" : "±"}¥${Math.abs(n).toLocaleString("ja-JP")}`
+    : "—";
+const trackOf = (r: Row) => String(r.track_name ?? r.jurisdiction ?? "未設定");
+function raceFinished(r: Row) {
+  return (
+    r.result_status === "official" ||
+    r.result_status === "provisional" ||
+    r.result_status === "cancelled" ||
+    r.status === "started" ||
+    r.status === "cancelled" ||
+    Date.parse(String(r.scheduled_start_at)) < Date.now() - 15 * 60000
+  );
+}
+const surfaceClass = (s: Json | undefined) => {
+  const v = String(s ?? "");
+  if (v.includes("芝") || /turf/i.test(v)) return "turf";
+  if (v.includes("ダ") || /dirt/i.test(v)) return "dirt";
+  if (v.includes("障")) return "jump";
+  return "other";
+};
 const statusNames: Record<string, string> = {
   locked: "確定",
   validated: "確認待ち",
@@ -249,6 +274,8 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
 
 function App() {
   const [trackFilter, setTrackFilter] = useState('all');
+  const [hideFinished, setHideFinished] = useState(false);
+  const [, setClock] = useState(0);
   const [chatReviews, setChatReviews] = useState<Row[]>([]);
   const [selectedChatReview, setSelectedChatReview] = useState<Row | null>(null);
   const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
@@ -320,6 +347,10 @@ function App() {
     const timer = setTimeout(() => setNotice(""), 4000);
     return () => clearTimeout(timer);
   }, [notice]);
+  useEffect(() => {
+    const timer = setInterval(() => setClock((c) => c + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
   async function action(work: () => Promise<void>) {
     if (busy) return;
     setBusy(true);
@@ -367,6 +398,23 @@ function App() {
     });
   }
   const races = data ? rows(data.races) : [];
+  const trackNames = Array.from(new Set(races.map(trackOf)));
+  const visibleRaces = races.filter(
+    (r) =>
+      (trackFilter === "all" || trackOf(r) === trackFilter) &&
+      (!hideFinished || !raceFinished(r)),
+  );
+  const groupedRaces: [string, Row[]][] = trackNames
+    .map((name): [string, Row[]] => [
+      name,
+      visibleRaces
+        .filter((r) => trackOf(r) === name)
+        .sort((a, b) => Number(a.race_number) - Number(b.race_number)),
+    ])
+    .filter(([, group]) => group.length > 0);
+  const nextRace = races
+    .filter((r) => !raceFinished(r) && Date.parse(String(r.scheduled_start_at)) > Date.now() - 2 * 60000)
+    .sort((a, b) => Date.parse(String(a.scheduled_start_at)) - Date.parse(String(b.scheduled_start_at)))[0];
   const predictions = detail ? rows(detail.predictions) : [];
   const selected = predictions.find(
     (p) => p.prediction_id === activePrediction,
@@ -384,6 +432,14 @@ function App() {
   );
   const researchProfiles = detail ? rows(detail.research_baselines ?? []).filter((f) =>
     obj(f.features_json).snapshot_id === researchSnapshot?.snapshot_id) : [];
+  const fieldSize = detail ? rows(detail.entries).length : 0;
+  const entryById = (id: Json | undefined) =>
+    detail ? rows(detail.entries).find((x) => x.entry_id === id) : undefined;
+  const selectedEvaluations = detail
+    ? rows(detail.evaluations)
+        .filter((e) => e.prediction_id === activePrediction)
+        .sort((a, b) => Number(a.rank) - Number(b.rank))
+    : [];
   const canEditBet =
     race?.status === "scheduled" &&
     Date.now() < Date.parse(String(race.scheduled_start_at));
@@ -586,68 +642,86 @@ function App() {
                     </button>
                   </div>
                 </div>
-                <details className="panel">
-                  <summary>登録件数・仮想購入予算・精算損益</summary>
-                  <div className="metrics">
-                  <article>
+                <div className="day-summary">
+                  <div>
                     <span>登録レース</span>
-                    <strong>
-                      {races.length}
-                      <small> レース</small>
-                    </strong>
-                    <p>原則5レース。少数・見送り可</p>
-                  </article>
-                  <article>
+                    <strong>{races.length}<small>R</small></strong>
+                  </div>
+                  <div>
                     <span>本日の仮想購入</span>
                     <strong>{yen(data?.spent_yen)}</strong>
-                    <p>1レース最大 ¥1,000</p>
-                  </article>
-                  <article>
-                    <span>本日の予算残高</span>
-                    <strong>{yen(data?.remaining_yen)}</strong>
-                    <p>当日上限 ¥5,000</p>
-                  </article>
-                  <article>
-                    <span>精算済み損益 · 全期間</span>
-                    <strong>{Number(purchase.settled_tickets) > 0 ? yen(purchase.net_yen) : "精算なし"}</strong>
-                    <p>
-                      未精算 {String(purchase.pending_tickets ?? 0)}券を除外
-                    </p>
-                  </article>
                   </div>
-                </details>
-                <section className="panel">
+                  <div>
+                    <span>予算残 <small>/ ¥5,000</small></span>
+                    <strong className={Number(data?.remaining_yen) <= 0 ? "neg" : ""}>{yen(data?.remaining_yen)}</strong>
+                  </div>
+                  <div>
+                    <span>精算損益 <small>全期間</small></span>
+                    <strong className={Number(purchase.net_yen) > 0 ? "pos" : Number(purchase.net_yen) < 0 ? "neg" : ""}>
+                      {Number(purchase.settled_tickets) > 0 ? signedYen(purchase.net_yen) : "—"}
+                    </strong>
+                    {Number(purchase.pending_tickets) > 0 && <small>未精算 {String(purchase.pending_tickets)}券</small>}
+                  </div>
+                </div>
+                {nextRace && (() => {
+                  const cd = countdownInfo(countdownMinutes(nextRace.scheduled_start_at));
+                  return (
+                    <button className="next-race" onClick={() => void openRace(String(nextRace.race_id))}>
+                      <span className="next-label">次のレース</span>
+                      <span className="next-r">
+                        {trackOf(nextRace)} <b>{String(nextRace.race_number)}R</b>
+                      </span>
+                      <span className="next-time">{hhmm(nextRace.scheduled_start_at)}</span>
+                      {cd && <span className={"countdown tone-" + cd.tone}>{cd.label}</span>}
+                      <span className="next-name">{String(nextRace.name)}</span>
+                      <span className="next-picks">
+                        {rows(nextRace.picks).slice(0, 3).map((p) => (
+                          <span key={String(p.rank)} className="pick">
+                            <Mark rank={p.rank} />
+                            <HorseNo n={p.horse_number} fieldSize={Number(nextRace.entry_count) || undefined} size="sm" />
+                          </span>
+                        ))}
+                      </span>
+                      <IconArrowRight size={14} />
+                    </button>
+                  );
+                })()}
+                <section className="panel race-panel">
                   <div className="section-heading">
                     <h2>レース一覧</h2>
-                    <span>{date} · JST</span>
+                    <label className="hide-finished">
+                      <input
+                        type="checkbox"
+                        checked={hideFinished}
+                        onChange={(e) => setHideFinished(e.target.checked)}
+                      />
+                      発走済みを隠す
+                    </label>
                   </div>
-                  {races.length > 0 && (
+                  {races.length > 0 && trackNames.length > 1 && (
                     <div className="track-filter-chips">
                       <button
                         className={`track-chip ${trackFilter === "all" ? "active" : ""}`}
                         onClick={() => setTrackFilter("all")}
                       >
-                        全場 ({races.length})
+                        全場 <small>{races.length}</small>
                       </button>
-                      {Array.from(new Set(races.map((r) => String(r.jurisdiction)).filter(Boolean))).map((jurisdiction) => {
-                        const count = races.filter((r) => String(r.jurisdiction) === jurisdiction).length;
-                        return (
-                          <button
-                            key={jurisdiction}
-                            className={`track-chip ${trackFilter === jurisdiction ? "active" : ""}`}
-                            onClick={() => setTrackFilter(jurisdiction)}
-                          >
-                            {jurisdiction} ({count})
-                          </button>
-                        );
-                      })}
+                      {trackNames.map((name) => (
+                        <button
+                          key={name}
+                          className={`track-chip ${trackFilter === name ? "active" : ""}`}
+                          onClick={() => setTrackFilter(name)}
+                        >
+                          {name} <small>{races.filter((r) => trackOf(r) === name).length}</small>
+                        </button>
+                      ))}
                     </div>
                   )}
-                  {loading ? (
+                  {loading && !races.length ? (
                     <div className="empty" role="status">
                       読み込んでいます…
                     </div>
-                  ) : !races.length ? (
+                  ) : !races.length && !chatReviews.length ? (
                     <div className="empty">
                       <span className="empty-icon">◎</span>
                       <h3>この日のレースは未登録です</h3>
@@ -657,84 +731,139 @@ function App() {
                       </button>
                     </div>
                   ) : (
-                    <div className="race-list">
-                      {races
-    .filter((r) => trackFilter === "all" || String(r.jurisdiction) === trackFilter)
-    .map((r) => {
-      const cd = countdownMinutes(r.scheduled_start_at);
-      return (
-                        <button
-                          className="race-card"
-                          key={String(r.race_id)}
-                          onClick={() => void openRace(String(r.race_id))}
-                        >
-                          <div className="race-time">
-                            {time(r.scheduled_start_at).split(" ").at(-1)}
-                            <small>{String(r.jurisdiction)}</small>
+                    <div className="race-groups">
+                      {groupedRaces.map(([trackName, group]) => (
+                        <div className="track-group" key={trackName}>
+                          <h3 className="track-group-title">
+                            {trackName}
+                            <small>{String(group[0]?.jurisdiction ?? "")} · {group.length}R</small>
+                          </h3>
+                          <div className="race-list">
+                            {group.map((r) => {
+                              const mins = countdownMinutes(r.scheduled_start_at);
+                              const cd = countdownInfo(mins);
+                              const finished = raceFinished(r);
+                              const field = Number(r.entry_count) || undefined;
+                              const picks = rows(r.picks);
+                              const top3 = Array.isArray(r.finish_top3) ? r.finish_top3 : [];
+                              return (
+                                <button
+                                  className={"race-card" + (finished ? " finished" : "") + (r.race_id === nextRace?.race_id ? " is-next" : "")}
+                                  key={String(r.race_id)}
+                                  onClick={() => void openRace(String(r.race_id))}
+                                >
+                                  <div className="race-no">
+                                    <b>{String(r.race_number)}<small>R</small></b>
+                                    <span>{hhmm(r.scheduled_start_at)}</span>
+                                  </div>
+                                  <div className="race-title">
+                                    <h3>{String(r.name)}</h3>
+                                    <div className="race-meta">
+                                      {r.surface != null && (
+                                        <span className={"surface surface-" + surfaceClass(r.surface)}>
+                                          {String(r.surface)}{r.distance_m != null ? String(r.distance_m) + "m" : ""}
+                                        </span>
+                                      )}
+                                      {field && <span>{field}頭</span>}
+                                      <span className="race-state">{raceState(r, r.result_status)}</span>
+                                      {!finished && cd && cd.tone !== "far" && (
+                                        <span className={"countdown tone-" + cd.tone}>
+                                          <IconClock size={11} /> {cd.label}
+                                        </span>
+                                      )}
+                                    </div>
+                                    {top3.length > 0 ? (
+                                      <div className="race-picks result">
+                                        <span className="picks-label">結果</span>
+                                        {top3.map((g, i) => (
+                                          <span key={i} className="pick">
+                                            <span className="finish-pos">{i + 1}着</span>
+                                            {(Array.isArray(g) ? g : [g]).map((n, j) => (
+                                              <HorseNo key={j} n={n as Json} fieldSize={field} size="sm" />
+                                            ))}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : picks.length > 0 ? (
+                                      <div className="race-picks">
+                                        {picks.slice(0, 4).map((p) => (
+                                          <span key={String(p.rank)} className="pick">
+                                            <Mark rank={p.rank} />
+                                            <HorseNo n={p.horse_number} fieldSize={field} size="sm" />
+                                            <span className="pick-name">{String(p.horse_name ?? "")}</span>
+                                            {Number(p.rank) === 1 && typeof p.win_probability === "number" && (
+                                              <span className="pick-prob">{pct(p.win_probability)}</span>
+                                            )}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                    {arr(r, "missing").length > 0 && (
+                                      <small className="missing">{arr(r, "missing").join(" / ")}</small>
+                                    )}
+                                    <div className="race-tags">{renderRaceTags(r).map((t, idx) => (<span key={idx} className={"race-tag " + t.cls}>{t.label}</span>))}</div>
+                                  </div>
+                                  <div className="race-side">
+                                    <span className={"badge " + r.prediction_status}>
+                                      {statusNames[String(r.prediction_status)]}
+                                    </span>
+                                    {Number(r.bet_count) > 0 ? (
+                                      <span className="bet-info">
+                                        購入 {yen(r.spent_yen)}
+                                        {Number(r.settlement_pending) > 0 ? (
+                                          <small>精算待ち</small>
+                                        ) : (
+                                          <b className={Number(r.settlement_net_yen) > 0 ? "pos" : Number(r.settlement_net_yen) < 0 ? "neg" : ""}>
+                                            {signedYen(r.settlement_net_yen)}
+                                          </b>
+                                        )}
+                                      </span>
+                                    ) : (
+                                      <span className="bet-info none">購入なし</span>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
-                          <div className="race-title">
-                            <span>
-                              {String(r.race_number)}R ·{" "}
-                              {raceState(r, r.result_status)}
-                              {cd !== null && cd > 0 && cd <= 120 && (
-                                <span className="countdown-pill">
-                                  <IconClock size={11} /> あと{cd}分
-                                </span>
-                              )}
-                              {cd !== null && cd <= 0 && cd >= -15 && (
-                                <span className="countdown-pill urgent">
-                                  <IconClock size={11} /> 発走直前
-                                </span>
-                              )}
-                            </span>
-                            <h3>{String(r.name)}</h3>
-                            <p>
-                              {Number(r.bet_count) > 0
-                                ? `本人の仮想購入 ${yen(r.spent_yen)} · ${Number(r.settlement_pending) > 0 ? "精算待ち " + r.settlement_pending + "券" : "損益 " + yen(r.settlement_net_yen)}`
-                                : "本人の仮想購入なし"}
-                            </p>
-                            {r.research_at && <small>調査保存 {time(r.research_at)}</small>}
-                            {arr(r, "missing").length > 0 && (
-                              <small className="missing">
-                                {arr(r, "missing").join(" / ")}
-                              </small>
-                            )}
-                          <div className="race-tags">{renderRaceTags(r).map((t, idx) => (<span key={idx} className={"race-tag " + t.cls}>{t.label}</span>))}</div></div>
-                          <span className={"badge " + r.prediction_status}>
-                            {statusNames[String(r.prediction_status)]}
-                          </span>
-                          <span>↗</span>
-                        </button>
-                      );
-                    })}
+                        </div>
+                      ))}
+                      {visibleRaces.length === 0 && races.length > 0 && (
+                        <p className="muted">表示できるレースがありません（発走済みを隠しています）。</p>
+                      )}
+                      {chatReviews.length > 0 && (
+                        <div className="track-group">
+                          <h3 className="track-group-title">チャット事後レビュー<small>参考 · {chatReviews.length}件</small></h3>
+                          <div className="race-list">
                       {chatReviews.map((rev) => {
                         const doc = obj(rev.document ?? {});
                         const rRace = obj(doc.race ?? {});
                         const rPurchase = obj(doc.reported_purchase ?? {});
                         const rFinish = obj(doc.reported_finish ?? {});
                         const rOutcome = rFinish.purchase_outcome_if_report_correct ? obj(rFinish.purchase_outcome_if_report_correct) : null;
-                        const timeStr = rRace.scheduled_start_jst ? time(rRace.scheduled_start_jst).split(" ").at(-1) : "--:--";
+                        const timeStr = rRace.scheduled_start_jst ? hhmm(rRace.scheduled_start_jst) : "--:--";
                         return (
                           <button
                             className="race-card review-card"
                             key={String(rev.path)}
                             onClick={() => setSelectedChatReview(rev)}
                           >
-                            <div className="race-time">
-                              {timeStr}
-                              <small>{String(rRace.track ?? "参考")}</small>
+                            <div className="race-no">
+                              <b>{String(rRace.number ?? "—")}<small>R</small></b>
+                              <span>{timeStr}</span>
                             </div>
                             <div className="race-title">
-                              <span>
-                                {String(rRace.number ?? "—")}R · チャット事後レビュー
-                              </span>
-                              <h3>{String(rRace.name ?? "ChatGPT参考レース")}</h3>
-                              <p>
-                                {rPurchase.total_yen ? "チャット仮想購入 " + yen(rPurchase.total_yen) : "チャット購入記録なし"} ·{" "}
-                                {rOutcome?.net_yen !== undefined
-                                  ? "損益 " + yen(rOutcome.net_yen)
-                                  : "結果未照合"}
-                              </p>
+                              <h3>{String(rRace.track ?? "参考")} · {String(rRace.name ?? "ChatGPT参考レース")}</h3>
+                              <div className="race-meta">
+                                <span>
+                                  {rPurchase.total_yen ? "チャット仮想購入 " + yen(rPurchase.total_yen) : "チャット購入記録なし"}
+                                </span>
+                                <span>
+                                  {rOutcome?.net_yen !== undefined
+                                    ? "損益 " + signedYen(rOutcome.net_yen)
+                                    : "結果未照合"}
+                                </span>
+                              </div>
                               <div className="race-tags">
                                 <span className="race-tag tag-chatgpt">#ChatGPT</span>
                                 <span className="race-tag tag-post-review">#事後レビュー</span>
@@ -742,11 +871,15 @@ function App() {
                                 <span className="race-tag tag-unverified">#公式未照合</span>
                               </div>
                             </div>
-                            <span className="badge missing">参考レビュー</span>
-                            <span>↗</span>
+                            <div className="race-side">
+                              <span className="badge missing">参考レビュー</span>
+                            </div>
                           </button>
                         );
                       })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </section>
@@ -814,9 +947,9 @@ function App() {
               <>
                 <div className="page-heading">
                   <div>
-                    <p className="eyebrow">
-                      RACE NOTE · {String(obj(detail.track).name)}{" "}
-                      {String(race.race_number)}R
+                    <p className="race-heading-r">
+                      <span>{String(obj(detail.track).name)}</span>
+                      <b>{String(race.race_number)}R</b>
                     </p>
                     <h1>{String(race.name)}</h1>
                     {storage === "local" && snapshotId && (
@@ -824,12 +957,20 @@ function App() {
                         このsnapshotで入力パック
                       </button>
                     )}
-                    <p>
-                      {time(race.scheduled_start_at)} ·{" "}
-                      {String(obj(detail.course).surface)}{" "}
-                      {String(obj(detail.course).distance_m)}m ·{" "}
-                      {raceState(race, latestResult?.official_status)}
-                    </p>
+                    <div className="race-meta detail-meta">
+                      <span className="race-time-big">{hhmm(race.scheduled_start_at)} 発走</span>
+                      <span className={"surface surface-" + surfaceClass(obj(detail.course).surface)}>
+                        {String(obj(detail.course).surface ?? "")}{String(obj(detail.course).distance_m ?? "")}m
+                      </span>
+                      <span>{fieldSize}頭</span>
+                      <span className="race-state">{raceState(race, latestResult?.official_status)}</span>
+                      {(() => {
+                        const cd = countdownInfo(countdownMinutes(race.scheduled_start_at));
+                        return cd && !latestResult && cd.tone !== "past" ? (
+                          <span className={"countdown tone-" + cd.tone}><IconClock size={11} /> {cd.label}</span>
+                        ) : null;
+                      })()}
+                    </div>
                   </div>
                   <button onClick={() => setTab("today")}>← 一覧へ</button>
                 </div>
@@ -837,14 +978,61 @@ function App() {
                   <h2>このレースの状況</h2>
                   <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
                   <p>本人の仮想購入 {rows(detail.bets).filter((b) => b.status === "confirmed").length}券</p>
-                  {latestResult?.finish_order_json && <p>
-                    着順 {arr(latestResult, "finish_order_json").slice(0, 3).map((group) => Array.isArray(group) ? group.join("・") : String(group)).join(" → ")}
-                  </p>}
+                  {latestResult?.finish_order_json && (
+                    <div className="race-picks result">
+                      <span className="picks-label">着順</span>
+                      {arr(latestResult, "finish_order_json").slice(0, 3).map((group, i) => (
+                        <span key={i} className="pick">
+                          <span className="finish-pos">{i + 1}着</span>
+                          {(Array.isArray(group) ? group : [group]).map((n, j) => {
+                            const e = rows(detail.entries).find((x) => Number(x.horse_number) === Number(n));
+                            return (
+                              <React.Fragment key={j}>
+                                <HorseNo n={n as Json} fieldSize={fieldSize} size="sm" />
+                                {e && <span className="pick-name">{String(obj(e.horse).horse_name)}</span>}
+                              </React.Fragment>
+                            );
+                          })}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   {research && <p>調査保存 {time(researchSnapshot?.captured_at)} · 馬場 {String(research.going ?? "未確認")} ·{" "}
                     <a href={String(research.source_url)} target="_blank" rel="noreferrer">出馬表の出典</a>
                   </p>}
                   {research?.history_version && <p>公式成績の出典付き近走 {officialRunCount}件</p>}
                 </section>
+                {selectedEvaluations.length > 0 && (
+                  <section className="panel marks-panel">
+                    <div className="section-heading">
+                      <h2>予想の印と確率</h2>
+                      <span>{statusNames[String(selected?.status)] ?? ""} · {String(selected?.kind ?? "")}</span>
+                    </div>
+                    <div className="marks-list">
+                      {selectedEvaluations.map((e) => {
+                        const entry = entryById(e.entry_id);
+                        return (
+                          <div className={"marks-row" + (Number(e.rank) <= 3 ? " top" : "")} key={String(e.evaluation_id)}>
+                            <Mark rank={e.rank} />
+                            <HorseNo n={entry?.horse_number} fieldSize={fieldSize} />
+                            <div className="marks-horse">
+                              <strong>{String(obj(entry?.horse ?? {}).horse_name ?? "不明")}</strong>
+                              <small>
+                                {String(obj(entry?.jockey ?? {}).jockey_name ?? "")}
+                                {entry?.carried_weight_kg != null && ` · ${String(entry.carried_weight_kg)}kg`}
+                                {e.expected_position && ` · ${String(e.expected_position)}`}
+                              </small>
+                            </div>
+                            <div className="marks-probs">
+                              <label>勝率<ProbBar value={e.win_probability} /></label>
+                              <label>複勝圏<ProbBar value={e.top3_probability} tone="top3" /></label>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </section>
+                )}
                 <section className="panel">
                   <h2>コースと固定入力</h2>
                   <p>
@@ -881,6 +1069,7 @@ function App() {
                         <tr>
                           <th>馬番</th>
                           <th>馬 / 騎手</th>
+                          <th>斤量</th>
                           <th>状態</th>
                           <th>根拠と戦績</th>
                         </tr>
@@ -893,9 +1082,7 @@ function App() {
                           return (
                           <tr key={String(e.entry_id)}>
                             <td>
-                              <span className="horse-number">
-                                {String(e.horse_number)}
-                              </span>
+                              <HorseNo n={e.horse_number} fieldSize={fieldSize} />
                             </td>
                             <td>
                               <button className="link-button" title="過去走を表示" onClick={() => setHorseRuns(String(e.horse_id))}>
@@ -904,10 +1091,11 @@ function App() {
                               <small>{String(obj(e.jockey).jockey_name)}</small>
                               {profile && <small>過去の位置取り · {String(obj(profile.features_json).early_position_group)}</small>}
                             </td>
+                            <td>{e.carried_weight_kg != null ? `${String(e.carried_weight_kg)}kg` : "—"}</td>
                             <td>
                               {e.status === "active"
                                 ? "出走"
-                                : String(e.status)}
+                                : <span className="scratched">{String(e.status)}</span>}
                             </td>
                             <td>
                               {!observed && <Evidence row={e} />}
@@ -985,7 +1173,23 @@ function App() {
                           {yen(plan.amount_yen)}
                         </strong>
                         <p>確定 {time(plan.locked_at)} · 本人購入は別操作</p>
-                        <JsonView value={plan.tickets_json} />
+                        <div className="ticket-list">
+                          {rows(plan.tickets_json).map((t, i) => (
+                            <span key={i} className="ticket-with-reason">
+                              <TicketChip
+                                type={t.ticket_type}
+                                selections={Array.isArray(t.selections) ? (t.selections as Json[]) : []}
+                                amount={t.suggested_amount_yen}
+                                fieldSize={fieldSize}
+                              />
+                              {t.reason != null && <small>{String(t.reason)}</small>}
+                            </span>
+                          ))}
+                        </div>
+                        <details>
+                          <summary>JSONを見る</summary>
+                          <JsonView value={plan.tickets_json} />
+                        </details>
                       </div>
                     ) : null;
                   })}
@@ -1001,8 +1205,8 @@ function App() {
                         <table className="horse-evaluations">
                           <thead>
                             <tr>
-                              <th>順位</th>
-                              <th>馬番</th>
+                              <th>印・順位</th>
+                              <th>馬</th>
                               <th>勝率</th>
                               <th>複勝圏</th>
                               <th>根拠</th>
@@ -1016,26 +1220,26 @@ function App() {
                               .sort((a, b) => Number(a.rank) - Number(b.rank))
                               .map((e) => (
                                 <tr key={String(e.evaluation_id)}>
-                                  <td data-label="順位・総合点">
-                                    {Number(e.rank) === 1 ? "◎ " : ""}
-                                    {String(e.rank)} ·{" "}
-                                    {e.score == null
-                                      ? "—"
-                                      : Number(e.score).toFixed(2)}
-                                    点
+                                  <td data-label="印・総合点">
+                                    <Mark rank={e.rank} /> {String(e.rank)}位
+                                    <small>
+                                      {e.score == null
+                                        ? "—"
+                                        : Number(e.score).toFixed(2)}
+                                      点
+                                    </small>
                                   </td>
-                                  <td data-label="馬番">
-                                    {String(
-                                      rows(detail.entries).find(
-                                        (x) => x.entry_id === e.entry_id,
-                                      )?.horse_number,
-                                    )}
+                                  <td data-label="馬">
+                                    <span className="horse-cell">
+                                      <HorseNo n={entryById(e.entry_id)?.horse_number} fieldSize={fieldSize} />
+                                      <strong>{String(obj(entryById(e.entry_id)?.horse ?? {}).horse_name ?? "")}</strong>
+                                    </span>
                                   </td>
                                   <td data-label="勝率">
-                                    {pct(e.win_probability)}
+                                    <ProbBar value={e.win_probability} />
                                   </td>
                                   <td data-label="複勝圏">
-                                    {pct(e.top3_probability)}
+                                    <ProbBar value={e.top3_probability} tone="top3" />
                                   </td>
                                   <td data-label="評価根拠">
                                     <p>
@@ -1260,8 +1464,11 @@ function App() {
                           .map((r) => (
                             <tr key={String(r.recommendation_id)}>
                               <td>
-                                {String(r.ticket_type)} ·{" "}
-                                {arr(r, "selections_json").join("-")}
+                                <TicketChip
+                                  type={r.ticket_type}
+                                  selections={arr(r, "selections_json")}
+                                  fieldSize={fieldSize}
+                                />
                               </td>
                               <td>{yen(r.suggested_amount_yen)}</td>
                               <td>
@@ -1471,7 +1678,7 @@ function App() {
                       return (
                       <div className="run-row" key={String(b.bet_id)}>
                         <span>
-                          {String(b.ticket_type)}{" "}
+                          {ticketTypeName(b.ticket_type)}{" "}
                           {arr(b, "selections_json").join("-")}
                         </span>
                         <strong>{yen(b.amount_yen)}</strong>
@@ -1535,7 +1742,7 @@ function App() {
                     );
                     const summary = (b: Row | undefined) =>
                       b
-                        ? `${b.ticket_type} ${arr(b, "selections_json").join("-")} / ${yen(b.amount_yen)}`
+                        ? `${ticketTypeName(b.ticket_type)} ${arr(b, "selections_json").join("-")} / ${yen(b.amount_yen)}`
                         : "記録未取得";
                     return (
                       <p key={String(e.event_id)}>
