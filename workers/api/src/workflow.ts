@@ -337,6 +337,10 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
         e.action === "revise-bet" && bets.some((b) => b.bet_id === e.entity_id),
     ),
     results: await select("race_results"),
+    payouts: await (async () => {
+      const ids = new Set((await select("race_results")).map((r) => r.result_id));
+      return (await repo.list("payouts")).filter((p) => ids.has(p.result_id));
+    })(),
     settlements: (await repo.list("settlements")).filter((s) =>
       bets.some((b) => b.bet_id === s.bet_id)),
     adoptions: await select("prediction_adoptions"),

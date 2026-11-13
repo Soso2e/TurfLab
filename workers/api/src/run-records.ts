@@ -20,6 +20,7 @@ import {
   type RunSourceKind,
 } from "../../../packages/shared/src/run-record";
 import { JOCKEY_STATS_VERSION, normJockey, type StatRun } from "../../../packages/shared/src/jockey-stats";
+import { TENDENCY_VERSION, horseTendency, jockeyTendency, type TendencyRun } from "../../../packages/shared/src/tendency";
 
 const LEGACY_HORSE_RUN = "horse-run-v1";
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -396,10 +397,22 @@ export async function raceRunView(repo: Repository, raceId: string): Promise<Row
     .sort((a, b) => Number(a.horse_number) - Number(b.horse_number));
   const horses: Row[] = [];
   const forCoverage: { horse_number: number; runs: Row[] }[] = [];
+  // Jockey rides before the race day, newest first (tendency-v1).
+  const rides = new Map<string, Row[]>();
+  for (const row of (await runIndex(repo)).values()) {
+    const date = String(row.run_date_jst ?? "");
+    const name = normJockey(row.jockey_name);
+    if (!date || date >= day || !name) continue;
+    rides.set(name, [...(rides.get(name) ?? []), row]);
+  }
+  for (const list of rides.values())
+    list.sort((a, b) => String(b.run_date_jst).localeCompare(String(a.run_date_jst)));
   for (const e of entries) {
-    const list = (await horseRuns(repo, str(e, "horse_id"), day)).slice(0, RUNS_PER_HORSE);
+    const all = await horseRuns(repo, str(e, "horse_id"), day);
+    const list = all.slice(0, RUNS_PER_HORSE);
     const horse = await repo.get("horses", str(e, "horse_id"));
     const jockey = e.jockey_id ? await repo.get("jockeys", String(e.jockey_id)) : undefined;
+    const jockeyRides = rides.get(normJockey(jockey?.jockey_name ?? null)) ?? [];
     forCoverage.push({ horse_number: Number(e.horse_number), runs: list });
     horses.push({
       horse_number: e.horse_number!,
@@ -407,6 +420,10 @@ export async function raceRunView(repo: Repository, raceId: string): Promise<Row
       horse_name: horse?.horse_name ?? null,
       jockey_name: jockey?.jockey_name ?? null,
       runs: list.map(viewRun),
+      horse_tags: horseTendency(all as TendencyRun[]) as unknown as Json,
+      horse_tag_sample: Math.min(all.length, 10),
+      jockey_tags: jockeyTendency(jockeyRides as TendencyRun[]) as unknown as Json,
+      jockey_tag_sample: Math.min(jockeyRides.length, 50),
     });
   }
   const stats = (await repo.list("entity_features"))
@@ -419,6 +436,7 @@ export async function raceRunView(repo: Repository, raceId: string): Promise<Row
     race_date_jst: day,
     horses,
     coverage: runCoverage(forCoverage),
+    tendency_version: TENDENCY_VERSION,
     jockey_stats: [...latest.values()].map((f) => ({ jockey_id: f.jockey_id!, computed_at: f.cutoff_at!, ...obj(f.features_json) })),
   };
 }

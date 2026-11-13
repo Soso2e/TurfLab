@@ -13,7 +13,8 @@ import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
 import { DatabaseExplorer } from "./DatabaseExplorer";
-import { HorseRunsModal, RacePastRuns } from "./PastRuns";
+import { HorseRunsModal } from "./PastRuns";
+import { RaceHorses, RePredictPanel, ResultView, TagList } from "./RacePanels";
 import {
   IconRace,
   IconImport,
@@ -78,6 +79,15 @@ const surfaceClass = (s: Json | undefined) => {
   if (v.includes("障")) return "jump";
   return "other";
 };
+type Route = { tab: string; date?: string; raceId?: string; section?: string };
+/** URL hash → screen. `#/today/2026-11-13`, `#/race/<id>/<section>`, `#/stats` … */
+function parseRoute(hash: string): Route {
+  const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  const [head, a, b] = parts;
+  if (head === "race" && a) return { tab: "detail", raceId: a, section: b };
+  if (["import", "stats", "db", "settings"].includes(head ?? "")) return { tab: head };
+  return { tab: "today", date: a && /^\d{4}-\d\d-\d\d$/.test(a) ? a : undefined };
+}
 const statusNames: Record<string, string> = {
   locked: "確定",
   validated: "確認待ち",
@@ -280,8 +290,11 @@ function App() {
   const [selectedChatReview, setSelectedChatReview] = useState<Row | null>(null);
   const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
   const [tokenInput, setTokenInput] = useState("");
-  const [tab, setTab] = useState("today");
-  const [date, setDate] = useState(today());
+  const initialRoute = parseRoute(window.location.hash);
+  const [tab, setTab] = useState(initialRoute.tab);
+  const [date, setDate] = useState(initialRoute.date ?? today());
+  const [section, setSection] = useState(initialRoute.section ?? "");
+  const [raceRuns, setRaceRuns] = useState<Row>();
   const [data, setData] = useState<Row>();
   const [detail, setDetail] = useState<Row>();
   const [horseRuns, setHorseRuns] = useState<string | null>(null);
@@ -364,15 +377,50 @@ function App() {
       setBusy(false);
     }
   }
+  function go(hash: string, replace = false) {
+    if (window.location.hash === hash) return applyRoute(hash);
+    if (replace) {
+      history.replaceState(null, "", hash);
+      applyRoute(hash);
+    } else window.location.hash = hash;
+  }
   async function openRace(id: string) {
-    await action(async () => {
+    go("#/race/" + encodeURIComponent(id));
+  }
+  function applyRoute(hash: string) {
+    const r = parseRoute(hash);
+    setTab(r.tab);
+    if (r.tab === "today" && r.date) setDate(r.date);
+    if (r.tab === "stats") void action(async () => setStats(await api("/stats")));
+    if (r.tab === "detail" && r.raceId) {
+      setSection(r.section ?? "");
+      if (String(obj(detail?.race ?? {}).race_id ?? "") !== r.raceId) void loadRace(r.raceId);
+    }
+    window.scrollTo({ top: 0 });
+  }
+  useEffect(() => {
+    const onHash = () => applyRoute(window.location.hash);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  });
+  useEffect(() => {
+    if (token && initialRoute.tab === "detail" && initialRoute.raceId) void loadRace(initialRoute.raceId);
+    if (token && initialRoute.tab === "stats") void action(async () => setStats(await api("/stats")));
+  }, [token]);
+  async function loadRace(id: string, preferPrediction?: string) {
+    setError("");
+    try {
       const d = await api("/races/" + encodeURIComponent(id));
       setDetail(d);
-      setTab("detail");
+      setRaceRuns(undefined);
+      void api("/races/" + encodeURIComponent(id) + "/runs").then(setRaceRuns).catch(() => setRaceRuns({ horses: [] }));
+      const raceDate = String(obj(d.race).race_date_jst ?? "");
+      if (raceDate) setDate(raceDate);
       const ps = rows(d.predictions);
       setActivePrediction(
         String(
-          ps.find((p) => p.status === "locked")?.prediction_id ??
+          (preferPrediction && ps.some((p) => p.prediction_id === preferPrediction) ? preferPrediction : undefined) ??
+          [...ps].reverse().find((p) => p.status === "locked")?.prediction_id ??
             ps[0]?.prediction_id ??
             "",
         ),
@@ -395,7 +443,9 @@ function App() {
       setConfirmed(false);
       setEditingBet(undefined);
       setOperation(uid());
-    });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "レースを読み込めませんでした");
+    }
   }
   const races = data ? rows(data.races) : [];
   const trackNames = Array.from(new Set(races.map(trackOf)));
@@ -440,6 +490,27 @@ function App() {
         .filter((e) => e.prediction_id === activePrediction)
         .sort((a, b) => Number(a.rank) - Number(b.rank))
     : [];
+  const raceTrack = String(obj(detail?.track ?? {}).name ?? "");
+  const sameTrackRaces = race
+    ? races
+        .filter((r) => trackOf(r) === raceTrack || r.race_id === race.race_id)
+        .sort((a, b) => Number(a.race_number) - Number(b.race_number))
+    : [];
+  const raceIndex = sameTrackRaces.findIndex((r) => r.race_id === race?.race_id);
+  const prevRace = raceIndex > 0 ? sameTrackRaces[raceIndex - 1] : undefined;
+  const nextRaceSameTrack = raceIndex >= 0 ? sameTrackRaces[raceIndex + 1] : undefined;
+  const confirmedBets = detail ? rows(detail.bets).filter((b) => b.status === "confirmed").length : 0;
+  const raceSections: { id: string; label: string; badge?: string }[] = [
+    { id: "predict", label: "予想", badge: predictions.length ? undefined : "未" },
+    { id: "horses", label: "出走馬" },
+    { id: "bet", label: "購入", badge: confirmedBets ? String(confirmedBets) : undefined },
+    { id: "result", label: "結果", badge: latestResult ? (latestResult.official_status === "official" ? "確定" : "暫定") : undefined },
+    { id: "record", label: "記録" },
+  ];
+  // No section in the URL: open the tab the user most likely wants now.
+  const activeSection = raceSections.some((x) => x.id === section)
+    ? section
+    : latestResult ? "result" : "predict";
   const canEditBet =
     race?.status === "scheduled" &&
     Date.now() < Date.parse(String(race.scheduled_start_at));
@@ -489,7 +560,7 @@ function App() {
           href="#"
           onClick={(e) => {
             e.preventDefault();
-            setTab("today");
+            go("#/today/" + today());
           }}
         >
           <span className="brand-mark">T</span>
@@ -500,25 +571,22 @@ function App() {
         <div className="side-label">WORKSPACE</div>
         <nav>
           {[
-            { id: "today", title: "本日のレース", no: "01", icon: IconRace },
-            { id: "import", title: "データを取り込む", no: "02", icon: IconImport },
-            { id: "stats", title: "成績と検証", no: "03", icon: IconChart },
-            { id: "db", title: "データベース", no: "04", icon: IconDatabase },
-            { id: "settings", title: "接続とバックアップ", no: "05", icon: IconSettings },
+            { id: "today", title: "本日のレース", short: "レース", no: "01", icon: IconRace },
+            { id: "import", title: "データを取り込む", short: "取込", no: "02", icon: IconImport },
+            { id: "stats", title: "成績と検証", short: "成績", no: "03", icon: IconChart },
+            { id: "db", title: "データベース", short: "DB", no: "04", icon: IconDatabase },
+            { id: "settings", title: "接続とバックアップ", short: "設定", no: "05", icon: IconSettings },
           ].map((item) => {
             const IconComp = item.icon;
             return (
               <button
                 key={item.id}
-                className={tab === item.id ? "active" : ""}
-                onClick={() => {
-                  setTab(item.id);
-                  if (item.id === "stats")
-                    void action(async () => setStats(await api("/stats")));
-                }}
+                className={tab === item.id || (item.id === "today" && tab === "detail") ? "active" : ""}
+                onClick={() => go(item.id === "today" ? "#/today/" + date : "#/" + item.id)}
               >
                 <IconComp size={15} className="nav-icon" />
-                {item.title}
+                <em className="nav-long">{item.title}</em>
+                <em className="nav-short">{item.short}</em>
               </button>
             );
           })}
@@ -603,7 +671,7 @@ function App() {
                       onClick={() => {
                         const d = new Date(date);
                         d.setDate(d.getDate() - 1);
-                        setDate(d.toISOString().slice(0, 10));
+                        go("#/today/" + d.toISOString().slice(0, 10), true);
                       }}
                       title="前日へ"
                     >
@@ -611,7 +679,7 @@ function App() {
                     </button>
                     <button
                       className={`secondary date-step-btn ${date === today() ? "active-date" : ""}`}
-                      onClick={() => setDate(today())}
+                      onClick={() => go("#/today/" + today(), true)}
                     >
                       今日
                     </button>
@@ -620,7 +688,7 @@ function App() {
                       onClick={() => {
                         const d = new Date(date);
                         d.setDate(d.getDate() + 1);
-                        setDate(d.toISOString().slice(0, 10));
+                        go("#/today/" + d.toISOString().slice(0, 10), true);
                       }}
                       title="翌日へ"
                     >
@@ -630,7 +698,7 @@ function App() {
                       aria-label="開催日"
                       type="date"
                       value={date}
-                      onChange={(e) => setDate(e.target.value)}
+                      onChange={(e) => e.target.value && go("#/today/" + e.target.value, true)}
                     />
                     <button
                       onClick={() => void reload()}
@@ -726,7 +794,7 @@ function App() {
                       <span className="empty-icon">◎</span>
                       <h3>この日のレースは未登録です</h3>
                       <p>出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。</p>
-                      <button onClick={() => setTab("import")}>
+                      <button onClick={() => go("#/import")}>
                         JSONを取り込む
                       </button>
                     </div>
@@ -774,6 +842,14 @@ function App() {
                                     </div>
                                     {top3.length > 0 ? (
                                       <div className="race-picks result">
+                                        {picks[0] && (() => {
+                                          const pos = top3.findIndex((g) => (Array.isArray(g) ? g : [g]).some((n) => Number(n) === Number(picks[0].horse_number)));
+                                          return (
+                                            <span className={"honmei-verdict " + (pos === 0 ? "win" : pos > 0 ? "place" : "miss")}>
+                                              ◎{pos >= 0 ? `${pos + 1}着` : "着外"}
+                                            </span>
+                                          );
+                                        })()}
                                         <span className="picks-label">結果</span>
                                         {top3.map((g, i) => (
                                           <span key={i} className="pick">
@@ -945,24 +1021,44 @@ function App() {
             )}
             {tab === "detail" && detail && race && (
               <>
-                <div className="page-heading">
-                  <div>
+                <div className="race-sticky">
+                  <div className="race-sticky-top">
+                    <button className="back-btn" onClick={() => go("#/today/" + String(race.race_date_jst ?? date))}>
+                      <IconChevronLeft size={14} /> 一覧
+                    </button>
+                    <div className="race-r-strip" role="navigation" aria-label="同じ競馬場のレース">
+                      {sameTrackRaces.map((r) => (
+                        <button
+                          key={String(r.race_id)}
+                          className={"r-chip" + (r.race_id === race.race_id ? " active" : "") + (raceFinished(r) ? " done" : "")}
+                          onClick={() => go("#/race/" + encodeURIComponent(String(r.race_id)))}
+                        >
+                          {String(r.race_number)}R
+                        </button>
+                      ))}
+                    </div>
+                    <div className="race-prevnext">
+                      <button disabled={!prevRace} onClick={() => prevRace && go("#/race/" + encodeURIComponent(String(prevRace.race_id)))} aria-label="前のレース">
+                        <IconChevronLeft size={14} />
+                      </button>
+                      <button disabled={!nextRaceSameTrack} onClick={() => nextRaceSameTrack && go("#/race/" + encodeURIComponent(String(nextRaceSameTrack.race_id)))} aria-label="次のレース">
+                        <IconChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="race-sticky-main">
                     <p className="race-heading-r">
                       <span>{String(obj(detail.track).name)}</span>
                       <b>{String(race.race_number)}R</b>
                     </p>
                     <h1>{String(race.name)}</h1>
-                    {storage === "local" && snapshotId && (
-                      <button onClick={() => setTab("import")}>
-                        このsnapshotで入力パック
-                      </button>
-                    )}
                     <div className="race-meta detail-meta">
                       <span className="race-time-big">{hhmm(race.scheduled_start_at)} 発走</span>
                       <span className={"surface surface-" + surfaceClass(obj(detail.course).surface)}>
                         {String(obj(detail.course).surface ?? "")}{String(obj(detail.course).distance_m ?? "")}m
                       </span>
                       <span>{fieldSize}頭</span>
+                      {research?.going != null && <span>馬場 {String(research.going)}</span>}
                       <span className="race-state">{raceState(race, latestResult?.official_status)}</span>
                       {(() => {
                         const cd = countdownInfo(countdownMinutes(race.scheduled_start_at));
@@ -972,36 +1068,21 @@ function App() {
                       })()}
                     </div>
                   </div>
-                  <button onClick={() => setTab("today")}>← 一覧へ</button>
+                  <nav className="section-tabs" aria-label="レースの表示切替">
+                    {raceSections.map((sec) => (
+                      <button
+                        key={sec.id}
+                        className={activeSection === sec.id ? "active" : ""}
+                        onClick={() => go("#/race/" + encodeURIComponent(String(race.race_id)) + "/" + sec.id, true)}
+                      >
+                        {sec.label}
+                        {sec.badge && <span className="tab-badge">{sec.badge}</span>}
+                      </button>
+                    ))}
+                  </nav>
                 </div>
-                <section className="panel">
-                  <h2>このレースの状況</h2>
-                  <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
-                  <p>本人の仮想購入 {rows(detail.bets).filter((b) => b.status === "confirmed").length}券</p>
-                  {latestResult?.finish_order_json && (
-                    <div className="race-picks result">
-                      <span className="picks-label">着順</span>
-                      {arr(latestResult, "finish_order_json").slice(0, 3).map((group, i) => (
-                        <span key={i} className="pick">
-                          <span className="finish-pos">{i + 1}着</span>
-                          {(Array.isArray(group) ? group : [group]).map((n, j) => {
-                            const e = rows(detail.entries).find((x) => Number(x.horse_number) === Number(n));
-                            return (
-                              <React.Fragment key={j}>
-                                <HorseNo n={n as Json} fieldSize={fieldSize} size="sm" />
-                                {e && <span className="pick-name">{String(obj(e.horse).horse_name)}</span>}
-                              </React.Fragment>
-                            );
-                          })}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {research && <p>調査保存 {time(researchSnapshot?.captured_at)} · 馬場 {String(research.going ?? "未確認")} ·{" "}
-                    <a href={String(research.source_url)} target="_blank" rel="noreferrer">出馬表の出典</a>
-                  </p>}
-                  {research?.history_version && <p>公式成績の出典付き近走 {officialRunCount}件</p>}
-                </section>
+                {activeSection === "predict" && (
+                  <>
                 {selectedEvaluations.length > 0 && (
                   <section className="panel marks-panel">
                     <div className="section-heading">
@@ -1022,6 +1103,7 @@ function App() {
                                 {entry?.carried_weight_kg != null && ` · ${String(entry.carried_weight_kg)}kg`}
                                 {e.expected_position && ` · ${String(e.expected_position)}`}
                               </small>
+                              <TagList tags={rows(raceRuns?.horses ?? []).find((h) => Number(h.horse_number) === Number(entry?.horse_number))?.horse_tags} />
                             </div>
                             <div className="marks-probs">
                               <label>勝率<ProbBar value={e.win_probability} /></label>
@@ -1033,108 +1115,20 @@ function App() {
                     </div>
                   </section>
                 )}
-                <section className="panel">
-                  <h2>コースと固定入力</h2>
-                  <p>
-                    直線{" "}
-                    {String(obj(detail.course).straight_length_m ?? "未取得")}m
-                    · 初回コーナーまで{" "}
-                    {String(
-                      obj(detail.course).start_to_first_turn_m ?? "未取得",
+                {storage === "local" && (
+                      <RePredictPanel
+                        key={String(race.race_id)}
+                        api={api}
+                        busy={busy}
+                        action={action}
+                        detail={detail}
+                        defaultOpen={predictions.length === 0}
+                        onSaved={async (pid) => {
+                          await loadRace(String(race.race_id), pid);
+                          setNotice("再予想を保存しました。新しい版を表示しています");
+                        }}
+                      />
                     )}
-                    m · コース版 {String(obj(detail.course).revision)}
-                  </p>
-                  <Evidence row={obj(detail.course)} />
-                  <details>
-                    <summary>コース形状・入力スナップショット</summary>
-                    <JsonView
-                      value={{
-                        course: detail.course,
-                        snapshots: detail.snapshots,
-                      }}
-                    />
-                  </details>
-                </section>
-                <RacePastRuns api={api} raceId={String(obj(detail.race).race_id)} />
-                {horseRuns && (
-                  <HorseRunsModal api={api} horseId={horseRuns}
-                    before={String(obj(detail.race).race_date_jst ?? "") || null}
-                    onClose={() => setHorseRuns(null)} />
-                )}
-                <section className="panel">
-                  <h2>出走馬と過去5走</h2>
-                  <div className="table-scroll">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>馬番</th>
-                          <th>馬 / 騎手</th>
-                          <th>斤量</th>
-                          <th>状態</th>
-                          <th>根拠と戦績</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rows(detail.entries).sort((a, b) => Number(a.horse_number) - Number(b.horse_number)).map((e) => {
-                          const observed = rows(research?.horses ?? []).find((h) => h.horse_number === e.horse_number);
-                          const recent = rows(observed?.recent_runs ?? []);
-                          const profile = researchProfiles.find((p) => p.horse_id === e.horse_id);
-                          return (
-                          <tr key={String(e.entry_id)}>
-                            <td>
-                              <HorseNo n={e.horse_number} fieldSize={fieldSize} />
-                            </td>
-                            <td>
-                              <button className="link-button" title="過去走を表示" onClick={() => setHorseRuns(String(e.horse_id))}>
-                                <strong>{String(obj(e.horse).horse_name)}</strong>
-                              </button>
-                              <small>{String(obj(e.jockey).jockey_name)}</small>
-                              {profile && <small>過去の位置取り · {String(obj(profile.features_json).early_position_group)}</small>}
-                            </td>
-                            <td>{e.carried_weight_kg != null ? `${String(e.carried_weight_kg)}kg` : "—"}</td>
-                            <td>
-                              {e.status === "active"
-                                ? "出走"
-                                : <span className="scratched">{String(e.status)}</span>}
-                            </td>
-                            <td>
-                              {!observed && <Evidence row={e} />}
-                              {observed && <details>
-                                <summary>保存した近走 {recent.length}件</summary>
-                                {observed.jockey_observation && <p>{String(observed.jockey_observation)}</p>}
-                                {rows(observed.jockey_notes ?? []).map((note, i) => <p key={i}>
-                                  {String(note.note)} · <a href={String(note.source_url)} target="_blank" rel="noreferrer">騎手の出典</a>
-                                </p>)}
-                                {recent.map((run, i) => (
-                                  <p key={i}>
-                                    {String(run.date_jst)} {String(run.track ?? "")} {String(run.distance_m)}m · {run.finish == null ? "着順未確認" : String(run.finish) + "着"}<br />
-                                    通過順 {arr(run, "corners").join("–") || "未確認"}
-                                    {run.corners_source_url && "（出馬表）"}
-                                    {run.finish_time_s != null && <> · 時計 {String(run.finish_time_s)}秒</>}
-                                    {run.last_3f_s != null && <> · 上がり {String(run.last_3f_s)}秒</>}
-                                    {run.margin && <> · 着差 {String(run.margin)}</>}
-                                    {run.source_url && <> · <a href={String(run.source_url)} target="_blank" rel="noreferrer">成績の出典</a></>}
-                                  </p>
-                                ))}
-                              </details>}
-                              {(!observed || rows(e.past5).length > 0) && <details>
-                                <summary>
-                                  過去5走 {rows(e.past5).length}件
-                                </summary>
-                                {rows(e.past5).length ? (
-                                  <JsonView value={e.past5} />
-                                ) : (
-                                  <p>未取得。ゼロとして扱いません。</p>
-                                )}
-                              </details>}
-                            </td>
-                          </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
                 <section className="panel">
                   <div className="section-heading">
                     <h2>予想と展開</h2>
@@ -1200,7 +1194,8 @@ function App() {
                         {String(selected.model_version_id)} · snapshot{" "}
                         {String(selected.snapshot_id)}
                       </p>
-                      <h3>全馬評価と根拠</h3>
+                      <details>
+                      <summary>全馬の評価根拠（点数・説明）</summary>
                       <div className="table-scroll">
                         <table className="horse-evaluations">
                           <thead>
@@ -1258,6 +1253,7 @@ function App() {
                           </tbody>
                         </table>
                       </div>
+                      </details>
                       {rows(detail.simulations)
                         .filter((s) => s.prediction_id === activePrediction)
                         .map((s) => (
@@ -1444,6 +1440,18 @@ function App() {
                     )}
                   </details>
                 </section>
+                  </>
+                )}
+                {activeSection === "horses" && (
+                  <RaceHorses
+                    runs={raceRuns}
+                    entries={rows(detail.entries)}
+                    fieldSize={fieldSize}
+                    marks={new Map(selectedEvaluations.map((e) => [String(e.entry_id), e.rank]))}
+                    onHorse={(id) => setHorseRuns(id)}
+                  />
+                )}
+                {activeSection === "bet" && (
                 <section className="panel">
                   <h2>推奨と本人の仮想購入</h2>
                   <h3>AI参考推奨買い目</h3>
@@ -1752,8 +1760,130 @@ function App() {
                     );
                   })}
                 </section>
+                )}
+                {activeSection === "result" && (
+                  <ResultView
+                    detail={detail}
+                    evaluations={selectedEvaluations}
+                    predictionLabel={selected ? `${String(selected.kind)} · ${statusNames[String(selected.status)] ?? ""}` : "予想なし"}
+                    fieldSize={fieldSize}
+                    busy={busy}
+                    onSettle={(rid) =>
+                      void action(async () => {
+                        await api("/results/" + encodeURIComponent(rid) + "/settle", { operation_id: uid() });
+                        await loadRace(String(race.race_id));
+                        await reload();
+                        setNotice("公式結果で精算しました");
+                      })
+                    }
+                  />
+                )}
+                {activeSection === "record" && (
+                  <>
                 <section className="panel">
-                  <h2>公式結果と翌朝レビュー</h2>
+                  <h2>コースと固定入力</h2>
+                  <p>
+                    直線{" "}
+                    {String(obj(detail.course).straight_length_m ?? "未取得")}m
+                    · 初回コーナーまで{" "}
+                    {String(
+                      obj(detail.course).start_to_first_turn_m ?? "未取得",
+                    )}
+                    m · コース版 {String(obj(detail.course).revision)}
+                  </p>
+                  <Evidence row={obj(detail.course)} />
+                  <details>
+                    <summary>コース形状・入力スナップショット</summary>
+                    <JsonView
+                      value={{
+                        course: detail.course,
+                        snapshots: detail.snapshots,
+                      }}
+                    />
+                  </details>
+                </section>
+                <section className="panel">
+                  <h2>調査時の出走表と近走（固定入力）</h2>
+                  {research && (
+                    <p className="muted">
+                      調査保存 {time(researchSnapshot?.captured_at)} · 馬場 {String(research.going ?? "未確認")} · 出典付き近走 {officialRunCount}件 ·{" "}
+                      <a href={String(research.source_url)} target="_blank" rel="noreferrer">出馬表の出典</a>
+                    </p>
+                  )}
+                  <div className="table-scroll">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>馬番</th>
+                          <th>馬 / 騎手</th>
+                          <th>斤量</th>
+                          <th>状態</th>
+                          <th>根拠と戦績</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows(detail.entries).sort((a, b) => Number(a.horse_number) - Number(b.horse_number)).map((e) => {
+                          const observed = rows(research?.horses ?? []).find((h) => h.horse_number === e.horse_number);
+                          const recent = rows(observed?.recent_runs ?? []);
+                          const profile = researchProfiles.find((p) => p.horse_id === e.horse_id);
+                          return (
+                          <tr key={String(e.entry_id)}>
+                            <td>
+                              <HorseNo n={e.horse_number} fieldSize={fieldSize} />
+                            </td>
+                            <td>
+                              <button className="link-button" title="過去走を表示" onClick={() => setHorseRuns(String(e.horse_id))}>
+                                <strong>{String(obj(e.horse).horse_name)}</strong>
+                              </button>
+                              <small>{String(obj(e.jockey).jockey_name)}</small>
+                              {profile && <small>過去の位置取り · {String(obj(profile.features_json).early_position_group)}</small>}
+                            </td>
+                            <td>{e.carried_weight_kg != null ? `${String(e.carried_weight_kg)}kg` : "—"}</td>
+                            <td>
+                              {e.status === "active"
+                                ? "出走"
+                                : <span className="scratched">{String(e.status)}</span>}
+                            </td>
+                            <td>
+                              {!observed && <Evidence row={e} />}
+                              {observed && <details>
+                                <summary>保存した近走 {recent.length}件</summary>
+                                {observed.jockey_observation && <p>{String(observed.jockey_observation)}</p>}
+                                {rows(observed.jockey_notes ?? []).map((note, i) => <p key={i}>
+                                  {String(note.note)} · <a href={String(note.source_url)} target="_blank" rel="noreferrer">騎手の出典</a>
+                                </p>)}
+                                {recent.map((run, i) => (
+                                  <p key={i}>
+                                    {String(run.date_jst)} {String(run.track ?? "")} {String(run.distance_m)}m · {run.finish == null ? "着順未確認" : String(run.finish) + "着"}<br />
+                                    通過順 {arr(run, "corners").join("–") || "未確認"}
+                                    {run.corners_source_url && "（出馬表）"}
+                                    {run.finish_time_s != null && <> · 時計 {String(run.finish_time_s)}秒</>}
+                                    {run.last_3f_s != null && <> · 上がり {String(run.last_3f_s)}秒</>}
+                                    {run.margin && <> · 着差 {String(run.margin)}</>}
+                                    {run.source_url && <> · <a href={String(run.source_url)} target="_blank" rel="noreferrer">成績の出典</a></>}
+                                  </p>
+                                ))}
+                              </details>}
+                              {(!observed || rows(e.past5).length > 0) && <details>
+                                <summary>
+                                  過去5走 {rows(e.past5).length}件
+                                </summary>
+                                {rows(e.past5).length ? (
+                                  <JsonView value={e.past5} />
+                                ) : (
+                                  <p>未取得。ゼロとして扱いません。</p>
+                                )}
+                              </details>}
+                            </td>
+                          </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+                <section className="panel">
+                  <h2>結果の版と精算（記録）</h2>
                   {rows(detail.results).map((r) => (
                     <div key={String(r.result_id)} className="simulation">
                       <strong>
@@ -1793,6 +1923,13 @@ function App() {
                     <JsonView value={detail.reviews} />
                   </details>
                 </section>
+                  </>
+                )}
+                {horseRuns && (
+                  <HorseRunsModal api={api} horseId={horseRuns}
+                    before={String(obj(detail.race).race_date_jst ?? "") || null}
+                    onClose={() => setHorseRuns(null)} />
+                )}
               </>
             )}
             {tab === "import" && (

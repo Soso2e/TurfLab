@@ -178,6 +178,10 @@ describe("performances as the single store of past runs", () => {
     const horse = (view.horses as Row[])[0];
     expect((horse.runs as Row[]).map((x) => x.date_jst)).toEqual(["2026-10-20", "2026-09-20", "2026-08-20"]);
     expect((view.coverage as Row).complete).toBe(true);
+    // Tendency tags use every run before the race day, not only the latest three.
+    expect(view.tendency_version).toBe("tendency-v1");
+    expect(horse.horse_tag_sample).toBe(4);
+    expect((horse.horse_tags as Row[]).map((t) => t.label)).toEqual(expect.arrayContaining(["先行", "善戦止まり"]));
     const stats = await statRuns(r, { before_date: "2026-11-13", jockeys: ["騎手一"], horse_ids: [] });
     expect(stats.runs as Row[]).toHaveLength(4);
   });

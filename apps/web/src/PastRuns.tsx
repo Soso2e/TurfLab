@@ -23,7 +23,7 @@ function sourcesOf(run: Row): string {
   return [...kinds].map((k) => SOURCE_LABEL[k] ?? k).join("・") || "出典なし";
 }
 
-function RunTable({ runs }: { runs: Row[] }) {
+export function RunTable({ runs }: { runs: Row[] }) {
   if (!runs.length) return <p className="muted">保存された過去走はありません（未取得。0走とは扱いません）。</p>;
   return (
     <div className="table-scroll">
@@ -71,7 +71,7 @@ function RunTable({ runs }: { runs: Row[] }) {
   );
 }
 
-function Coverage({ coverage }: { coverage: Row }) {
+export function Coverage({ coverage }: { coverage: Row }) {
   const fields = rows(coverage.fields ?? []);
   return (
     <div className="coverage">
@@ -97,7 +97,7 @@ const rate = (r: Row | undefined) => {
   return x.starts ? `${String(x.starts)}騎乗 勝率${pct(x.win_rate)} 複勝率${pct(x.top3_rate)}${x.small_sample ? "（標本少）" : ""}` : "標本なし";
 };
 
-function JockeyStats({ stats }: { stats: Row[] }) {
+export function JockeyStats({ stats }: { stats: Row[] }) {
   if (!stats.length) return <p className="muted">騎手統計は未計算です（近走収集のあと自動で保存されます）。</p>;
   return (
     <div className="table-scroll">
