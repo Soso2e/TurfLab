@@ -22,6 +22,7 @@
     "predictions:local": "node scripts/run-tool.mjs tsx scripts/local-predictions.ts",
     "nar:check": "node scripts/run-tool.mjs tsx scripts/nar-csv-check.ts",
     "results:import": "tsx scripts/import-all-missing-results.ts",
+    "learning:report": "node scripts/run-tool.mjs tsx scripts/learning-report.ts",
     "generate:d1": "tsx scripts/generate-d1.ts"
   },
   "dependencies": {

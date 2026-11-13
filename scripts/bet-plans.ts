@@ -3,8 +3,14 @@
 //  - EV plan (400 yen): fixed 60-10 minutes before the start from time-stamped odds.
 // Both are virtual Lab records (no real tickets) and are settled apart.
 import { obj, rows, type Row } from "../packages/shared/src/domain";
-import { features, probabilities } from "./lab-learning";
+import {
+  blendProbabilities, BLEND_VERSION, features, PRIOR_WEIGHTS, probabilities, type Blend,
+} from "./lab-learning";
+import { orderProbabilities, ticketKey, type OrderProbabilities } from "./order-probabilities";
 
+export { ticketKey };
+/** Superseded by pl-exact-v1 (order-probabilities.ts). Kept so the exact
+ * calculation can be checked against an independent simulation. */
 export const MC_VERSION = "pl-mc-v1";
 export const MC_TRIALS = 20000;
 export const HIT_BUDGET_YEN = 600;
@@ -15,14 +21,7 @@ const UNIT = 100;
 const HIT_POINTS: [string, number][] = [["wide", 2], ["quinella", 1], ["exacta", 1], ["trio", 2]];
 /** Combinations whose odds the pre-race check asks for. */
 const EV_CANDIDATES: [string, number][] = [["wide", 4], ["quinella", 3], ["exacta", 3], ["trio", 3]];
-const UNORDERED = new Set(["quinella", "wide", "trio"]);
-
 const round = (value: number, digits = 4) => Math.round(value * 10 ** digits) / 10 ** digits;
-
-export function ticketKey(type: string, selections: number[]): string {
-  const order = UNORDERED.has(type) ? [...selections].sort((a, b) => a - b) : selections;
-  return `${type}:${order.join("-")}`;
-}
 
 function random(seed: number) {
   let state = seed >>> 0;
@@ -79,7 +78,7 @@ export function simulateOrders(p: Map<number, number>, trials = MC_TRIALS, seed 
   };
 }
 
-const best = (mc: MonteCarlo, type: string, count: number) =>
+const best = (mc: { tickets: Record<string, number> }, type: string, count: number) =>
   Object.entries(mc.tickets).filter(([k]) => k.startsWith(type + ":"))
     .sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0])).slice(0, count)
     .map(([k, probability]) => ({
@@ -88,10 +87,10 @@ const best = (mc: MonteCarlo, type: string, count: number) =>
       probability,
     }));
 
-function model(record: Row, weights: number[]) {
+function model(record: Row, weights: number[]): { p: Map<number, number>; mc: OrderProbabilities } {
   const horses = features(rows(record.evaluations ?? []));
   const p = probabilities(horses, weights);
-  return { p, mc: simulateOrders(p) };
+  return { p, mc: orderProbabilities(p) };
 }
 
 /** Stage 3: the most likely combinations per ticket type, 600 yen, no odds. */
@@ -101,12 +100,12 @@ export function hitPlan(record: Row, weights: number[], calibrated: boolean, now
     .map((pick) => ({ ...pick, amount_yen: UNIT }));
   const stake = picks.reduce((s, x) => s + x.amount_yen, 0);
   return {
-    schema_version: "1", plan_version: "hit-plan-v1", plan_lane: "hit",
+    schema_version: "1", plan_version: "hit-plan-v2", plan_lane: "hit",
     lane: "lab", adopted: false, real_money: false,
     race_id: record.race_id!, fixed_at: now, record_saved_at: record.saved_at ?? null,
     budget_yen: HIT_BUDGET_YEN, odds_used: false, calibrated,
     confidence: record.confidence ?? null,
-    simulation: { version: mc.version, seed: mc.seed, trials: mc.trials, win: mc.win, top3: mc.top3 },
+    simulation: { version: mc.version, discount: mc.discount, win: mc.win, top3: mc.top3 },
     picks: stake <= HIT_BUDGET_YEN ? picks : [],
     skip_reason: picks.length ? null : "出走3頭未満などで組合せを作れない",
     probability_note: calibrated ? "学習済み重みの確率" : "未校正の確率（順位の目安）",
@@ -145,14 +144,70 @@ export function evPlan(record: Row, odds: Row, weights: number[], calibrated: bo
     .slice(0, EV_BUDGET_YEN / UNIT)
     .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT, ev: l.ev! }));
   return {
-    schema_version: "1", plan_version: "ev-plan-v2", plan_lane: "ev",
+    schema_version: "1", plan_version: "ev-plan-v3", plan_lane: "ev",
     lane: "lab", adopted: false, real_money: false,
     race_id: record.race_id!, fixed_at: now,
     odds_checked_at: odds.checked_at ?? null, record_saved_at: record.saved_at ?? null,
     budget_yen: EV_BUDGET_YEN, calibrated, confidence: record.confidence ?? null,
-    simulation: { version: mc.version, seed: mc.seed, trials: mc.trials },
+    simulation: { version: mc.version, discount: mc.discount },
     lines, picks,
     skip_reason: picks.length ? null : `EV${EV_MIN}以上の買い目なし。見送りも記録する`,
+  };
+}
+
+/** Market-anchored EV lane ("evm"), recorded beside the 400-yen EV lane.
+ * Probability = market share adjusted by the six factors only as far as past
+ * races showed the factors add information (blend.alpha). Until a time-ordered
+ * test shows that (evidence), the lane records every line and buys nothing:
+ * with alpha = 0 the EV of any win ticket is the payout rate, below 1. */
+export function marketAnchoredPlan(record: Row, odds: Row, blend: Blend, evidence: boolean, now: string): Row {
+  const horses = features(rows(record.evaluations ?? []));
+  const quotes = new Map(rows(odds.win_odds ?? []).map((q) => [Number(q.horse_number), Number(q.odds)]));
+  const base = {
+    schema_version: "1", plan_version: "ev-market-plan-v1", plan_lane: "evm",
+    lane: "lab", adopted: false, real_money: false,
+    race_id: record.race_id!, fixed_at: now,
+    odds_checked_at: odds.checked_at ?? null, record_saved_at: record.saved_at ?? null,
+    budget_yen: EV_BUDGET_YEN, confidence: record.confidence ?? null,
+    blend: { version: BLEND_VERSION, ...blend, evidence },
+  };
+  if (horses.length < 2 || !horses.every((h) => quotes.get(h.number)! >= 1))
+    return { ...base, lines: [], picks: [], skip_reason: "単勝オッズが全頭そろっていない" };
+  const inverse = horses.map((h) => 1 / quotes.get(h.number)!);
+  const overround = inverse.reduce((a, b) => a + b, 0);
+  const market = new Map(horses.map((h, i) => [h.number, inverse[i] / overround]));
+  const model_ = probabilities(horses, PRIOR_WEIGHTS);
+  const p = blendProbabilities(horses, market, blend);
+  const order = orderProbabilities(p);
+  const lines: Row[] = horses.map((h) => ({
+    ticket_type: "win", selections_json: [h.number],
+    model_probability: round(model_.get(h.number)!), market_probability: round(market.get(h.number)!),
+    probability: round(p.get(h.number)!), odds: quotes.get(h.number)!,
+    ev: round(p.get(h.number)! * quotes.get(h.number)!),
+  }));
+  for (const quote of rows(odds.combo_odds ?? [])) {
+    const type = String(quote.ticket_type), price = Number(quote.odds);
+    const selection = (Array.isArray(quote.selections_json) ? quote.selections_json : []).map(Number);
+    if (!(price >= 1) || !EV_CANDIDATES.some(([t]) => t === type)) continue;
+    if (selection.length !== (type === "trio" ? 3 : 2) || selection.some((n) => !p.has(n))) continue;
+    const key = ticketKey(type, selection);
+    const probability = order.tickets[key] ?? 0;
+    lines.push({ ticket_type: type, selections_json: key.slice(type.length + 1).split("-").map(Number),
+      probability, odds: price, ev: round(probability * price) });
+  }
+  const picks = !evidence ? [] : lines
+    .filter((l) => Number(l.ev) >= EV_MIN && Number(l.probability) >= (l.ticket_type === "win" ? 0.05 : 0.02))
+    .sort((a, b) => Number(b.ev) - Number(a.ev))
+    .slice(0, EV_BUDGET_YEN / UNIT)
+    .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT, ev: l.ev! }));
+  return {
+    ...base,
+    payout_rate: round(1 / overround),
+    simulation: { version: order.version, discount: order.discount },
+    lines, picks,
+    skip_reason: picks.length ? null : !evidence
+      ? "6評価が市場に情報を上乗せする証拠がまだ無い。買わずに全行を記録する"
+      : `EV${EV_MIN}以上の買い目なし。見送りも記録する`,
   };
 }
 

@@ -68,7 +68,12 @@ export function LocalPredictionStatus({
           ))}
         </details>
       )}
-      {state?.error && <p>{String(state.error)}</p>}
+      {state?.error && (
+        <p>
+          {String(state.error)}
+          {state.detail != null && <> · {String(state.detail)}</>}
+        </p>
+      )}
       {state?.learning != null && (
         <details>
           <summary>
@@ -80,6 +85,29 @@ export function LocalPredictionStatus({
           <p>判定: {String(obj(obj(state.learning).top1_flat_win).verdict ?? "標本不足")}</p>
           <p>的中狙い600円 {String(obj(obj(state.learning).hit_plans).fixed ?? 0)}件 · 的中 {String(obj(obj(state.learning).hit_plans).hit_races ?? 0)}R · 判定: {String(obj(obj(state.learning).hit_plans).verdict ?? "標本不足")}</p>
           <p>期待値買い400円 {String(obj(obj(state.learning).ev_plans).fixed ?? 0)}件 · 判定: {String(obj(obj(state.learning).ev_plans).verdict ?? "標本不足")}</p>
+          {obj(obj(obj(state.learning).ev_plans).pick_profile).median_odds != null && (
+            <p>
+              期待値買いの買い目 {String(obj(obj(obj(state.learning).ev_plans).pick_profile).picks)}点 · オッズ中央値{" "}
+              {String(obj(obj(obj(state.learning).ev_plans).pick_profile).median_odds)}倍 · 20倍以上{" "}
+              {Math.round(Number(obj(obj(obj(state.learning).ev_plans).pick_profile).share_odds_20_plus) * 100)}%
+            </p>
+          )}
+          {obj(state.learning).market_anchored_plans != null && (
+            <p>
+              市場基準の期待値（記録のみ） {String(obj(obj(state.learning).market_anchored_plans).fixed ?? 0)}件 · 見送り{" "}
+              {String(obj(obj(state.learning).market_anchored_plans).skipped ?? 0)}件
+            </p>
+          )}
+          {obj(state.learning).market_blend != null && (
+            <p>市場との比較: {String(obj(obj(state.learning).market_blend).verdict ?? "未算出")}</p>
+          )}
+          {Number(obj(obj(obj(state.learning).recorded_probabilities).versus_market).races ?? 0) > 0 && (
+            <p>
+              記録した勝率のlog loss（低いほど良い） {String(obj(obj(obj(state.learning).recorded_probabilities).versus_market).stated_log_loss)} ／ 市場{" "}
+              {String(obj(obj(obj(state.learning).recorded_probabilities).versus_market).market_log_loss)}（
+              {String(obj(obj(obj(state.learning).recorded_probabilities).versus_market).races)}R）
+            </p>
+          )}
           <p>時系列検証 {String(obj(state.learning).holdout_races ?? 0)}R · 重み候補 {obj(state.learning).candidate_ready ? "あり（本人承認待ち）" : "なし"}</p>
         </details>
       )}
@@ -98,7 +126,10 @@ export function LocalPredictionStatus({
         <details>
           <summary>保留 {Number(state?.blocked_jobs)}件 · 理由を見る</summary>
           {rows(state?.job_issues ?? []).map((issue, i) => (
-            <p key={i}>{String(issue.reason)}</p>
+            <p key={i}>
+              {String(issue.reason)}
+              {issue.file != null && <> · {String(issue.file)}</>}
+            </p>
           ))}
         </details>
       )}

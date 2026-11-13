@@ -378,10 +378,10 @@ await page.screenshot({
   path: `${outputDir}/turflab-desktop.png`,
   fullPage: true,
 });
+// The list also shows a "next race" shortcut with the same name; open the card itself.
 await page
-  .getByRole("button", {
-    name: new RegExp("架空レース · ローカル動作確認 " + runId),
-  })
+  .locator("button.race-card")
+  .filter({ hasText: "架空レース · ローカル動作確認 " + runId })
   .click();
 await page.getByRole("heading", { name: "推奨と本人の仮想購入" }).waitFor();
 await page.setViewportSize({ width: 390, height: 844 });
@@ -433,13 +433,15 @@ await page.getByText('"SKIPPED"', { exact: false }).waitFor();
 await page.getByRole("button", { name: /本日のレース/ }).click();
 await page.locator('input[type="date"]').fill(coreDate);
 await page
-  .getByRole("button", { name: new RegExp(`Core架空レース ${runId} 7`) })
+  .locator("button.race-card")
+  .filter({ hasText: new RegExp(`Core架空レース ${runId} 7`) })
   .click();
 await page.getByRole("button", { name: "見送る", exact: true }).click();
 await page.getByText("見送り記録：", { exact: false }).waitFor();
 await page.getByRole("button", { name: /本日のレース/ }).click();
 await page
-  .getByRole("button", { name: new RegExp(`Core架空レース ${runId} 1`) })
+  .locator("button.race-card")
+  .filter({ hasText: new RegExp(`Core架空レース ${runId} 1`) })
   .click();
 await page.getByRole("heading", { name: "全馬評価と根拠" }).waitFor();
 await page.getByRole("heading", { name: /スロー ·/ }).waitFor();
@@ -476,9 +478,8 @@ if (await page.getByLabel("本人用接続キー").count())
   throw new Error("再読込後にログインが維持されていません");
 await page.locator('input[type="date"]').fill(date);
 await page
-  .getByRole("button", {
-    name: new RegExp("架空レース · ローカル動作確認 " + runId),
-  })
+  .locator("button.race-card")
+  .filter({ hasText: "架空レース · ローカル動作確認 " + runId })
   .click();
 const afterReload = await call(`/races/${raceId}`);
 const active = rows(afterReload.data.bets).filter(
