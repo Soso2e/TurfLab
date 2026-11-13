@@ -367,8 +367,35 @@ export async function dashboard(repo: Repository, date: string): Promise<Row> {
       result?.result_id === s.result_id && confirmed.some((b) => b.bet_id === s.bet_id));
     const research = rows(d.snapshots).filter((s) => obj(s.evidence_json ?? {}).research)
       .sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
+    const entries = rows(d.entries);
+    const pick =
+      predictions.find((p) => p.status === "locked") ?? predictions.at(-1);
+    const picks = pick
+      ? rows(d.evaluations)
+          .filter((e) => e.prediction_id === pick.prediction_id)
+          .sort((a, b) => Number(a.rank) - Number(b.rank))
+          .slice(0, 5)
+          .map((e) => {
+            const entry = entries.find((x) => x.entry_id === e.entry_id);
+            return {
+              rank: e.rank,
+              horse_number: entry?.horse_number ?? null,
+              horse_name: entry ? obj(entry.horse ?? {}).horse_name ?? null : null,
+              win_probability: e.win_probability ?? null,
+            };
+          })
+      : [];
+    const course = obj(d.course ?? {});
     cards.push({
       ...r,
+      track_name: obj(d.track ?? {}).name ?? null,
+      surface: course.surface ?? null,
+      distance_m: course.distance_m ?? null,
+      entry_count: entries.filter((e) => e.status === "active").length,
+      picks,
+      finish_top3: result?.finish_order_json
+        ? (Array.isArray(result.finish_order_json) ? result.finish_order_json : []).slice(0, 3)
+        : [],
       result_status: result?.official_status ?? null,
       research_at: research?.captured_at ?? null,
       bet_count: confirmed.length,
