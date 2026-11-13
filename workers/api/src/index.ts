@@ -56,7 +56,7 @@ import {
 } from "./betting";
 import { adoptModel, analytics, backtest, saveReview } from "./analytics";
 import { bridgeConvert } from "./github-bridge";
-import { dailyStateExport } from "./daily-export";
+import { dailyStateExport, historicalOfficialResults } from "./daily-export";
 import { importNameReference, withFormalStatus } from "./name-reference-intake";
 import { reconcileReference } from "./reference-intake";
 import { validateReferenceMirror } from "./reference-report";
@@ -221,6 +221,14 @@ export async function route(
   if (path === "/local-predictions/baseline") {
     requireCondition(!sheets, "調査ベースラインはlocal保存専用です");
     return saveResearchBaseline(repo, input, now);
+  }
+  if (method === "POST" && path === "/local-predictions/official-results") {
+    requireCondition(!sheets, "公式結果の振り返りはlocal保存専用です");
+    const ids = input.race_ids;
+    requireCondition(Array.isArray(ids) && ids.length <= 100 &&
+      ids.every((id): id is string => typeof id === "string" && id.length > 0),
+    "レースIDは100件以内です");
+    return historicalOfficialResults(repo, ids as string[]);
   }
   if (path === "/local-predictions/entity-memory/save") {
     requireCondition(!sheets, "個体メモリはlocal保存専用です");

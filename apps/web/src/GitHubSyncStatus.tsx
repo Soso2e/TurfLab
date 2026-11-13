@@ -127,6 +127,15 @@ export function GitHubSyncStatus({
           {String(obj(state.last_daily_export).path ?? "未保存")}
         </p>
       )}
+      {state?.research_pack_sync && (
+        <p>
+          CLI調査パック: GitHub照合済み {String(obj(state.research_pack_sync).confirmed)}件
+          {" · "}失敗 {String(obj(state.research_pack_sync).failed)}件
+          {obj(state.research_pack_sync).error && (
+            <span role="alert">{" · "}{String(obj(state.research_pack_sync).error)}</span>
+          )}
+        </p>
+      )}
       {state?.last_export && (
         <p>
           入力パック出力: {String(obj(state.last_export).reason)} ·{" "}

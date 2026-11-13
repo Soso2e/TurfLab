@@ -1,10 +1,11 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import {
   canonical,
+  hash,
   obj,
   rows,
   str,
@@ -21,6 +22,11 @@ import { referenceAnswer } from "../packages/shared/src/reference-answer";
 
 const exec = promisify(execFile);
 const digest = (s: string) => createHash("sha256").update(s).digest("hex");
+export const blobSha = (text: string) =>
+  createHash("sha1")
+    .update(`blob ${Buffer.byteLength(text)}\0`)
+    .update(text)
+    .digest("hex");
 const jst = (d: Date) =>
   new Date(d.getTime() + 9 * 3600000).toISOString().slice(0, 10);
 export interface BridgeConfig {
@@ -31,6 +37,25 @@ export interface BridgeConfig {
 export interface FileRef {
   path: string;
   sha: string;
+}
+export async function localFiles(root: string, kinds = ["daily", "packs", "predictions", "results"]): Promise<FileRef[]> {
+  const files: FileRef[] = [];
+  for (const kind of kinds) {
+    const dir = path.join(root, kind);
+    const days = await readdir(dir, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    for (const day of days) {
+      if (!day.isDirectory() || !/^\d{4}-\d{2}-\d{2}$/.test(day.name)) continue;
+      for (const file of await readdir(path.join(dir, day.name), { withFileTypes: true })) {
+        if (!file.isFile() || !/^[A-Za-z0-9_.-]+\.json$/.test(file.name)) continue;
+        const name = `${kind}/${day.name}/${file.name}`;
+        files.push({ path: name, sha: blobSha(await readFile(path.join(root, name), "utf8")) });
+      }
+    }
+  }
+  return files;
 }
 export interface BridgeIO {
   api: (route: string, body?: unknown) => Promise<Row>;
@@ -81,6 +106,8 @@ interface State {
   last_daily_export?: Row;
   daily_inventory?: Row;
   last_export?: Row;
+  research_pack_blobs?: Record<string, string>;
+  research_pack_sync?: Row;
   reference_files?: Record<string, ReferenceReceipt>;
   last_reference_sync?: string;
   last_reference?: Row;
@@ -186,6 +213,7 @@ export class PredictionBridge {
       configured: true,
       transport: this.local ? "local" : "github",
       last_export: this.state.last_export ?? null,
+      research_pack_sync: this.state.research_pack_sync ?? null,
       last_daily_export: this.state.last_daily_export ?? null,
       last_reference: this.state.last_reference ?? null,
       last_result: this.state.last_result ?? null,
@@ -593,6 +621,72 @@ export class PredictionBridge {
     this.state.last_result_sync = now.toISOString();
     await this.save();
   }
+  async syncResearchPacks(files: FileRef[], readLocal: BridgeIO["read"]) {
+    const verified = this.state.research_pack_blobs ??= {};
+    const checkedAt = this.io.now().toISOString();
+    let failed = 0;
+    let confirmed = 0;
+    let error: string | null = null;
+    try {
+      const remote = new Map((await this.io.list()).map((f) => [f.path, f]));
+      const races = new Map<string, Promise<Row>>();
+      for (const file of files) {
+        try {
+          const existing = remote.get(file.path);
+          if (verified[file.path] !== file.sha || existing?.sha !== file.sha) {
+            const content = await readLocal(file);
+            if (Buffer.byteLength(content) > 262144)
+              throw new BridgeError("CLI調査パックが256KiBを超えています");
+            const { pack_hash, ...pack } = obj(obj(JSON.parse(content)).pack);
+            if (!rows(pack.evidence).some((entry) => entry.source === "codex_cli_reference")) continue;
+            const race = obj(pack.race);
+            const raceId = str(race, "race_id");
+            const date = str(race, "race_date_jst");
+            const cutoff = str(pack, "information_cutoff_at");
+            if (
+              !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+              file.path !== `packs/${date}/${raceKey(raceId)}-${pack_hash}.json` ||
+              file.sha !== blobSha(content) || pack_hash !== await hash(pack) ||
+              !pack.research || !(Date.parse(cutoff) < Date.parse(str(race, "scheduled_start_at")))
+            ) throw new BridgeError("ローカル調査パックの形式・ハッシュが不正です");
+            if (!races.has(raceId))
+              races.set(raceId, this.io.api("/races/" + encodeURIComponent(raceId)));
+            const detail = await races.get(raceId)!;
+            const snapshot = rows(detail.snapshots).find((s) => s.snapshot_id === pack.snapshot_id);
+            if (
+              !snapshot || snapshot.source !== "codex_cli_reference" ||
+              snapshot.race_id !== raceId || snapshot.input_hash !== pack.input_hash ||
+              snapshot.captured_at !== cutoff || obj(detail.race).race_date_jst !== date ||
+              !(Date.parse(cutoff) < Date.parse(str(obj(detail.race), "scheduled_start_at"))) ||
+              canonical(obj(snapshot.evidence_json).research) !== canonical(pack.research)
+            ) throw new BridgeError("CoreのCLI調査スナップショットと一致しません");
+            if (!existing) await this.io.put(file.path, content);
+            const saved = existing ?? (await this.io.list()).find((f) => f.path === file.path);
+            if (saved?.sha !== file.sha || blobSha(await this.io.read(saved)) !== file.sha)
+              throw new BridgeError("GitHub上の調査パックのハッシュが一致しません");
+            verified[file.path] = file.sha;
+          }
+          confirmed++;
+        } catch (e) {
+          delete verified[file.path];
+          failed++;
+          error = e instanceof BridgeError ? e.message : "調査パックの照合・転送に失敗しました";
+        }
+      }
+    } catch (e) {
+      failed = files.length;
+      error = e instanceof BridgeError ? e.message : "GitHub上の調査パックを確認できません";
+    }
+    this.state.research_pack_sync = {
+      checked_at: checkedAt,
+      status: error ? "failed" : "success",
+      confirmed,
+      failed,
+      error,
+    };
+    await this.save();
+  }
+
   async exportPack(snapshot: string) {
     const pack = await this.io.api("/race-import/pack", {
       snapshot_id: snapshot,

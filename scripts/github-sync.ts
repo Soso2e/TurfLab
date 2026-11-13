@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   BridgeError,
   githubIO,
+  localFiles,
   PredictionBridge,
   type BridgeConfig,
 } from "./github-bridge";
@@ -100,6 +101,8 @@ try {
   });
   await bridge.init();
   let nextCheckpoint = 0;
+  let nextResearchSync = 0;
+  const exchange = path.join(home, "local-predictions", "exchange");
   do {
     const ack: string[] = [];
     let commandError: string | null = null;
@@ -121,6 +124,13 @@ try {
             await bridge.exportFailure(str(c, "snapshot_id"), commandError);
           ack.push(str(c, "id"));
         }
+      }
+      if (Date.now() >= nextResearchSync) {
+        await bridge.syncResearchPacks(
+          await localFiles(exchange, ["packs"]),
+          (file) => readFile(path.join(exchange, file.path), "utf8"),
+        );
+        nextResearchSync = Date.now() + (config.interval_seconds ?? 300) * 1000;
       }
       await bridge.sync();
       try {

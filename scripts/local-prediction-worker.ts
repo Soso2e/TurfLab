@@ -18,7 +18,7 @@ import {
   type Row,
 } from "../packages/shared/src/domain";
 import { coreStats, loadCoreRuns } from "./core-result-stats";
-import { PredictionBridge, type BridgeIO } from "./github-bridge";
+import { blobSha, localFiles, PredictionBridge, type BridgeIO } from "./github-bridge";
 import { predictWithCodex } from "./local-codex";
 import { raceKey } from "../packages/shared/src/github-bridge";
 import { officialResearchUrl } from "../packages/shared/src/race-research";
@@ -84,12 +84,6 @@ function carriedOver(pack: Row, going: unknown, weather: unknown): Row {
   };
 }
 
-export const blobSha = (text: string) =>
-  createHash("sha1")
-    .update(`blob ${Buffer.byteLength(text)}\0`)
-    .update(text)
-    .digest("hex");
-
 export class CoreRequestError extends Error {
   constructor(status: number, readonly detail?: string) {
     super(`CORE_HTTP_${status}`);
@@ -125,25 +119,6 @@ export async function immutableLocalFile(
     )
       throw new Error("LOCAL_FILE_CONFLICT");
   }
-}
-
-export async function localFiles(root: string) {
-  const files: { path: string; sha: string }[] = [];
-  for (const kind of ["daily", "packs", "predictions", "results"]) {
-    const dir = path.join(root, kind);
-    for (const day of await readdir(dir).catch(() => [])) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) continue;
-      for (const file of await readdir(path.join(dir, day))) {
-        if (!/^[A-Za-z0-9_.-]+\.json$/.test(file)) continue;
-        const name = `${kind}/${day}/${file}`;
-        files.push({
-          path: name,
-          sha: blobSha(await readFile(path.join(root, name), "utf8")),
-        });
-      }
-    }
-  }
-  return files;
 }
 
 export async function claimLocalWorker(directory: string) {
@@ -1131,32 +1106,47 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       const result = obj(entry.official_result ?? {});
       return result.official_status === "official" ? [[obj(entry.race).race_id, result] as const] : [];
     }));
-    // daily-state only covers today and yesterday; saved results keep older races settled.
-    const paceOf = new Map<unknown, Row>();
+    const labs = await this.exchangeJson("lab");
+    const savedPlans = await this.exchangeJson("plans");
+    const yesterday = jstDate(new Date(now.getTime() - 86400_000).toISOString());
+    const olderRaceIds = [...new Set([...labs, ...savedPlans]
+      .filter(({ name, value }) => typeof value.race_id === "string" &&
+        !results.has(value.race_id) && name.split("/")[1]! < yesterday)
+      .map(({ value }) => str(value, "race_id")))];
+    for (let i = 0; i < olderRaceIds.length; i += 100) {
+      const history = await this.api("/local-predictions/official-results", {
+        race_ids: olderRaceIds.slice(i, i + 100),
+      });
+      for (const result of rows(history.results)) results.set(result.race_id, result);
+    }
+    const paceOf = new Map<string, Row>();
     for (const { value } of await this.exchangeJson("results")) {
       const saved = obj(value.result);
-      if (value.pace_observation) paceOf.set(saved.race_id, obj(value.pace_observation));
-      if (saved.official_status === "official" && !results.has(saved.race_id))
-        results.set(saved.race_id, { ...saved, payouts: value.payouts ?? [] });
+      if (value.pace_observation)
+        paceOf.set(`${saved.race_id}:${saved.revision}`, obj(value.pace_observation));
     }
-    for (const { name, value } of await this.exchangeJson("lab")) {
+    const outcomes = await this.exchangeJson("outcomes");
+    const existing = new Set(outcomes.map(({ name }) => name));
+    for (const { name, value } of labs) {
       const result = results.get(value.race_id!);
       if (!result || !Array.isArray(value.ranking)) continue;
       if (Date.parse(str(value, "saved_at")) >= Date.parse(str(value, "scheduled_start_at"))) continue;
       const base = name.split("/").at(-1)!.replace(/\.json$/u, "");
-      await immutableLocalFile(this.exchange,
-        `outcomes/${name.split("/")[1]}/${base}-r${result.revision}.json`,
-        JSON.stringify(labOutcome(value, result, name, paceOf.get(value.race_id!) ?? null)));
+      const output = `outcomes/${name.split("/")[1]}/${base}-r${result.revision}.json`;
+      if (existing.has(output)) continue;
+      const outcome = labOutcome(value, result, name, paceOf.get(`${value.race_id}:${result.revision}`) ?? null);
+      await immutableLocalFile(this.exchange, output, JSON.stringify(outcome));
+      outcomes.push({ name: output, value: outcome });
     }
     const newest = new Map<string, Row>();
-    for (const { value } of await this.exchangeJson("outcomes")) {
+    for (const { value } of outcomes) {
       const id = `${value.lab_path}`;
       const prior = newest.get(id);
       if (!prior || Number(prior.result_revision) < Number(value.result_revision)) newest.set(id, value);
     }
     const odds = new Map((await this.exchangeJson("prerace")).filter(({ value }) => value.odds_complete)
       .map(({ value }) => [String(value.race_id), value]));
-    const plans = (await this.exchangeJson("plans")).map(({ value }) => {
+    const plans = savedPlans.map(({ value }) => {
       const result = results.get(value.race_id!);
       return result ? { ...value, settled: planOutcome(value, result) } : value;
     });

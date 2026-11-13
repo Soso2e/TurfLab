@@ -13,6 +13,27 @@ const pick = (row: Row, keys: string[]): Row =>
 const asString = (value: unknown) => typeof value === "string" ? value : "";
 const byRevision = (a: Row, b: Row) => Number(b.revision ?? 0) - Number(a.revision ?? 0);
 
+function resultForExport(result: Row, payouts: Row[]): Row {
+  return {
+    ...pick(result, ["result_id", "official_status", "published_at", "revision", "finish_order_json", "entry_status_json"]),
+    payouts: payouts.filter((p) => p.result_id === result.result_id)
+      .map((p) => pick(p, ["ticket_type", "selections_json", "payout_per_100_yen", "refund_rule_json"])),
+  };
+}
+
+export async function historicalOfficialResults(repo: Repository, raceIds: string[]): Promise<Row> {
+  const ids = new Set(raceIds);
+  const [results, payouts] = await Promise.all([repo.list("race_results"), repo.list("payouts")]);
+  const latest = new Map<unknown, Row>();
+  for (const result of results.filter((r) => ids.has(asString(r.race_id))).sort(byRevision)) {
+    if (!latest.has(result.race_id)) latest.set(result.race_id, result);
+  }
+  return {
+    results: [...latest.values()].filter((r) => r.official_status === "official")
+      .map((r) => ({ ...resultForExport(r, payouts), race_id: r.race_id! })),
+  };
+}
+
 export async function dailyStateExport(repo: Repository, now: string): Promise<Row> {
   const today = jst(now);
   const yesterday = previousJst(now);
@@ -57,11 +78,7 @@ export async function dailyStateExport(repo: Repository, now: string): Promise<R
         .map((a) => pick(a, ["prediction_id", "plan_id", "adopted_at"])),
       adopted_prediction: db.prediction_adoptions.filter((a) => a.race_id === raceId)
         .map((a) => pick(a, ["prediction_id", "adopted_at"])),
-      official_result: result ? {
-        ...pick(result, ["result_id", "official_status", "published_at", "revision", "finish_order_json", "entry_status_json"]),
-        payouts: db.payouts.filter((p) => p.result_id === result.result_id)
-          .map((p) => pick(p, ["ticket_type", "selections_json", "payout_per_100_yen", "refund_rule_json"])),
-      } : null,
+      official_result: result ? resultForExport(result, db.payouts) : null,
       personal_bets: bets.map((b) => ({
         ...pick(b, ["bet_id", "prediction_id", "ticket_type", "selections_json", "amount_yen", "status", "confirmed_at"]),
         settlements: db.settlements.filter((s) => s.bet_id === b.bet_id)

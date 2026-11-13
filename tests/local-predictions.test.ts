@@ -4,12 +4,12 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   immutableLocalFile,
-  localFiles,
   callBucket,
   claimLocalWorker,
   LocalPredictionWorker,
   MAX_AUTO_RACES,
 } from "../scripts/local-prediction-worker";
+import { localFiles } from "../scripts/github-bridge";
 import { MemoryRepository } from "../packages/shared/src/repository";
 import { obj, str, type Row } from "../packages/shared/src/domain";
 import {
@@ -21,6 +21,46 @@ import { route } from "../workers/api/src/index";
 import { wizardDraft, wizardRequest, wizardAnswer } from "./wizard-fixture";
 
 afterEach(() => vi.useRealTimers());
+
+it("retains old comparisons and uses Core result IDs after the race leaves daily state", async () => {
+  const now = new Date("2026-11-13T13:00:00Z");
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-outcome-replay-"));
+  const exchange = path.join(home, "exchange");
+  const oldDate = "2026-11-10";
+  const lab = {
+    race_id: "older", race_date_jst: oldDate, saved_at: "2026-11-10T02:00:00Z",
+    scheduled_start_at: "2026-11-10T03:00:00Z", ranking: [{ horse_number: 1 }],
+  };
+  const existing = JSON.stringify({
+    lab_path: `lab/${oldDate}/first.json`, result_id: "core-result", result_revision: 1,
+    race_id: "older", race_date_jst: oldDate,
+  });
+  await immutableLocalFile(exchange, `lab/${oldDate}/first.json`, JSON.stringify(lab));
+  await immutableLocalFile(exchange, `lab/${oldDate}/second.json`, JSON.stringify(lab));
+  await immutableLocalFile(exchange, `outcomes/${oldDate}/first-r1.json`, existing);
+  await immutableLocalFile(exchange, `results/${oldDate}/older-official-v1.json`, JSON.stringify({
+    result: { race_id: "older", revision: 1, official_status: "official" },
+  }));
+  const api = vi.fn(async (route: string): Promise<Row> => {
+    if (route === "/local-predictions/official-results") return {
+      results: [{
+        race_id: "older", result_id: "core-result", revision: 1, official_status: "official",
+        finish_order_json: [[1]], entry_status_json: { "1": "finished" }, payouts: [],
+      }],
+    };
+    return { races: [] };
+  });
+  const infer = vi.fn(async () => ({}));
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer);
+  await worker.init();
+  await worker.tick(now);
+  await worker.tick(now);
+  expect(api).toHaveBeenCalledWith("/local-predictions/official-results", { race_ids: ["older"] });
+  expect(await readFile(path.join(exchange, "outcomes", oldDate, "first-r1.json"), "utf8")).toBe(existing);
+  const saved = JSON.parse(await readFile(path.join(exchange, "outcomes", oldDate, "second-r1.json"), "utf8"));
+  expect(saved).toMatchObject({ result_id: "core-result", result_revision: 1, actual_winners: [1] });
+  expect(infer).not.toHaveBeenCalled();
+});
 
 it.each([500, 401, 403])(
   "continues after a race fetch failure but stops on authentication failure (%s)",

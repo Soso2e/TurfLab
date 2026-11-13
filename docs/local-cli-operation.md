@@ -76,6 +76,8 @@ npm run nar:check -- --track 佐賀 --date 2026-11-09 --surface ダ --distance 1
 
 - `local-predictions/jobs/` に開始記録・JSON回答・実行receiptを保持。
 - `local-predictions/exchange/` にdaily、pack、予想、公式結果候補、レビューを追記保存。ローカルファイルのBlobハッシュはGitHubと同じ計算法を用いる。
+- GitHub同期Workerは設定した同期間隔（既定5分）で、ローカルに固定されたCLI調査パックをCoreのスナップショットと照合し、設定済みの非公開リポジトリの `packs/YYYY-MM-DD/` に追記する。発走前に固定された過去のパックも対象。GitHub上のblobを読み返してハッシュが一致したものを同期画面に計上する。通信失敗は次の周期で再試行し、同名で内容の異なるファイルは保存せず表示する。
+- 学習用の結果比較はCoreの公式結果と結果IDを使用する。日次状態の対象外のレースもCoreから取得し、保存済みの比較は保持する。公式結果が訂正された場合は結果の版ごとに比較を保存する。
 - `local-predictions/bridge/` に既存Bridgeの検証receiptを保持。ChatGPT/GitHub Workerは既存のディレクトリと入力契約を利用する。
 - Webの「ローカル自動予想」に状態と保留件数を表示。Tailscaleの8443番から同じ本人認証付きWebを閲覧できる。
 
