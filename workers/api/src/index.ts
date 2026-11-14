@@ -479,6 +479,24 @@ export class TurfCoordinator {
         return response({ error: "本人用認証が必要です" }, 401);
       try {
         const bridgePath = new URL(request.url).pathname;
+        if (bridgePath === "/api/local-predictions/race-prediction") {
+          // One key per race: the fixed Lab prediction stays readable after the
+          // race leaves the daily state, and no value nears the storage limit.
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          if (request.method === "GET") {
+            const raceId = new URL(request.url).searchParams.get("race_id") ?? "";
+            return response(await this.state.storage.get<Row>("local-race-prediction:" + raceId) ?? { status: "none" });
+          }
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const input = await readBody(request);
+          requireCondition(typeof input.race_id === "string" && input.race_id.length > 0 && input.race_id.length <= 200,
+            "race_idが不正です");
+          requireCondition(["provisional", "formal"].includes(String(input.status)) && Array.isArray(input.horses),
+            "予想の形式が不正です");
+          requireCondition(JSON.stringify(input).length <= 60000, "予想が大きすぎます", 413);
+          await this.state.storage.put("local-race-prediction:" + input.race_id, input);
+          return response({ status: "saved" });
+        }
         if (bridgePath === "/api/local-predictions/status") {
           requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
           if (request.method === "GET") {

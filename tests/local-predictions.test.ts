@@ -45,6 +45,37 @@ it("reports a saved virtual bet after race day, even with incomplete odds", asyn
   })]);
 });
 
+it("publishes the fixed provisional prediction for the Web once per change", async () => {
+  const now = new Date("2026-11-15T02:00:00Z");
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-lab-view-"));
+  const race = { race_id: "r1", race_date_jst: "2026-11-14", scheduled_start_at: "2026-11-14T08:00:00Z" };
+  const components = { ability: 80, course: 60, pace: 55, going: 50, draw_weight: null, horse_jockey_course: 40 };
+  await immutableLocalFile(path.join(home, "exchange"), "lab/2026-11-14/r1-abc-provisional.json", JSON.stringify({
+    race_id: "r1", prediction_status: "provisional", saved_at: "2026-11-14T03:00:00Z", model: "fixture",
+    confidence: 0.8, main_pace: "high", main_pace_reason: "逃げ馬が多い",
+    missing: [{ horse_number: 1, component: "draw_weight" }, { horse_number: 2, component: "draw_weight" }],
+    ranking: [{ horse_number: 2, horse_name: "B", score: 70, covered_weight: 0.8 }, { horse_number: 1, horse_name: "A", score: 60, covered_weight: 0.8 }],
+    evaluations: [{ horse_number: 1, components, rationale: "近走安定" }, { horse_number: 2, components, rationale: "前走勝ち" }],
+  }));
+  const posted: Row[] = [];
+  const api = async (url: string, body?: unknown): Promise<Row> => {
+    if (url === "/local-predictions/race-prediction") posted.push(body as Row);
+    return url === "/daily-state" ? { races: [{ race }] } : {};
+  };
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", async () => ({}));
+  await worker.init();
+  await worker.tick(now);
+  await worker.tick(now);
+  expect(posted).toHaveLength(1);
+  expect(posted[0]).toMatchObject({
+    race_id: "r1", status: "provisional", confidence: 0.8, main_pace: "high", missing_factors: ["draw_weight"],
+    horses: [
+      { rank: 1, horse_number: 2, horse_name: "B", score: 70, components, rationale: "前走勝ち" },
+      { rank: 2, horse_number: 1, rationale: "近走安定" },
+    ],
+  });
+});
+
 it("retains old comparisons and uses Core result IDs after the race leaves daily state", async () => {
   const now = new Date("2026-11-13T13:00:00Z");
   const home = await mkdtemp(path.join(tmpdir(), "turflab-outcome-replay-"));

@@ -44,7 +44,7 @@ export const scoringRules = `6項目の根拠の定義:
 - going: pack.research.going は公式出馬表の表示を history_checked_at に確認した観測値として使ってよい（別途の観測時刻は不要）。null のときだけ欠測。
 - draw_weight: 枠・馬番の傾向（pack.research.local_stats.draw の期間・標本付き集計、または出典付きの資料）と斤量。枠の傾向資料が無いときは欠測。
 - horse_jockey_course: 騎手の今回の競馬場での成績（research.jockey_stats の標本数付き統計＝同場・距離帯・馬場別成績、先行率、コーナーでの順位変化、人馬コンビ／local_stats.jockeys／jockey_notes の公式騎手リーディング）と、馬の今回のコース・距離での近走。人馬コンビの過去実績が0例なのは「経験なし」という事実で、欠測ではない（その場合は騎手と馬それぞれの根拠で採点）。騎手の成績も馬の近走も無いときだけ欠測。`;
-const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整数またはnull(全馬共通), component:6項目名, detail:何が無いか}], lab_evaluations:[{horse_number, horse_name, components:{6項目:0〜100またはnull(根拠なし)}, rationale}]} を返す。lab_evaluations は正式予想ではない研究用記録。根拠のある項目だけ数値にし、根拠の無い項目は必ずnull。`;
+const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整数またはnull(全馬共通), component:6項目名, detail:何が無いか}], main_pace:"slow|middle|high", main_pace_reason:展開の理由, rationale:全体の見立て, lab_evaluations:[{horse_number, horse_name, components:{6項目:0〜100またはnull(根拠なし)}, expected_position:想定位置, rationale}]} を返す。lab_evaluations は正式予想ではない研究用記録。根拠のある項目だけ数値にし、根拠の無い項目は必ずnull。`;
 
 const BIAS_PREFIX = "[当日傾向] ";
 /** Automatic selection per JST day (race-flow-v2: deeper research on fewer races). */
@@ -179,6 +179,39 @@ export function withMemory(answer: Row, known: Row[]): Row {
   return { ...answer, horses };
 }
 
+/** What the Web shows for one fixed Lab record: the ranking with its reasons. */
+export function labView(record: Row): Row {
+  const evaluations = rows(record.evaluations ?? []);
+  return {
+    race_id: record.race_id!,
+    status: record.prediction_status === "formal" ? "formal" : "provisional",
+    saved_at: record.saved_at ?? null,
+    model: record.model ?? null,
+    pack_hash: record.pack_hash ?? null,
+    confidence: record.confidence ?? null,
+    main_pace: record.main_pace ?? null,
+    main_pace_reason: record.main_pace_reason ?? null,
+    rationale: record.rationale ?? null,
+    scenarios: rows(record.scenarios ?? []).map((s) => ({
+      pace: s.pace ?? null, analysis: String(s.analysis ?? "").slice(0, 600),
+    })),
+    missing_factors: [...new Set(rows(record.missing ?? []).map((m) => String(m.component)))],
+    horses: rows(record.ranking).slice(0, 20).map((ranked, i) => {
+      const evaluation = evaluations.find((e) => e.horse_number === ranked.horse_number);
+      return {
+        rank: i + 1,
+        horse_number: ranked.horse_number!,
+        horse_name: ranked.horse_name ?? evaluation?.horse_name ?? null,
+        score: ranked.score ?? null,
+        covered_weight: ranked.covered_weight ?? null,
+        components: evaluation?.components ?? {},
+        expected_position: evaluation?.expected_position ?? null,
+        rationale: String(evaluation?.rationale ?? "").slice(0, 400),
+      };
+    }),
+  };
+}
+
 export type InferFn = (
   directory: string,
   prompt: string,
@@ -190,6 +223,7 @@ export class LocalPredictionWorker {
   private blockedJobs = 0;
   private jobIssues: Row[] = [];
   private provisional: Row[] = [];
+  private published = new Map<string, string>();
   private stages = new Map<string, Row>();
   private cliCalls = 0;
   private csvImport: Row | null = null;
@@ -670,7 +704,9 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         }
         if (answer?.blocked || heldBack)
           await this.saveLab(pack, heldBack
-            ? { reason: "根拠の欠測があるため暫定", lab_evaluations: answer.horse_evaluations }
+            ? { reason: "根拠の欠測があるため暫定", lab_evaluations: answer.horse_evaluations,
+              main_pace: answer.main_pace ?? null, main_pace_reason: answer.main_pace_reason ?? null,
+              rationale: answer.rationale ?? null, scenarios: answer.scenarios ?? null }
             : answer!, day, coverage);
         if (answer?.blocked || heldBack)
           this.mark(race, 3, "暫定予想を保存（正式予想ではない）");
@@ -713,6 +749,8 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       this.failedJob("race-bet-plans", error);
       return null;
     });
+    await this.publishPredictions(currentRaces).catch((error) =>
+      this.failedJob("race-predictions", error));
     const learning = await this.learn(now).catch((error) => {
       this.failedJob("learning-report", error);
       return null;
@@ -1142,6 +1180,13 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         saved_at: savedAt,
         model: this.model,
         reason: String(answer.reason ?? "").slice(0, 600),
+        // The reading behind the ranking, so the Web can show what was predicted.
+        ...(typeof answer.main_pace === "string" ? {
+          main_pace: answer.main_pace,
+          main_pace_reason: String(answer.main_pace_reason ?? "").slice(0, 600),
+        } : {}),
+        ...(typeof answer.rationale === "string" ? { rationale: answer.rationale.slice(0, 1200) } : {}),
+        ...(Array.isArray(answer.scenarios) ? { scenarios: rows(answer.scenarios).slice(0, 3) } : {}),
         missing: missing.slice(0, 120),
         evaluations: (ranked?.evaluations ?? given).slice(0, 20),
       }),
@@ -1260,6 +1305,23 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         }),
       };
     }));
+  }
+
+  /** Send each race's newest fixed Lab prediction to the Web store, once per change. */
+  private async publishPredictions(races: Row[]) {
+    const labs = (await this.exchangeJson("lab")).map(({ value }) => value)
+      .filter((value) => Array.isArray(value.ranking))
+      .sort((a, b) => String(b.saved_at).localeCompare(String(a.saved_at)));
+    for (const entry of races) {
+      const raceId = str(obj(entry.race), "race_id");
+      const record = labs.find((value) => value.race_id === raceId);
+      if (!record) continue;
+      const view = labView(record);
+      const digest = JSON.stringify(view);
+      if (this.published.get(raceId) === digest) continue;
+      await this.api("/local-predictions/race-prediction", view);
+      this.published.set(raceId, digest);
+    }
   }
 
   /** Newest pre-start Lab record (provisional or formal copy) with a ranking. */

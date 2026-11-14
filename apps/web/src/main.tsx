@@ -113,6 +113,157 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
   );
 }
 
+const FACTOR_LABELS: [string, string][] = [
+  ["ability", "能力"], ["course", "コース"], ["pace", "展開"],
+  ["going", "馬場"], ["draw_weight", "枠・斤量"], ["horse_jockey_course", "騎手"],
+];
+const PACE_LABELS: Record<string, string> = { slow: "スロー", middle: "ミドル", high: "ハイ" };
+
+/** The fixed Lab prediction (provisional or formal copy) saved by the local worker. */
+function AutomaticPrediction({ api, race, fieldSize, finishOrder }: {
+  api: (path: string) => Promise<Row>;
+  race: Row;
+  fieldSize: number;
+  finishOrder: Json[];
+}) {
+  const latest = useRef(api);
+  latest.current = api;
+  const raceId = String(race.race_id);
+  const [record, setRecord] = useState<Row>();
+  const [unavailable, setUnavailable] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setRecord(undefined);
+    const load = async () => {
+      try {
+        const value = await latest.current("/local-predictions/race-prediction?race_id=" + encodeURIComponent(raceId));
+        if (active) {
+          setRecord(value);
+          setUnavailable(false);
+        }
+      } catch {
+        if (active) setUnavailable(true);
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 60_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [raceId]);
+  const finishOf = (n: Json | undefined) => {
+    const i = finishOrder.findIndex((group) =>
+      (Array.isArray(group) ? group : [group]).some((x) => Number(x) === Number(n)));
+    return i < 0 ? null : i + 1;
+  };
+  const horses = rows(record?.horses ?? []);
+  const provisional = record?.status === "provisional";
+  const missing = ((record?.missing_factors ?? []) as string[])
+    .map((key) => FACTOR_LABELS.find(([k]) => k === key)?.[1] ?? key);
+  return (
+    <div>
+      <h3>自動予想{horses.length > 0 && (provisional ? "（暫定）" : "（正式）")}</h3>
+      {unavailable && <p role="status">自動予想を取得できません。</p>}
+      {!record && !unavailable && <p>自動予想を確認中です。</p>}
+      {record && !horses.length && !unavailable && <p>このレースの自動予想はまだ保存されていません。</p>}
+      {horses.length > 0 && (
+        <>
+          <p>
+            保存 {time(record?.saved_at)}
+            {record?.model != null && <> · {String(record.model)}</>}
+            {record?.confidence != null && <> · 根拠の充足度 {Math.round(Number(record.confidence) * 100)}%</>}
+          </p>
+          {provisional && (
+            <p>
+              根拠が欠けた項目があるため暫定です（採用・精算の対象外）。
+              {missing.length > 0 && <> 欠測・弱い根拠: {missing.join("、")}</>}
+            </p>
+          )}
+          {record?.main_pace != null && (
+            <p>
+              <strong>展開 {PACE_LABELS[String(record.main_pace)] ?? String(record.main_pace)}</strong>
+              {record.main_pace_reason ? " · " + String(record.main_pace_reason) : ""}
+            </p>
+          )}
+          {record?.rationale != null && <p>{String(record.rationale)}</p>}
+          <div className="race-picks">
+            <span className="picks-label">上位</span>
+            {horses.slice(0, 5).map((h) => (
+              <span key={String(h.horse_number)} className="pick">
+                <Mark rank={h.rank} />
+                <HorseNo n={h.horse_number} fieldSize={fieldSize} size="sm" />
+                {String(h.horse_name ?? "")}
+              </span>
+            ))}
+          </div>
+          <details>
+            <summary>全馬の評価と根拠 {horses.length}頭</summary>
+            <div className="table-scroll">
+              <table className="horse-evaluations">
+                <thead>
+                  <tr>
+                    <th>印・順位</th>
+                    <th>馬</th>
+                    <th>6評価</th>
+                    <th>根拠</th>
+                    {finishOrder.length > 0 && <th>着順</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {horses.map((h) => (
+                    <tr key={String(h.horse_number)}>
+                      <td data-label="印・総合点">
+                        <Mark rank={h.rank} /> {String(h.rank)}位
+                        <small>{h.score == null ? "—" : Number(h.score).toFixed(1)}点</small>
+                      </td>
+                      <td data-label="馬">
+                        <span className="horse-cell">
+                          <HorseNo n={h.horse_number} fieldSize={fieldSize} />
+                          <strong>{String(h.horse_name ?? "")}</strong>
+                        </span>
+                      </td>
+                      <td data-label="6評価">
+                        {FACTOR_LABELS.map(([key, label]) => {
+                          const value = obj(h.components ?? {})[key];
+                          return (
+                            <span key={key}>
+                              {label} {typeof value === "number" ? Math.round(value) : "欠測"}{" "}
+                            </span>
+                          );
+                        })}
+                      </td>
+                      <td data-label="根拠">
+                        <p>
+                          {h.expected_position != null && <>想定位置 {String(h.expected_position)} · </>}
+                          {String(h.rationale || "未記録")}
+                        </p>
+                      </td>
+                      {finishOrder.length > 0 && (
+                        <td data-label="着順">{finishOf(h.horse_number) == null ? "—" : finishOf(h.horse_number) + "着"}</td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+          {rows(record?.scenarios ?? []).length > 0 && (
+            <details>
+              <summary>展開別の見立て</summary>
+              {rows(record?.scenarios ?? []).map((s, i) => (
+                <p key={i}>
+                  <strong>{PACE_LABELS[String(s.pace)] ?? String(s.pace)}</strong> {String(s.analysis)}
+                </p>
+              ))}
+            </details>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 const today = () =>
   new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const uid = () => crypto.randomUUID();
@@ -1049,6 +1200,14 @@ function App() {
                   <h2>このレースの状況</h2>
                   <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
                   <p>本人の仮想購入 {rows(detail.bets).filter((b) => b.status === "confirmed").length}券</p>
+                  {storage === "local" && (
+                    <AutomaticPrediction
+                      api={api}
+                      race={race}
+                      fieldSize={fieldSize}
+                      finishOrder={latestResult?.finish_order_json ? arr(latestResult, "finish_order_json") : []}
+                    />
+                  )}
                   {storage === "local" && <AutomaticBetPlans api={api} race={race} fieldSize={fieldSize} />}
                   {latestResult?.finish_order_json && (
                     <div className="race-picks result">
