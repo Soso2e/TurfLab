@@ -225,6 +225,14 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   // The 600-yen hit lane is fixed alongside and never reads odds.
   const hit = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => f.includes("-hit"))!), "utf8"));
   expect(hit).toMatchObject({ plan_lane: "hit", budget_yen: 600, odds_used: false });
+  expect(report.race_bet_plans).toContainEqual(expect.objectContaining({
+    race_id: "r1",
+    plans: [
+      expect.objectContaining({ lane: "hit", picks: hit.picks }),
+      expect.objectContaining({ lane: "ev", picks: plan.picks }),
+      expect.objectContaining({ lane: "evm", picks: [], skip_reason: anchored.skip_reason }),
+    ],
+  }));
   expect(issues).not.toContain("LOCAL_FILE_CONFLICT");
   // The six-factor prompt received the pack, never the odds file.
   const analysis = prompts.find((p) => p.includes("固定pack.research"))!;

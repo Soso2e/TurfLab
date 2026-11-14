@@ -22,6 +22,29 @@ import { wizardDraft, wizardRequest, wizardAnswer } from "./wizard-fixture";
 
 afterEach(() => vi.useRealTimers());
 
+it("reports a saved virtual bet after race day, even with incomplete odds", async () => {
+  const now = new Date("2026-11-15T02:00:00Z");
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-saved-bet-"));
+  const exchange = path.join(home, "exchange");
+  const race = { race_id: "r1", race_date_jst: "2026-11-14", scheduled_start_at: "2026-11-14T08:00:00Z" };
+  const picks = [{ ticket_type: "win", selections_json: [1], amount_yen: 100 }];
+  await immutableLocalFile(exchange, "plans/2026-11-14/r1-hit.json", JSON.stringify({ race_id: "r1", picks }));
+  await immutableLocalFile(exchange, "prerace/2026-11-14/r1.json", JSON.stringify({ odds_complete: false }));
+  const official_result = {
+    official_status: "official", finish_order_json: [[1]], entry_status_json: { "1": "finished" },
+    payouts: [{ ticket_type: "win", selections_json: [1], payout_per_100_yen: 450 }],
+  };
+  const api = async (url: string): Promise<Row> =>
+    url === "/daily-state" ? { races: [{ race, official_result }] } : {};
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", async () => ({}));
+  await worker.init();
+  const status = await worker.tick(now);
+  expect(status.race_bet_plans).toEqual([expect.objectContaining({
+    race_id: "r1", missing_ev_reason: "単勝オッズが全頭分そろわず未作成",
+    plans: [expect.objectContaining({ lane: "hit", picks, returned_yen: 450 })],
+  })]);
+});
+
 it("retains old comparisons and uses Core result IDs after the race leaves daily state", async () => {
   const now = new Date("2026-11-13T13:00:00Z");
   const home = await mkdtemp(path.join(tmpdir(), "turflab-outcome-replay-"));

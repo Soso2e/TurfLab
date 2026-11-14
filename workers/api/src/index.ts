@@ -481,12 +481,22 @@ export class TurfCoordinator {
         const bridgePath = new URL(request.url).pathname;
         if (bridgePath === "/api/local-predictions/status") {
           requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
-          if (request.method === "GET")
-            return response(await this.state.storage.get<Row>("local-predictions-status") ?? { status: "disabled" });
+          if (request.method === "GET") {
+            const status = await this.state.storage.get<Row>("local-predictions-status") ?? { status: "disabled" };
+            const plans = await this.state.storage.get<Row>("local-prediction-bet-plans");
+            return response({ ...status, ...plans });
+          }
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);
           requireCondition(["healthy", "failed", "running"].includes(String(input.status)), "状態が不正です");
-          await this.state.storage.put("local-predictions-status", input);
+          const { race_bet_plans, race_bet_plans_date, ...status } = input;
+          await this.state.storage.put({
+            "local-predictions-status": status,
+            ...(input.status === "healthy" && Array.isArray(race_bet_plans) &&
+              typeof race_bet_plans_date === "string" && {
+              "local-prediction-bet-plans": { race_bet_plans, race_bet_plans_date },
+            }),
+          });
           return response({ status: "saved" });
         }
         if (

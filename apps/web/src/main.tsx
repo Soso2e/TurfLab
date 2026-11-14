@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   arr,
@@ -42,6 +42,77 @@ const time = (n: Json | undefined) =>
         minute: "2-digit",
       })
     : "未取得";
+
+function AutomaticBetPlans({ api, race, fieldSize }: {
+  api: (path: string) => Promise<Row>;
+  race: Row;
+  fieldSize: number;
+}) {
+  const latest = useRef(api);
+  latest.current = api;
+  const [status, setStatus] = useState<Row>();
+  const [unavailable, setUnavailable] = useState(false);
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const value = await latest.current("/local-predictions/status");
+        if (active) {
+          setStatus(value);
+          setUnavailable(false);
+        }
+      } catch {
+        if (active) setUnavailable(true);
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+  const record = rows(status?.race_bet_plans ?? []).find((item) => item.race_id === race.race_id);
+  const lanes = [
+    { lane: "hit", label: "的中狙い（600円枠）", missing: record?.missing_hit_reason },
+    { lane: "ev", label: "期待値（400円枠）", missing: record?.missing_ev_reason },
+    { lane: "evm", label: "市場基準の期待値", missing: record?.missing_ev_reason },
+  ];
+  return (
+    <div>
+      <h3>自動ベット（シミュレーション）</h3>
+      {unavailable && <p role="status">自動ベットの最新状況を取得できません。</p>}
+      {!status && !unavailable && <p>自動ベットの状況を確認中です。</p>}
+      {status && !record && !unavailable && <p>このレースの自動ベット記録を確認できていません。</p>}
+      {record?.stage && <p>{String(record.stage)}</p>}
+      {record && lanes.map(({ lane, label, missing }) => {
+        const plan = rows(record.plans ?? []).find((item) => item.lane === lane);
+        const picks = rows(plan?.picks ?? []);
+        const stake = picks.reduce((sum, pick) => sum + Number(pick.amount_yen), 0);
+        if (!picks.length) return (
+          <p key={lane}><strong>{label}</strong> · {String(plan?.skip_reason ?? missing ?? "未作成")}</p>
+        );
+        return (
+          <details key={lane}>
+            <summary>
+              <strong>{label}</strong> · 自動保存済み {picks.length}点 {yen(stake)}
+              {" · "}{typeof plan?.returned_yen === "number" ? "仮想払戻 " + yen(plan.returned_yen) : "公式結果との照合待ち"}
+            </summary>
+            <p>保存 {time(plan?.fixed_at)}</p>
+            <ul>
+              {picks.map((pick, i) => (
+                <li key={i}>
+                  <TicketChip type={pick.ticket_type} selections={arr(pick, "selections_json")} fieldSize={fieldSize} /> {yen(pick.amount_yen)}
+                </li>
+              ))}
+            </ul>
+          </details>
+        );
+      })}
+    </div>
+  );
+}
+
 const today = () =>
   new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const uid = () => crypto.randomUUID();
@@ -978,6 +1049,7 @@ function App() {
                   <h2>このレースの状況</h2>
                   <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
                   <p>本人の仮想購入 {rows(detail.bets).filter((b) => b.status === "confirmed").length}券</p>
+                  {storage === "local" && <AutomaticBetPlans api={api} race={race} fieldSize={fieldSize} />}
                   {latestResult?.finish_order_json && (
                     <div className="race-picks result">
                       <span className="picks-label">着順</span>
