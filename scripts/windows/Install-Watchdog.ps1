@@ -6,9 +6,9 @@ $name = 'TurfLab-Watchdog'
 if (Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue) {
     throw "Task $name already exists. Inspect it before changing it."
 }
-$script = Join-Path $PSScriptRoot 'Start-AtLogon.ps1'
-$exe = Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe'
-$action = New-ScheduledTaskAction -Execute $exe -Argument "-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$script`""
+$script = Join-Path $PSScriptRoot 'Start-AtLogon-Hidden.vbs'
+$exe = Join-Path $env:SystemRoot 'System32/wscript.exe'
+$action = New-ScheduledTaskAction -Execute $exe -Argument "//B //NoLogo `"$script`""
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 15)
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10) -StartWhenAvailable
 $principal = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive
