@@ -16,7 +16,6 @@ import { DatabaseExplorer } from "./DatabaseExplorer";
 import { HorseRunsModal, RacePastRuns } from "./PastRuns";
 import {
   IconRace,
-  IconImport,
   IconChart,
   IconDatabase,
   IconSettings,
@@ -26,8 +25,11 @@ import {
   IconRefresh,
   IconArrowRight,
 } from "./Icons";
+import { RubberDock } from "./RubberDock";
 import {
   CopyButton,
+  ExpandCardList,
+  type ExpandCardItem,
   HoldConfirmButton,
   MorphIslandToast,
   NumberRoll,
@@ -80,10 +82,55 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
   }, []);
   const record = rows(status?.race_bet_plans ?? []).find((item) => item.race_id === race.race_id);
   const lanes = [
-    { lane: "hit", label: "的中狙い（600円枠）", missing: record?.missing_hit_reason },
-    { lane: "ev", label: "期待値（400円枠）", missing: record?.missing_ev_reason },
-    { lane: "evm", label: "市場基準の期待値", missing: record?.missing_ev_reason },
+    { lane: "hit", short: "的中", tone: "emerald" as const, label: "的中狙い（600円枠）", missing: record?.missing_hit_reason },
+    { lane: "ev", short: "EV", tone: "amber" as const, label: "期待値（400円枠）", missing: record?.missing_ev_reason },
+    { lane: "evm", short: "市場", tone: "blue" as const, label: "市場基準の期待値", missing: record?.missing_ev_reason },
   ];
+  const activeItems: ExpandCardItem[] = [];
+  const skippedLanes: { lane: string; label: string; reason: string }[] = [];
+  if (record) {
+    for (const { lane, short, tone, label, missing } of lanes) {
+      const plan = rows(record.plans ?? []).find((item) => item.lane === lane);
+      const picks = rows(plan?.picks ?? []);
+      const stake = picks.reduce((sum, pick) => sum + Number(pick.amount_yen), 0);
+      if (!picks.length) {
+        skippedLanes.push({
+          lane,
+          label,
+          reason: String(plan?.skip_reason ?? missing ?? "未作成"),
+        });
+        continue;
+      }
+      const settledText =
+        typeof plan?.returned_yen === "number"
+          ? `仮想払戻 ${yen(plan.returned_yen)}`
+          : "公式結果との照合待ち";
+      activeItems.push({
+        id: `auto-${lane}`,
+        title: label,
+        subtitle: `自動保存済み ${picks.length}点 · ${settledText}`,
+        badge: short,
+        badgeTone: tone,
+        expandedHeader: `${label} · 合計 ${yen(stake)}`,
+        value: yen(stake),
+        summary: (
+          <div className="expand-card-picks">
+            {picks.map((pick, i) => (
+              <div className="expand-card-pick-row" key={i}>
+                <TicketChip
+                  type={pick.ticket_type}
+                  selections={arr(pick, "selections_json")}
+                  fieldSize={fieldSize}
+                />
+                <span className="expand-card-pick-amount">{yen(pick.amount_yen)}</span>
+              </div>
+            ))}
+          </div>
+        ),
+        chips: [`保存 ${time(plan?.fixed_at)}`, `${picks.length}点`, settledText],
+      });
+    }
+  }
   return (
     <div>
       <h3>自動ベット（シミュレーション）</h3>
@@ -91,30 +138,12 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
       {!status && !unavailable && <p>自動ベットの状況を確認中です。</p>}
       {status && !record && !unavailable && <p>このレースの自動ベット記録を確認できていません。</p>}
       {record?.stage && <p>{String(record.stage)}</p>}
-      {record && lanes.map(({ lane, label, missing }) => {
-        const plan = rows(record.plans ?? []).find((item) => item.lane === lane);
-        const picks = rows(plan?.picks ?? []);
-        const stake = picks.reduce((sum, pick) => sum + Number(pick.amount_yen), 0);
-        if (!picks.length) return (
-          <p key={lane}><strong>{label}</strong> · {String(plan?.skip_reason ?? missing ?? "未作成")}</p>
-        );
-        return (
-          <details key={lane}>
-            <summary>
-              <strong>{label}</strong> · 自動保存済み {picks.length}点 {yen(stake)}
-              {" · "}{typeof plan?.returned_yen === "number" ? "仮想払戻 " + yen(plan.returned_yen) : "公式結果との照合待ち"}
-            </summary>
-            <p>保存 {time(plan?.fixed_at)}</p>
-            <ul>
-              {picks.map((pick, i) => (
-                <li key={i}>
-                  <TicketChip type={pick.ticket_type} selections={arr(pick, "selections_json")} fieldSize={fieldSize} /> {yen(pick.amount_yen)}
-                </li>
-              ))}
-            </ul>
-          </details>
-        );
-      })}
+      {activeItems.length > 0 && <ExpandCardList items={activeItems} />}
+      {skippedLanes.map((s) => (
+        <p key={s.lane}>
+          <strong>{s.label}</strong> · {s.reason}
+        </p>
+      ))}
     </div>
   );
 }
@@ -658,69 +687,41 @@ function App() {
       await reload();
     });
   }
-  const sidebarPill = useSlidingPill(tab);
   const trackPill = useSlidingPill(trackFilter, [races.length, trackNames.length, tab]);
+  const dockActiveId = tab === "detail" ? "today" : tab;
+  const dockItems = [
+    { id: "today", title: "レース", icon: IconRace },
+    { id: "stats", title: "ダッシュボード", icon: IconChart },
+    { id: "db", title: "データベース", icon: IconDatabase },
+    { id: "settings", title: "設定", icon: IconSettings },
+  ];
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <a
-          className="brand"
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            setTab("today");
-          }}
-        >
-          <span className="brand-mark">T</span>
-          <span>
-            TurfLab<small>競馬分析ノート</small>
-          </span>
-        </a>
-        <div className="side-label">WORKSPACE</div>
-        <nav ref={sidebarPill.containerRef}>
-          <div className="sidebar-nav-pill" style={sidebarPill.pillStyle} aria-hidden="true" />
-          {[
-            { id: "today", title: "本日のレース", no: "01", icon: IconRace },
-            { id: "import", title: "データを取り込む", no: "02", icon: IconImport },
-            { id: "stats", title: "成績と検証", no: "03", icon: IconChart },
-            { id: "db", title: "データベース", no: "04", icon: IconDatabase },
-            { id: "settings", title: "接続とバックアップ", no: "05", icon: IconSettings },
-          ].map((item) => {
-            const IconComp = item.icon;
-            return (
-              <button
-                key={item.id}
-                className={tab === item.id ? "active" : ""}
-                data-pill-active={tab === item.id ? "true" : undefined}
-                onClick={() => {
-                  setTab(item.id);
-                  if (item.id === "stats")
-                    void action(async () => setStats(await api("/stats")));
-                }}
-              >
-                <IconComp size={15} className="nav-icon" />
-                {item.title}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="side-bottom">
-          <span className="dot" /> 個人用・仮想購入のみ
-          <p>
-            ChatGPT / CLI ↔ Local DB ↔ Web
-            <br />
-            表示・予算は日本時間
-          </p>
-        </div>
-      </aside>
+    <div className="app app-dock-layout">
       <main>
         <header>
-          <div className="breadcrumb">
-            MY RESEARCH <span>/</span> {date.replaceAll("-", ".")}
+          <div className="header-left">
+            <a
+              className="brand header-brand"
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                setTab("today");
+              }}
+            >
+              <span className="brand-mark">T</span>
+              <span>
+                TurfLab<small>競馬分析ノート</small>
+              </span>
+            </a>
+            <div className="breadcrumb">
+              MY RESEARCH <span>/</span> {date.replaceAll("-", ".")}
+            </div>
           </div>
-          <span className="connection">
-            {token ? "ローカルDB (SQLite)" : "未接続"}
-          </span>
+          <div className="header-right">
+            <span className="connection">
+              {token ? "ローカルDB (SQLite)" : "未接続"}
+            </span>
+          </div>
         </header>
         {!token ? (
           <section className="login panel">
@@ -926,7 +927,7 @@ function App() {
                       <span className="empty-icon">◎</span>
                       <h3>この日のレースは未登録です</h3>
                       <p>出馬表の保存後にここに表示します。自動処理の状態は下で確認できます。</p>
-                      <button onClick={() => setTab("import")}>
+                      <button onClick={() => setTab("settings")}>
                         JSONを取り込む
                       </button>
                     </div>
@@ -1145,6 +1146,20 @@ function App() {
             )}
             {tab === "detail" && detail && race && (
               <>
+                <div className="detail-sticky-bar">
+                  <button
+                    type="button"
+                    className="detail-back-btn"
+                    onClick={() => setTab("today")}
+                  >
+                    ← 一覧へ
+                  </button>
+                  <div className="detail-sticky-title">
+                    <span>{String(obj(detail.track).name)}</span>
+                    <b>{String(race.race_number)}R</b>
+                    <span className="detail-sticky-name">{String(race.name)}</span>
+                  </div>
+                </div>
                 <div className="page-heading">
                   <div>
                     <p className="race-heading-r">
@@ -1153,7 +1168,7 @@ function App() {
                     </p>
                     <h1>{String(race.name)}</h1>
                     {storage === "local" && snapshotId && (
-                      <button onClick={() => setTab("import")}>
+                      <button onClick={() => setTab("settings")}>
                         このsnapshotで入力パック
                       </button>
                     )}
@@ -1172,7 +1187,6 @@ function App() {
                       })()}
                     </div>
                   </div>
-                  <button onClick={() => setTab("today")}>← 一覧へ</button>
                 </div>
                 <section className="panel">
                   <h2>このレースの状況</h2>
@@ -1872,63 +1886,100 @@ function App() {
                   )}
                   <h3>本人購入の記録</h3>
                   {rows(detail.bets).length ? (
-                    rows(detail.bets).map((b) => {
-                      const settled = rows(detail.settlements).find((s) =>
-                        s.bet_id === b.bet_id && s.result_id === latestResult?.result_id);
-                      return (
-                      <div className="run-row" key={String(b.bet_id)}>
-                        <span>
-                          {ticketTypeName(b.ticket_type)}{" "}
-                          {arr(b, "selections_json").join("-")}
-                        </span>
-                        <strong>{yen(b.amount_yen)}</strong>
-                        <span>{settled
-                          ? `${Number(settled.refund_yen) > 0 ? "返還" : Number(settled.payout_yen) > 0 ? "的中" : "不的中"} · 損益 ${yen(settled.net_yen)}`
-                          : b.status === "confirmed" && Date.parse(String(race.scheduled_start_at)) <= Date.now()
+                    <ExpandCardList
+                      items={rows(detail.bets).map((b): ExpandCardItem => {
+                        const settled = rows(detail.settlements).find(
+                          (s) =>
+                            s.bet_id === b.bet_id &&
+                            s.result_id === latestResult?.result_id,
+                        );
+                        const selections = arr(b, "selections_json");
+                        const resultLabel = settled
+                          ? Number(settled.refund_yen) > 0
+                            ? `返還 · 損益 ${yen(settled.net_yen)}`
+                            : Number(settled.payout_yen) > 0
+                              ? `的中 · 損益 ${yen(settled.net_yen)}`
+                              : `不的中 · 損益 ${yen(settled.net_yen)}`
+                          : b.status === "confirmed" &&
+                              Date.parse(String(race.scheduled_start_at)) <= Date.now()
                             ? "精算待ち"
-                            : statusNames[String(b.status)]}</span>
-                        <button
-                          disabled={
-                            busy || b.status !== "confirmed" || !canEditBet
-                          }
-                          onClick={() => {
-                            setEditingBet(b);
-                            setBetType(String(b.ticket_type));
-                            setSelections(arr(b, "selections_json").join("-"));
-                            setAmount(Number(b.amount_yen));
-                            setActivePrediction(String(b.prediction_id));
-                            setConfirmed(false);
-                            setOperation(uid());
-                          }}
-                        >
-                          変更
-                        </button>
-                        <button
-                          disabled={busy || b.status === "void" || !canEditBet}
-                          onClick={() =>
-                            void action(async () => {
-                              await api(
-                                "/bets/" +
-                                  encodeURIComponent(String(b.bet_id)) +
-                                  "/void",
-                                { operation_id: uid() },
-                              );
-                              setDetail(
-                                await api(
-                                  "/races/" +
-                                    encodeURIComponent(String(race.race_id)),
-                                ),
-                              );
-                              await reload();
-                              setNotice("発走前の購入取消を記録しました");
-                            })
-                          }
-                        >
-                          取消
-                        </button>
-                      </div>
-                      );
-                    })
+                            : statusNames[String(b.status)];
+                        const tone = settled
+                          ? Number(settled.payout_yen) > 0
+                            ? "emerald"
+                            : Number(settled.refund_yen) > 0
+                              ? "amber"
+                              : "slate"
+                          : b.status === "void"
+                            ? "slate"
+                            : "blue";
+                        return {
+                          id: String(b.bet_id),
+                          title: `${ticketTypeName(b.ticket_type)} ${selections.join("-")}`,
+                          subtitle: resultLabel,
+                          badge: ticketTypeName(b.ticket_type).slice(0, 2),
+                          badgeTone: tone,
+                          expandedHeader: `${ticketTypeName(b.ticket_type)} ${selections.join("-")} · ${yen(b.amount_yen)}`,
+                          value: yen(b.amount_yen),
+                          summary: (
+                            <div className="expand-card-picks">
+                              <div className="expand-card-pick-row">
+                                <TicketChip
+                                  type={b.ticket_type}
+                                  selections={selections}
+                                  fieldSize={fieldSize}
+                                />
+                                <span className="expand-card-pick-amount">
+                                  {yen(b.amount_yen)}
+                                </span>
+                              </div>
+                            </div>
+                          ),
+                          chips: [resultLabel],
+                          action: (
+                            <>
+                              <button
+                                disabled={busy || b.status !== "confirmed" || !canEditBet}
+                                onClick={() => {
+                                  setEditingBet(b);
+                                  setBetType(String(b.ticket_type));
+                                  setSelections(selections.join("-"));
+                                  setAmount(Number(b.amount_yen));
+                                  setActivePrediction(String(b.prediction_id));
+                                  setConfirmed(false);
+                                  setOperation(uid());
+                                }}
+                              >
+                                変更
+                              </button>
+                              <button
+                                disabled={busy || b.status === "void" || !canEditBet}
+                                onClick={() =>
+                                  void action(async () => {
+                                    await api(
+                                      "/bets/" +
+                                        encodeURIComponent(String(b.bet_id)) +
+                                        "/void",
+                                      { operation_id: uid() },
+                                    );
+                                    setDetail(
+                                      await api(
+                                        "/races/" +
+                                          encodeURIComponent(String(race.race_id)),
+                                      ),
+                                    );
+                                    await reload();
+                                    setNotice("発走前の購入取消を記録しました");
+                                  })
+                                }
+                              >
+                                取消
+                              </button>
+                            </>
+                          ),
+                        };
+                      })}
+                    />
                   ) : (
                     <p>まだ購入していません。</p>
                   )}
@@ -1992,179 +2043,6 @@ function App() {
                     <summary>観測・原因仮説・未確認・次回検証</summary>
                     <JsonView value={detail.reviews} />
                   </details>
-                </section>
-              </>
-            )}
-            {tab === "import" && (
-              <>
-                <div className="page-heading">
-                  <div>
-                    <p className="eyebrow">IMPORT & REVIEW</p>
-                    <h1>データを取り込む</h1>
-                    <p>ChatGPT の出力を検証し、保存前に確認する。</p>
-                  </div>
-                  
-                </div>
-                {storage === "local" && (
-                  <RaceImportWizard
-                    api={api}
-                    busy={busy}
-                    action={action}
-                    onOpen={openRace}
-                    initialSnapshot={snapshotId}
-                  />
-                )}
-                <section className="panel">
-                  <div className="section-heading">
-                    <h2>JSON を貼り付ける</h2>
-                    <select
-                      aria-label="入力種別"
-                      value={mode}
-                      onChange={(e) => {
-                        setMode(e.target.value);
-                        setPreview(undefined);
-                        setOutput(undefined);
-                      }}
-                    >
-                      {[
-                        ["prediction", "予想"],
-                        ["pipeline", "Core：1Rの計算・参考プラン確定"],
-                        ["pipelineBatch", "Core：最大5Rを順番に確定"],
-                        ["master", "レース・基礎データ"],
-                        ["result", "公式結果・払戻"],
-                        ["review", "翌朝レビュー"],
-                        ["numeric", "数値シミュレーション"],
-                        ["backtest", "時間順の再評価"],
-                      ]
-                        .filter(
-                          ([v]) =>
-                            verificationMode ||
-                            !["numeric", "backtest"].includes(v),
-                        )
-                        .map(([v, n]) => (
-                          <option key={v} value={v}>
-                            {n}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                  <label className="check">
-                    <input
-                      type="checkbox"
-                      checked={verificationMode}
-                      onChange={(e) => {
-                        setVerificationMode(e.target.checked);
-                        setMode("prediction");
-                        setPreview(undefined);
-                        setOutput(undefined);
-                      }}
-                    />
-                    検証用の数値計算を表示する
-                  </label>
-                  <p>
-                    予想・展開/数値シミュレーションはChatGPT / CLIが担当します。Webは結果を受け取り、本人Betを管理します。
-                  </p>
-                  <p className="muted">
-                    {mode.startsWith("pipeline")
-                      ? "Coreは6評価項目から総合点・順位を計算し、3展開を検証して参考プランを自動確定します。本人購入は別操作です。失敗時は同じJSONで再開します。"
-                      : "確定・本人購入は別操作です。予想取り込みだけで購入は発生しません。JSON形式とサンプルは設計資料を参照してください。"}
-                  </p>
-                  <label className="file-button">
-                    JSONファイルを開く
-                    <input
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file)
-                          void action(async () => {
-                            if (file.size > 262144)
-                              throw new Error("入力は256KiB以内です");
-                            changedEditor(await file.text());
-                          });
-                      }}
-                    />
-                  </label>
-                  <textarea
-                    aria-label="取り込みJSON"
-                    value={editor}
-                    onChange={(e) => changedEditor(e.target.value)}
-                    rows={18}
-                    spellCheck={false}
-                    placeholder={
-                      '{\n  "schema_version": "0.2",\n  "import_id": "…",\n  "predictions": […]\n}'
-                    }
-                  />
-                  {mode === "numeric" && (
-                    <label>
-                      数値実行を紐づける予想 ID
-                      <input
-                        value={activePrediction}
-                        onChange={(e) => setActivePrediction(e.target.value)}
-                      />
-                    </label>
-                  )}
-                  <div className="toolbar">
-                    {mode === "prediction" && (
-                      <button
-                        disabled={busy || !editor}
-                        onClick={() =>
-                          void action(async () => {
-                            setPreview(
-                              await api(
-                                "/imports/validate",
-                                JSON.parse(editor),
-                              ),
-                            );
-                          })
-                        }
-                      >
-                        検証・プレビュー
-                      </button>
-                    )}
-                    <button
-                      className="primary"
-                      disabled={
-                        busy || !editor || (mode === "prediction" && !preview)
-                      }
-                      onClick={() => void submitJSON()}
-                    >
-                      {busy
-                        ? "処理中…"
-                        : mode === "backtest"
-                          ? "再評価を実行"
-                          : mode.startsWith("pipeline")
-                            ? "計算・検証して参考プランを確定"
-                            : "内容を確認して保存"}
-                    </button>
-                  </div>
-                  {preview && (
-                    <>
-                      <h3>検証結果</h3>
-                      {rows(preview.predictions).map((p) => (
-                        <div
-                          className={p.valid ? "notice" : "alert"}
-                          key={String(p.prediction_id)}
-                        >
-                          {String(p.prediction_id)} ·{" "}
-                          {p.valid ? "形式・参照・時点検証OK" : String(p.error)}
-                          {p.warnings && (
-                            <p>{arr(p, "warnings").join(" / ")}</p>
-                          )}
-                        </div>
-                      ))}
-                      <details>
-                        <summary>保存内容</summary>
-                        <JsonView value={JSON.parse(editor)} />
-                      </details>
-                    </>
-                  )}
-                  {output && (
-                    <>
-                      <h3>処理結果</h3>
-                      <JsonView value={output} />
-                    </>
-                  )}
                 </section>
               </>
             )}
@@ -2300,15 +2178,15 @@ function App() {
               <>
                 <div className="page-heading">
                   <div>
-                    <p className="eyebrow">CONNECTION & RECORDS</p>
-                    <h1>接続とバックアップ</h1>
-                    <p>ローカルSQLiteデータベースを正本として使い、予想の版と根拠を保管する。</p>
+                    <p className="eyebrow">SETTINGS & DATA</p>
+                    <h1>設定</h1>
+                    <p>接続・バックアップと、レースや予想データの取り込みを管理する。</p>
                   </div>
                 </div>
                 <section className="panel">
                   <h2>接続状態</h2>
                   <p>
-                    ローカルSQLiteデータベースを使用しています。全29テーブルのレコードは「04 データベース」から閲覧できます。
+                    ローカルSQLiteデータベースを使用しています。全テーブルのレコードは「データベース」タブから閲覧できます。
                   </p>
                   <p>
                     分析元: 既存 ChatGPT タスク（接続検証待ち） · 有料 AI API:
@@ -2369,6 +2247,161 @@ function App() {
                   </p>
                   {output && <JsonView value={output} />}
                 </section>
+                {storage === "local" && (
+                  <RaceImportWizard
+                    api={api}
+                    busy={busy}
+                    action={action}
+                    onOpen={openRace}
+                    initialSnapshot={snapshotId}
+                  />
+                )}
+                <section className="panel">
+                  <div className="section-heading">
+                    <h2>JSON を貼り付ける</h2>
+                    <select
+                      aria-label="入力種別"
+                      value={mode}
+                      onChange={(e) => {
+                        setMode(e.target.value);
+                        setPreview(undefined);
+                        setOutput(undefined);
+                      }}
+                    >
+                      {[
+                        ["prediction", "予想"],
+                        ["pipeline", "Core：1Rの計算・参考プラン確定"],
+                        ["pipelineBatch", "Core：最大5Rを順番に確定"],
+                        ["master", "レース・基礎データ"],
+                        ["result", "公式結果・払戻"],
+                        ["review", "翌朝レビュー"],
+                        ["numeric", "数値シミュレーション"],
+                        ["backtest", "時間順の再評価"],
+                      ]
+                        .filter(
+                          ([v]) =>
+                            verificationMode ||
+                            !["numeric", "backtest"].includes(v),
+                        )
+                        .map(([v, n]) => (
+                          <option key={v} value={v}>
+                            {n}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                  <label className="check">
+                    <input
+                      type="checkbox"
+                      checked={verificationMode}
+                      onChange={(e) => {
+                        setVerificationMode(e.target.checked);
+                        setMode("prediction");
+                        setPreview(undefined);
+                        setOutput(undefined);
+                      }}
+                    />
+                    検証用の数値計算を表示する
+                  </label>
+                  <p>
+                    予想・展開/数値シミュレーションはChatGPT / CLIが担当します。Webは結果を受け取り、本人Betを管理します。
+                  </p>
+                  <p className="muted">
+                    {mode.startsWith("pipeline")
+                      ? "Coreは6評価項目から総合点・順位を計算し、3展開を検証して参考プランを自動確定します。本人購入は別操作です。失敗時は同じJSONで再開します。"
+                      : "確定・本人購入は別操作です。予想取り込みだけで購入は発生しません。JSON形式とサンプルは設計資料を参照してください。"}
+                  </p>
+                  <label className="file-button">
+                    JSONファイルを開く
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file)
+                          void action(async () => {
+                            if (file.size > 262144)
+                              throw new Error("入力は256KiB以内です");
+                            changedEditor(await file.text());
+                          });
+                      }}
+                    />
+                  </label>
+                  <textarea
+                    aria-label="取り込みJSON"
+                    value={editor}
+                    onChange={(e) => changedEditor(e.target.value)}
+                    rows={12}
+                    spellCheck={false}
+                    placeholder={
+                      '{\n  "schema_version": "0.2",\n  "import_id": "…",\n  "predictions": […]\n}'
+                    }
+                  />
+                  {mode === "numeric" && (
+                    <label>
+                      数値実行を紐づける予想 ID
+                      <input
+                        value={activePrediction}
+                        onChange={(e) => setActivePrediction(e.target.value)}
+                      />
+                    </label>
+                  )}
+                  <div className="toolbar">
+                    {mode === "prediction" && (
+                      <button
+                        disabled={busy || !editor}
+                        onClick={() =>
+                          void action(async () => {
+                            setPreview(
+                              await api(
+                                "/imports/validate",
+                                JSON.parse(editor),
+                              ),
+                            );
+                          })
+                        }
+                      >
+                        検証・プレビュー
+                      </button>
+                    )}
+                    <button
+                      className="primary"
+                      disabled={
+                        busy || !editor || (mode === "prediction" && !preview)
+                      }
+                      onClick={() => void submitJSON()}
+                    >
+                      {busy
+                        ? "処理中…"
+                        : mode === "backtest"
+                          ? "再評価を実行"
+                          : mode.startsWith("pipeline")
+                            ? "計算・検証して参考プランを確定"
+                            : "内容を確認して保存"}
+                    </button>
+                  </div>
+                  {preview && (
+                    <>
+                      <h3>検証結果</h3>
+                      {rows(preview.predictions).map((p) => (
+                        <div
+                          className={p.valid ? "notice" : "alert"}
+                          key={String(p.prediction_id)}
+                        >
+                          {String(p.prediction_id)} ·{" "}
+                          {p.valid ? "形式・参照・時点検証OK" : String(p.error)}
+                          {p.warnings && (
+                            <p>{arr(p, "warnings").join(" / ")}</p>
+                          )}
+                        </div>
+                      ))}
+                      <details>
+                        <summary>保存内容</summary>
+                        <JsonView value={JSON.parse(editor)} />
+                      </details>
+                    </>
+                  )}
+                </section>
               </>
             )}
           </>
@@ -2376,7 +2409,20 @@ function App() {
         <footer>
           TurfLab <span>予想の根拠と、本人の判断を記録する。</span>
         </footer>
-            </main>
+      </main>
+
+      {token && (
+        <RubberDock
+          items={dockItems}
+          activeId={dockActiveId}
+          onSelect={(id) => {
+            setTab(id);
+            if (id === "stats") {
+              void action(async () => setStats(await api("/stats")));
+            }
+          }}
+        />
+      )}
 
       {/* Chat Review Modal */}
       {selectedChatReview && (

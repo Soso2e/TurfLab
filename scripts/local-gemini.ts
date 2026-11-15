@@ -1,6 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { obj, type Row } from "../packages/shared/src/domain";
 import { extractJson, predictWithCodex } from "./local-codex";
 import { emitOperationalEvent } from "../packages/shared/src/operational-event";
@@ -38,25 +39,25 @@ export async function predictWithGemini(
     const child = spawn(
       "agy",
       [
-        "-p",
-        "-",
         "--model",
         model,
+        "--input-format",
+        "stream-json",
         "--output-format",
-        "json",
+        "stream-json",
         "--disable-slash-commands",
       ],
       {
         cwd: directory,
         env,
         windowsHide: true,
-        shell: process.platform === "win32",
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
     let bytes = 0;
     let stopped = false;
     let out = "";
+    const decoder = new StringDecoder("utf8");
     const stop = () => {
       stopped = true;
       if (process.platform === "win32" && child.pid) {
@@ -70,7 +71,7 @@ export async function predictWithGemini(
     const timer = setTimeout(stop, 15 * 60_000);
     child.stdout.on("data", (chunk: Buffer) => {
       bytes += chunk.length;
-      out += chunk.toString("utf8");
+      out += decoder.write(chunk);
       if (bytes > 8_000_000) stop();
     });
     child.stderr.on("data", () => {});
@@ -83,51 +84,31 @@ export async function predictWithGemini(
       if (stopped || code !== 0) {
         reject(new Error(stopped ? "GEMINI_TIMEOUT" : "GEMINI_EXIT_FAILED"));
       } else {
-        resolve(out);
+        resolve(out + decoder.end());
       }
     });
     child.stdin.on("error", () => {});
-    child.stdin.end(geminiPrompt);
+    child.stdin.end(JSON.stringify({ event: "user", message: { content: geminiPrompt } }) + "\n");
   });
-
-  let rawResult = stdout;
-  try {
-    const parsed = JSON.parse(stdout);
-    if (parsed && typeof parsed === "object") {
-      if (parsed.structured_output && typeof parsed.structured_output === "object") {
-        const document = obj(parsed.structured_output);
-        await writeFile(
-          output,
-          JSON.stringify({ document: JSON.stringify(document) }),
-        );
-        await writeFile(
-          path.join(directory, "receipt.json"),
-          JSON.stringify({
-            provider: "gemini",
-            model,
-            started_at: startedAt,
-            finished_at: new Date().toISOString(),
-            exit_code: 0,
-          }),
-        );
-        return document;
-      }
-      if (typeof parsed.response === "string") {
-        rawResult = parsed.response;
-      }
-    }
-  } catch {
-    // fall through to extractJson
-  }
 
   let document: Row;
   try {
-    document = extractJson(rawResult);
+    let result: Row | undefined;
+    for (const line of stdout.split(/\r?\n/u)) {
+      if (!line.trim()) continue;
+      const event = obj(JSON.parse(line));
+      if (event.event === "result") result = obj(event.result);
+    }
+    if (!result || result.status !== "SUCCESS") throw new Error("GEMINI_RESULT_FAILED");
+    const structured = result.structured_output;
+    document = structured && typeof structured === "object" && !Array.isArray(structured)
+      ? obj(structured)
+      : extractJson(typeof result.response === "string" ? result.response : "");
   } catch (error) {
-    // Keep what the CLI actually printed (local job folder only), so a parse
-    // failure can be diagnosed instead of silently falling back every time.
-    await writeFile(path.join(directory, "gemini-raw.txt"), stdout.slice(0, 20_000)).catch(() => {});
-    throw error;
+    // Keep the end of the stream so the final result is available for diagnosis.
+    await writeFile(path.join(directory, "gemini-raw.txt"), stdout.slice(-20_000)).catch(() => {});
+    if (error instanceof Error && error.message === "GEMINI_RESULT_FAILED") throw error;
+    throw new Error("GEMINI_OUTPUT_INVALID");
   }
   await writeFile(
     output,

@@ -1,5 +1,12 @@
 # PROGRESS.md
 
+## 2026-11-14 Gemini CLIへの調査指示の受け渡し
+
+- `agy -p -` と標準入力では短い指示でも挨拶が返ることを再現。同じ指示を `-p` の値にすると指定JSONが返った。
+- `scripts/local-gemini.ts` で公式のNDJSON入力に切り替え、成功した `result` のJSONを既存の保存処理に渡す。Windowsでは `agy` を直接起動し、失敗時の診断にストリーム末尾を残す。
+- Windowsの実CLI・Gemini 3.8 Flash Mediumで、日本語を含む4万文字の指示から指定JSONとGeminiのreceiptを取得。高知競馬場の一周距離調査では約150秒で1,100mのJSONを取得。型・lint・314テスト成功。
+- 23:42 JSTに本番の予想Workerを再起動し、初回周期の正常終了を確認。再起動後の自動Gemini呼び出しと全頭調査は未確認。
+
 ## 2026-11-14 Windows自動起動のコンソール非表示
 
 - ログオンと15分間隔の監視タスクを、GUI実行ファイル `wscript.exe` から PowerShell を非表示で起動する方式に変更。既存タスク定義を退避し、実機で監視タスクを起動して終了コード0、起動ログ、Tailscale Serveの稼働を確認。ゲーム中の画面表示と次回ログオンは未確認。

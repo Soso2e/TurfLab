@@ -35,7 +35,10 @@ import {
   type Change,
 } from "./storage";
 import { adopt, lockPrediction, preview, saveImport } from "./imports";
-import { enrichCoursesAndPerformances } from "./maintenance";
+import {
+  backfillProvisional,
+  enrichCoursesAndPerformances,
+} from "./maintenance";
 import { prepareRace, runBatch, runRace, safeFailure } from "./race-pipeline";
 import {
   previewMaster,
@@ -317,6 +320,10 @@ export async function route(
   if (path === "/models/adopt") return adoptModel(repo, input, now);
   if (path === "/maintenance/enrich") {
     return enrichCoursesAndPerformances(repo, now);
+  }
+  if (path === "/maintenance/provisional-backfill") {
+    requireCondition(!sheets, "暫定予想のバックフィルはlocal保存専用です");
+    return backfillProvisional(repo, input, now);
   }
   if (path === "/restore") {
     await restoreEmpty(repo, input as unknown as Backup);

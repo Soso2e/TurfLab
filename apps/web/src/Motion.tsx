@@ -415,3 +415,350 @@ export function NumberRoll({
 
   return <>{format(display)}</>;
 }
+
+/**
+ * 7. ExpandCardList (DesignBookmark "Expand Card" 準拠)
+ * 複数の行カードを並べ、クリックした1枚をスプリング物理で最上段へ引き上げつつ展開する。
+ * 同じスプリング定数 (p: 240/21, a: 260/28, y: 300/26, o: 300/30, s: 300/26) を使用。
+ */
+export interface ExpandCardItem {
+  id: string;
+  title: string;
+  subtitle?: React.ReactNode;
+  badge?: React.ReactNode;
+  expandedHeader?: React.ReactNode;
+  badgeTone?: "emerald" | "amber" | "slate" | "blue";
+  value?: React.ReactNode;
+  summary: React.ReactNode;
+  chips?: React.ReactNode[];
+  action?: React.ReactNode;
+}
+
+interface SpringState {
+  x: number;
+  v: number;
+  t: number;
+  k: number;
+  c: number;
+}
+
+function makeSpring(x: number, k: number, c: number, reduced: boolean): SpringState {
+  return { x, v: 0, t: x, k, c: reduced ? 2 * Math.sqrt(k) : c };
+}
+
+function stepSpring(s: SpringState, dt: number): void {
+  const a = -s.k * (s.x - s.t) - s.c * s.v;
+  s.v += a * dt;
+  s.x += s.v * dt;
+}
+
+function isSettled(s: SpringState): boolean {
+  return Math.abs(s.x - s.t) < 0.001 && Math.abs(s.v) < 0.01;
+}
+
+export function ExpandCardList({
+  items,
+  className = "",
+  emptyMessage,
+}: {
+  items: ExpandCardItem[];
+  className?: string;
+  emptyMessage?: string;
+}) {
+  const ROW = 72;
+  const GAP = 8;
+  const THUMB_EXPANDED_H = 88;
+  const MORE_TOP = 166;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const rowRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const thumbRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const headRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const valRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const moreRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const openIndexRef = useRef<number>(-1);
+  const [openId, setOpenId] = useState<string | null>(null);
+
+  const springsRef = useRef<
+    {
+      p: SpringState;
+      a: SpringState;
+      y: SpringState;
+      o: SpringState;
+      s: SpringState;
+    }[]
+  >([]);
+  const listHRef = useRef<SpringState | null>(null);
+  const rafRef = useRef<number>(0);
+  const delayTimerRef = useRef<number | null>(null);
+
+  const closedListHeight = Math.max(0, items.length * ROW + Math.max(0, items.length - 1) * GAP);
+
+  const ensureSprings = useCallback(() => {
+    const reduced = prefersReducedMotion();
+    if (springsRef.current.length !== items.length) {
+      springsRef.current = items.map((_, i) => ({
+        p: makeSpring(0, 240, 21, reduced),
+        a: makeSpring(0, 260, 28, reduced),
+        y: makeSpring(i * (ROW + GAP), 300, 26, reduced),
+        o: makeSpring(1, 300, 30, reduced),
+        s: makeSpring(1, 300, 26, reduced),
+      }));
+      listHRef.current = makeSpring(closedListHeight, 240, 21, reduced);
+      openIndexRef.current = -1;
+    }
+  }, [items, closedListHeight]);
+
+  const renderFrame = useCallback(() => {
+    const listEl = listRef.current;
+    const W = listEl ? listEl.offsetWidth : 320;
+    const springs = springsRef.current;
+
+    if (listEl && listHRef.current) {
+      listEl.style.height = `${Math.max(ROW, listHRef.current.x).toFixed(2)}px`;
+    }
+
+    springs.forEach((sp, idx) => {
+      const el = rowRefs.current[idx];
+      const thumb = thumbRefs.current[idx];
+      const head = headRefs.current[idx];
+      const val = valRefs.current[idx];
+      const more = moreRefs.current[idx];
+      if (!el || !thumb || !head || !val || !more) return;
+
+      const p = sp.p.x;
+      const q = Math.max(0, Math.min(1, p));
+      const full = MORE_TOP + more.offsetHeight + 16;
+
+      el.style.height = `${(ROW + p * (full - ROW)).toFixed(2)}px`;
+      el.style.transform = `translateY(${sp.y.x.toFixed(2)}px) scale(${sp.s.x.toFixed(4)})`;
+      el.style.opacity = Math.max(0, Math.min(1, sp.o.x)).toFixed(3);
+      el.style.pointerEvents = sp.o.t > 0.5 ? "auto" : "none";
+
+      thumb.style.width = `${(48 + q * Math.max(0, W - 24 - 48)).toFixed(2)}px`;
+      thumb.style.height = `${Math.max(48, 48 + p * (THUMB_EXPANDED_H - 48)).toFixed(2)}px`;
+      thumb.style.borderRadius = `${(10 + q * 4).toFixed(2)}px`;
+
+      head.style.transform = `translate(${(72 - 56 * q).toFixed(2)}px, ${(16 + 96 * p).toFixed(2)}px)`;
+      val.style.transform = `translateY(${(25 + 93 * p).toFixed(2)}px)`;
+
+      const a = Math.max(0, Math.min(1, sp.a.x));
+      more.style.opacity = a.toFixed(3);
+      more.style.transform = `translateY(${((1 - sp.a.x) * 10).toFixed(2)}px)`;
+    });
+  }, []);
+
+  const startLoop = useCallback(() => {
+    if (rafRef.current) return;
+    let last = performance.now();
+
+    const tick = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 1 / 30);
+      last = now;
+
+      const sub = 4;
+      const subDt = dt / sub;
+      for (let k = 0; k < sub; k++) {
+        springsRef.current.forEach((sp) => {
+          stepSpring(sp.p, subDt);
+          stepSpring(sp.a, subDt);
+          stepSpring(sp.y, subDt);
+          stepSpring(sp.o, subDt);
+          stepSpring(sp.s, subDt);
+        });
+        if (listHRef.current) {
+          stepSpring(listHRef.current, subDt);
+        }
+      }
+
+      renderFrame();
+
+      const allSettled =
+        springsRef.current.every(
+          (sp) =>
+            isSettled(sp.p) &&
+            isSettled(sp.a) &&
+            isSettled(sp.y) &&
+            isSettled(sp.o) &&
+            isSettled(sp.s),
+        ) && (!listHRef.current || isSettled(listHRef.current));
+
+      if (allSettled) {
+        rafRef.current = 0;
+      } else {
+        rafRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+  }, [renderFrame]);
+
+  const toggleIndex = useCallback(
+    (targetIdx: number) => {
+      ensureSprings();
+      if (delayTimerRef.current !== null) {
+        window.clearTimeout(delayTimerRef.current);
+        delayTimerRef.current = null;
+      }
+
+      const nextOpen = openIndexRef.current === targetIdx ? -1 : targetIdx;
+      openIndexRef.current = nextOpen;
+      setOpenId(nextOpen >= 0 ? (items[nextOpen]?.id ?? null) : null);
+
+      springsRef.current.forEach((sp, i) => {
+        const home = i * (ROW + GAP);
+        const el = rowRefs.current[i];
+        if (nextOpen < 0) {
+          sp.p.t = 0;
+          sp.a.t = 0;
+          sp.y.t = home;
+          sp.o.t = 1;
+          sp.s.t = 1;
+          if (el) el.style.zIndex = "1";
+          return;
+        }
+        if (i === nextOpen) {
+          sp.p.t = 1;
+          sp.y.t = 0;
+          sp.o.t = 1;
+          sp.s.t = 1;
+          if (el) el.style.zIndex = "2";
+          const delayMs = prefersReducedMotion() ? 0 : 160;
+          delayTimerRef.current = window.setTimeout(() => {
+            if (openIndexRef.current === nextOpen && springsRef.current[i]) {
+              springsRef.current[i].a.t = 1;
+              startLoop();
+            }
+          }, delayMs);
+        } else {
+          sp.a.t = 0;
+          sp.p.t = 0;
+          sp.o.t = 0;
+          sp.s.t = 0.94;
+          sp.y.t = home + (i < nextOpen ? -24 : 24);
+          if (el) el.style.zIndex = "1";
+        }
+      });
+
+      if (listHRef.current) {
+        if (nextOpen >= 0) {
+          const moreEl = moreRefs.current[nextOpen];
+          const full = MORE_TOP + (moreEl ? moreEl.offsetHeight : 80) + 16;
+          listHRef.current.t = Math.max(ROW + 40, full);
+        } else {
+          listHRef.current.t = closedListHeight;
+        }
+      }
+
+      startLoop();
+    },
+    [ensureSprings, items, closedListHeight, startLoop],
+  );
+
+  useLayoutEffect(() => {
+    ensureSprings();
+    if (openIndexRef.current < 0 && listHRef.current) {
+      listHRef.current.t = closedListHeight;
+      listHRef.current.x = closedListHeight;
+    }
+    renderFrame();
+  }, [ensureSprings, closedListHeight, renderFrame]);
+
+  useEffect(() => {
+    const onResize = () => renderFrame();
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (delayTimerRef.current !== null) window.clearTimeout(delayTimerRef.current);
+    };
+  }, [renderFrame]);
+
+  if (!items.length) {
+    return emptyMessage ? <p className="muted">{emptyMessage}</p> : null;
+  }
+
+  return (
+    <div
+      ref={listRef}
+      className={`expand-card-list ${className}`}
+      style={{ height: `${closedListHeight}px` }}
+    >
+      {items.map((item, i) => {
+        const isOpen = openId === item.id;
+        return (
+          <div
+            key={item.id}
+            ref={(node) => {
+              rowRefs.current[i] = node;
+            }}
+            className={`expand-card-item ${isOpen ? "is-open" : ""}`}
+            role="button"
+            tabIndex={0}
+            aria-expanded={isOpen}
+            onClick={() => toggleIndex(i)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                toggleIndex(i);
+              }
+            }}
+          >
+            <div
+              ref={(node) => {
+                thumbRefs.current[i] = node;
+              }}
+              className={`expand-card-thumb tone-${item.badgeTone ?? "emerald"}`}
+            >
+              <span className="expand-card-badge-compact">{item.badge}</span>
+              {item.expandedHeader && (
+                <span className="expand-card-badge-expanded">{item.expandedHeader}</span>
+              )}
+            </div>
+            <div
+              ref={(node) => {
+                headRefs.current[i] = node;
+              }}
+              className="expand-card-head"
+            >
+              <p className="expand-card-title">{item.title}</p>
+              {item.subtitle && <p className="expand-card-sub">{item.subtitle}</p>}
+            </div>
+            {item.value != null && (
+              <div
+                ref={(node) => {
+                  valRefs.current[i] = node;
+                }}
+                className="expand-card-value"
+              >
+                {item.value}
+              </div>
+            )}
+            <div
+              ref={(node) => {
+                moreRefs.current[i] = node;
+              }}
+              className="expand-card-more"
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest("button, a, input, select")) {
+                  e.stopPropagation();
+                }
+              }}
+            >
+              <div className="expand-card-summary">{item.summary}</div>
+              {(item.chips?.length || item.action) && (
+                <div className="expand-card-footer">
+                  {item.chips?.map((chip, idx) => (
+                    <span key={idx} className="expand-card-chip">
+                      {chip}
+                    </span>
+                  ))}
+                  {item.action && <div className="expand-card-action">{item.action}</div>}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

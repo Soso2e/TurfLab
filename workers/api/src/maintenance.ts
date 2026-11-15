@@ -1,9 +1,20 @@
 import {
+  canonical,
+  instant,
+  money,
+  num,
   obj,
+  requireCondition,
+  rows,
+  str,
+  ticket,
   type Row,
 } from "../../../packages/shared/src/domain";
-import type { Repository } from "../../../packages/shared/src/repository";
+import { get, type Repository } from "../../../packages/shared/src/repository";
 import { detectJurisdiction, lookupCourseSpecs } from "../../../packages/shared/src/course-catalog";
+import { adopt, lockPrediction, saveImport } from "./imports";
+import { audit, confirmBet, reviseBet, settle } from "./betting";
+import { prepareRace } from "./race-pipeline";
 
 export async function enrichCoursesAndPerformances(
   repo: Repository,
@@ -153,4 +164,126 @@ export async function enrichCoursesAndPerformances(
     totalCourses: allCourses.length,
     totalPerformances: allPerformances.length,
   };
+}
+
+/**
+ * 発走前に作成済みの暫定予想と買い目プランを、当時の時刻整合性を保ったままバックフィル取り込み・精算する。
+ */
+export async function backfillProvisional(
+  repo: Repository,
+  input: Row,
+  now: string,
+): Promise<Row> {
+  const items = rows(input.items);
+  const results: Row[] = [];
+  for (const item of items) {
+    const pipeline = obj(item.pipeline);
+    const predictionTime = str(item, "prediction_time");
+    const p = obj(pipeline.prediction);
+    const raceId = str(p, "race_id");
+    const predictionId = str(p, "prediction_id");
+    const race = await get(repo, "races", raceId);
+    requireCondition(
+      instant(predictionTime) < instant(race.scheduled_start_at),
+      "予想時刻は発走前である必要があります",
+    );
+    let pred = await repo.get("predictions", predictionId);
+    if (!pred) {
+      const core = await prepareRace(repo, pipeline, predictionTime);
+      await saveImport(repo, core, predictionTime);
+      pred = await get(repo, "predictions", predictionId);
+    }
+    if (pred.status !== "locked") {
+      const locked = await lockPrediction(repo, predictionId, predictionTime);
+      await audit(
+        repo,
+        `backfill-lock:${predictionId}`,
+        "lock",
+        "predictions",
+        predictionTime,
+        null,
+        locked,
+      );
+    }
+    const existingAdopt = (await repo.list("prediction_adoptions")).find(
+      (a) => a.race_id === raceId,
+    );
+    if (!existingAdopt) {
+      await adopt(repo, raceId, predictionId, predictionTime);
+    }
+    const betInputs = rows(item.bets);
+    const betResults: Row[] = [];
+    for (const b of betInputs) {
+      const op = str(b, "operation_id");
+      const betTime = str(b, "fixed_at");
+      requireCondition(
+        instant(betTime) < instant(race.scheduled_start_at),
+        "ベット時刻は発走前である必要があります",
+      );
+      const type = str(b, "ticket_type");
+      const sel = ticket(type, b.selections);
+      const amount = money(b.amount_yen);
+      const priorOp = (await repo.list("virtual_bets")).find(
+        (x) => x.operation_id === op,
+      );
+      if (priorOp) {
+        betResults.push(priorOp);
+        continue;
+      }
+      const existingSame = (await repo.list("virtual_bets")).find(
+        (x) =>
+          x.status === "confirmed" &&
+          x.race_id === raceId &&
+          x.ticket_type === type &&
+          canonical(x.selections_json) === canonical(sel),
+      );
+      if (existingSame) {
+        const revised = await reviseBet(
+          repo,
+          str(existingSame, "bet_id"),
+          {
+            operation_id: op,
+            expected_bet: existingSame,
+            ticket_type: type,
+            selections: sel,
+            amount_yen: num(existingSame, "amount_yen") + amount,
+          },
+          betTime,
+        );
+        betResults.push(revised);
+      } else {
+        const confirmed = await confirmBet(
+          repo,
+          {
+            operation_id: op,
+            race_id: raceId,
+            prediction_id: predictionId,
+            ticket_type: type,
+            selections: sel,
+            amount_yen: amount,
+            recommendation_id: null,
+          },
+          betTime,
+        );
+        betResults.push(confirmed);
+      }
+    }
+    const raceResults = (await repo.list("race_results"))
+      .filter((r) => r.race_id === raceId)
+      .sort((a, b) => num(b, "revision") - num(a, "revision"));
+    const settled = raceResults[0]
+      ? await settle(repo, str(raceResults[0], "result_id"), now)
+      : [];
+    results.push({
+      race_id: raceId,
+      prediction_id: predictionId,
+      bets_count: betResults.length,
+      settled_count: settled.length,
+      stake_yen: settled.reduce((s, x) => s + num(x, "stake_yen"), 0),
+      payout_yen: settled.reduce((s, x) => s + num(x, "payout_yen"), 0),
+      refund_yen: settled.reduce((s, x) => s + num(x, "refund_yen"), 0),
+      net_yen: settled.reduce((s, x) => s + num(x, "net_yen"), 0),
+    });
+  }
+  return { items: results };
 }
