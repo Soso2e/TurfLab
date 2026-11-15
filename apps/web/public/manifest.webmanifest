@@ -1,0 +1,18 @@
+{
+  "name": "TurfLab",
+  "short_name": "TurfLab",
+  "description": "競馬予想・展開シミュレーション・検証ポータル",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#02091a",
+  "theme_color": "#071630",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
