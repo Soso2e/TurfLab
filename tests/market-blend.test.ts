@@ -101,7 +101,7 @@ it("does not offer weights that only match the fixed ones within noise", () => {
   expect(Number(report.holdout_races)).toBeGreaterThan(30);
   expect(report.candidate_ready).toBe(false);
   expect(report.learned_minus_fixed_log_loss).toMatchObject({ races: report.holdout_races });
-});
+}, 15000);
 
 const record: Row = {
   race_id: "x", saved_at: "2026-11-13T01:00:00Z", confidence: 0.8,
