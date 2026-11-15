@@ -27,6 +27,7 @@ it("adds up for a full field and ignores the scale of the input", () => {
   expect(total("exacta")).toBeCloseTo(1, 3);
   expect(total("quinella")).toBeCloseTo(1, 3);
   expect(total("trio")).toBeCloseTo(1, 3);
+  expect(total("trifecta")).toBeCloseTo(1, 3);
   expect(total("wide")).toBeCloseTo(3, 3);
   expect(Object.values(exact.top3).reduce((a, b) => a + b, 0)).toBeCloseTo(3, 4);
   const doubled = orderProbabilities(new Map([...field].map(([n, v]) => [n, v * 2])));

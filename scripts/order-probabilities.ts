@@ -78,6 +78,7 @@ export function orderProbabilities(
     add(tickets, ticketKey("wide", [a, c]), probability);
     add(tickets, ticketKey("wide", [b, c]), probability);
     add(tickets, ticketKey("trio", [a, b, c]), probability);
+    add(tickets, ticketKey("trifecta", [a, b, c]), probability);
   });
   const rounded = (table: Record<string, number>) =>
     Object.fromEntries(Object.entries(table).map(([k, v]) => [k, round(v)]));

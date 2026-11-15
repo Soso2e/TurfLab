@@ -18,9 +18,13 @@ export const EV_BUDGET_YEN = 400;
 export const EV_MIN = 1.1;
 const UNIT = 100;
 /** Points per ticket type in the hit plan (6 x 100 yen = 600 yen). */
-const HIT_POINTS: [string, number][] = [["wide", 2], ["quinella", 1], ["exacta", 1], ["trio", 2]];
+const HIT_POINTS: [string, number][] = [
+  ["wide", 1], ["quinella", 1], ["exacta", 1], ["trio", 2], ["trifecta", 1],
+];
 /** Combinations whose odds the pre-race check asks for. */
-const EV_CANDIDATES: [string, number][] = [["wide", 4], ["quinella", 3], ["exacta", 3], ["trio", 3]];
+const EV_CANDIDATES: [string, number][] = [
+  ["wide", 4], ["quinella", 3], ["exacta", 3], ["trio", 3], ["trifecta", 3],
+];
 const round = (value: number, digits = 4) => Math.round(value * 10 ** digits) / 10 ** digits;
 
 function random(seed: number) {
@@ -69,6 +73,7 @@ export function simulateOrders(p: Map<number, number>, trials = MC_TRIALS, seed 
     add(tickets, ticketKey("exacta", [a, b]));
     for (const pair of [[a, b], [a, c], [b, c]]) add(tickets, ticketKey("wide", pair));
     add(tickets, ticketKey("trio", order));
+    add(tickets, ticketKey("trifecta", order));
   }
   const share = (table: Record<string, number>) =>
     Object.fromEntries(Object.entries(table).map(([k, v]) => [k, round(v / trials)]));
@@ -93,17 +98,57 @@ function model(record: Row, weights: number[]): { p: Map<number, number>; mc: Or
   return { p, mc: orderProbabilities(p) };
 }
 
-/** Stage 3: the most likely combinations per ticket type, 600 yen, no odds. */
+const ALLOWED_HIT_TYPES = new Set(["wide", "quinella", "exacta", "trio", "trifecta"]);
+const UNORDERED_HIT_TYPES = new Set(["wide", "quinella", "trio"]);
+
+function aiHitPicks(record: Row, p: Map<number, number>, mc: OrderProbabilities): Row[] {
+  const raw = rows(record.hit_picks ?? []);
+  if (!raw.length) return [];
+  const merged = new Map<string, Row>();
+  let total = 0;
+  for (const item of raw) {
+    const type = String(item.ticket_type ?? "");
+    if (!ALLOWED_HIT_TYPES.has(type)) continue;
+    const needed = type === "trio" || type === "trifecta" ? 3 : 2;
+    const nums = Array.isArray(item.selections_json) ? item.selections_json.map(Number) : [];
+    if (nums.length !== needed || nums.some((n) => !Number.isInteger(n) || !p.has(n))) continue;
+    if (new Set(nums).size !== needed) continue;
+    const amountRaw = Number(item.amount_yen ?? UNIT);
+    const amount = Number.isFinite(amountRaw) && amountRaw >= UNIT ? Math.floor(amountRaw / UNIT) * UNIT : UNIT;
+    if (total + amount > HIT_BUDGET_YEN) continue;
+    const ordered = UNORDERED_HIT_TYPES.has(type) ? [...nums].sort((a, b) => a - b) : nums;
+    const key = ticketKey(type, ordered);
+    total += amount;
+    const existing = merged.get(key);
+    if (existing) {
+      existing.amount_yen = Number(existing.amount_yen) + amount;
+    } else {
+      merged.set(key, {
+        ticket_type: type,
+        selections_json: ordered,
+        probability: mc.tickets[key] ?? 0,
+        amount_yen: amount,
+      });
+    }
+  }
+  return [...merged.values()];
+}
+
+/** Stage 3: AI-selected formation/combination picks (falling back to the likeliest model picks), 600 yen, no odds. */
 export function hitPlan(record: Row, weights: number[], calibrated: boolean, now: string): Row {
-  const { mc } = model(record, weights);
-  const picks = HIT_POINTS.flatMap(([type, count]) => best(mc, type, count))
-    .map((pick) => ({ ...pick, amount_yen: UNIT }));
-  const stake = picks.reduce((s, x) => s + x.amount_yen, 0);
+  const { p, mc } = model(record, weights);
+  const fromAi = aiHitPicks(record, p, mc);
+  const picks = fromAi.length
+    ? fromAi
+    : HIT_POINTS.flatMap(([type, count]) => best(mc, type, count))
+      .map((pick) => ({ ...pick, amount_yen: UNIT }));
+  const stake = picks.reduce((s, x) => s + Number(x.amount_yen), 0);
   return {
     schema_version: "1", plan_version: "hit-plan-v2", plan_lane: "hit",
     lane: "lab", adopted: false, real_money: false,
     race_id: record.race_id!, fixed_at: now, record_saved_at: record.saved_at ?? null,
     budget_yen: HIT_BUDGET_YEN, odds_used: false, calibrated,
+    selection_source: fromAi.length ? "ai" : "model",
     confidence: record.confidence ?? null,
     simulation: { version: mc.version, discount: mc.discount, win: mc.win, top3: mc.top3 },
     picks: stake <= HIT_BUDGET_YEN ? picks : [],
@@ -119,6 +164,8 @@ export function evCandidates(record: Row, weights: number[]): Row[] {
     .map(({ ticket_type, selections_json }) => ({ ticket_type, selections_json }));
 }
 
+const minComboProbability = (type: string) => (type === "trifecta" ? 0.004 : 0.02);
+
 /** Stage 4: EV = probability x time-stamped odds; the best EVs within 400 yen. */
 export function evPlan(record: Row, odds: Row, weights: number[], calibrated: boolean, now: string): Row {
   const { p, mc } = model(record, weights);
@@ -133,13 +180,14 @@ export function evPlan(record: Row, odds: Row, weights: number[], calibrated: bo
     const type = String(quote.ticket_type), price = Number(quote.odds);
     const selection = (Array.isArray(quote.selections_json) ? quote.selections_json : []).map(Number);
     if (!(price >= 1) || !EV_CANDIDATES.some(([t]) => t === type)) continue;
-    if (selection.length !== (type === "trio" ? 3 : 2) || selection.some((n) => !p.has(n))) continue;
+    if (selection.length !== (type === "trio" || type === "trifecta" ? 3 : 2) || selection.some((n) => !p.has(n))) continue;
     const probability = mc.tickets[ticketKey(type, selection)] ?? 0;
-    const sorted = ticketKey(type, selection).slice(type.length + 1).split("-").map(Number);
-    lines.push({ ticket_type: type, selections_json: sorted, probability, odds: price, ev: round(probability * price) });
+    const ordered = ticketKey(type, selection).slice(type.length + 1).split("-").map(Number);
+    lines.push({ ticket_type: type, selections_json: ordered, probability, odds: price, ev: round(probability * price) });
   }
   const picks = lines
-    .filter((l) => Number(l.ev) >= EV_MIN && Number(l.probability) >= (l.ticket_type === "win" ? 0.05 : 0.02))
+    .filter((l) => l.ticket_type !== "win" && Number(l.ev) >= EV_MIN &&
+      Number(l.probability) >= minComboProbability(String(l.ticket_type)))
     .sort((a, b) => Number(b.ev) - Number(a.ev))
     .slice(0, EV_BUDGET_YEN / UNIT)
     .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT, ev: l.ev! }));
@@ -189,14 +237,15 @@ export function marketAnchoredPlan(record: Row, odds: Row, blend: Blend, evidenc
     const type = String(quote.ticket_type), price = Number(quote.odds);
     const selection = (Array.isArray(quote.selections_json) ? quote.selections_json : []).map(Number);
     if (!(price >= 1) || !EV_CANDIDATES.some(([t]) => t === type)) continue;
-    if (selection.length !== (type === "trio" ? 3 : 2) || selection.some((n) => !p.has(n))) continue;
+    if (selection.length !== (type === "trio" || type === "trifecta" ? 3 : 2) || selection.some((n) => !p.has(n))) continue;
     const key = ticketKey(type, selection);
     const probability = order.tickets[key] ?? 0;
     lines.push({ ticket_type: type, selections_json: key.slice(type.length + 1).split("-").map(Number),
       probability, odds: price, ev: round(probability * price) });
   }
   const picks = !evidence ? [] : lines
-    .filter((l) => Number(l.ev) >= EV_MIN && Number(l.probability) >= (l.ticket_type === "win" ? 0.05 : 0.02))
+    .filter((l) => Number(l.ev) >= EV_MIN &&
+      Number(l.probability) >= (l.ticket_type === "win" ? 0.05 : minComboProbability(String(l.ticket_type))))
     .sort((a, b) => Number(b.ev) - Number(a.ev))
     .slice(0, EV_BUDGET_YEN / UNIT)
     .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT, ev: l.ev! }));

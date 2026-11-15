@@ -25,7 +25,7 @@ import { officialResearchUrl } from "../packages/shared/src/race-research";
 import { enrichedReference, historyPrompt } from "./local-history-research";
 import { loadNarCsvDir, mergeRuns, narStats, normGoing } from "./nar-csv-stats";
 import { importNarCsvInbox } from "./nar-csv-import";
-import { evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
+import { completeEvaluations, evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
 import {
   fitBlend, fitScale, fitWeights, labOutcome, latestPerRace, learningReport, MIN_TRAIN_RACES,
   outcomeSamples, planOutcome, PRIOR_WEIGHTS, walkForwardBlend, type Sample,
@@ -645,32 +645,40 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
               ),
             ),
           );
+        const beforeStart = Date.parse(str(race, "scheduled_start_at")) > Date.now();
+        const allowWeb = !pack.research || beforeStart;
         const answer = await this.generate(
           day + "-" + str(pack, "pack_hash") + (pack.research ? "-context-v3" : "-context-v1"),
           `分析開始UTC ${new Date().toISOString()}。情報締切はpack.information_cutoff_at。\n` + common +
             (pack.research
-              ? "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n" + scoringRules
+              ? (beforeStart
+                  ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。\n"
+                  : "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n") + scoringRules
               : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
             "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
             (coverage
-              ? "evidence_coverage はコードが固定packから判定した根拠の有無。formal_allowed がtrueのときだけ正式回答にする。falseなら暫定予想として " + blockedShape + " statusがmissingの項目だけnull。weakの項目は弱い根拠だとrationaleに明記して低めの確信で採点し、推測で補わない。\n"
+              ? (beforeStart
+                  ? "evidence_coverage はローカルpack時点の根拠の有無。formal_allowed がfalseでも、発走前Web検索で近走・コース適性・脚質・馬場・騎手の根拠を確認できた項目は数値（0〜100）で採点し、確認した事実をrationaleに書く。どうしても根拠が見つからない項目だけnullにし、全頭・全6項目の根拠が揃わない場合だけ " + blockedShape + "\n"
+                  : "evidence_coverage はコードが固定packから判定した根拠の有無。formal_allowed がtrueのときだけ正式回答にする。falseなら暫定予想として " + blockedShape + " statusがmissingの項目だけnull。weakの項目は弱い根拠だとrationaleに明記して低めの確信で採点し、推測で補わない。\n")
               : "全馬の全6項目に根拠があるときだけ正式回答にする。1つでも根拠が無ければ正式にせず " + blockedShape + "\n") +
             (trends ? "trends はコードが保存済みの記録から集計した傾向（馬の距離・馬場別成績、当日の同場確定レースの枠・脚質）。標本数を確認し、少ない標本は弱い根拠として扱う。\n" : "") +
             (external ? "external_forecasts は他の予想サイトの印と根拠。まず固定packだけで評価を作り、次に外部と食い違う馬の根拠を固定pack内の事実で確かめる。外部の印だけで点を上げない。pack内で裏付けられた事実だけで評価を変え、変えた馬と理由をrationaleに書く。人気・オッズに基づく記述は使わない。\n" : "") +
             JSON.stringify({ pack, baseline, source_context: sourceContext,
               ...(coverage ? { evidence_coverage: coverage } : {}), ...(trends ? { trends } : {}),
               ...(external ? { external_forecasts: external } : {}) }),
-          !pack.research,
+          allowWeb,
         );
-        // Code, not the model, decides: a formal-looking answer without evidence stays provisional.
-        const heldBack = answer && !answer.blocked && coverage && !coverage.formal_allowed;
+        // Code, not the model, decides: an incomplete answer without local evidence stays provisional,
+        // while a complete pre-start AI-supplemented evaluation is accepted as formal for learning.
+        const aiComplete = Boolean(answer && !answer.blocked && completeEvaluations(pack, rows(answer.horse_evaluations ?? [])));
+        const heldBack = answer && !answer.blocked && coverage && !coverage.formal_allowed && !(beforeStart && aiComplete);
         if (heldBack) {
           this.blockedJobs++;
           this.jobIssues.push({ job: file, reason: "根拠の欠測があるため正式予想にせず暫定として保存" });
         }
         if (answer?.blocked || heldBack)
           await this.saveLab(pack, heldBack
-            ? { reason: "根拠の欠測があるため暫定", lab_evaluations: answer.horse_evaluations }
+            ? { reason: "根拠の欠測があるため暫定", lab_evaluations: answer.horse_evaluations, hit_picks: answer.hit_picks }
             : answer!, day, coverage);
         if (answer?.blocked || heldBack)
           this.mark(race, 3, "暫定予想を保存（正式予想ではない）");
@@ -691,6 +699,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
             await this.saveLab(pack, {
               reason: "正式予想の比較用コピー",
               lab_evaluations: answer.horse_evaluations ?? [],
+              hit_picks: answer.hit_picks,
             }, day, coverage, "formal");
         }
       } catch (error) {
@@ -1106,7 +1115,8 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     const missing = coverage ? rows(coverage.missing) : rows(answer.missing ?? []);
     if (!given.length && !missing.length) return;
     const name = `lab/${day}/${raceKey(str(race, "race_id"))}-${str(pack, "pack_hash").slice(0, 16)}${coverage ? `-${status}` : ""}.json`;
-    const ranked = coverage ? provisionalRanking(pack, coverage, given) : null;
+    const ranked = coverage ? provisionalRanking(pack, coverage, given, status === "formal") : null;
+    const hitPicks = Array.isArray(answer.hit_picks) && answer.hit_picks.length ? answer.hit_picks : null;
     if (status === "formal") {
       if (!(await readFile(path.join(this.exchange, name), "utf8").catch(() => null)))
         await immutableLocalFile(this.exchange, name, JSON.stringify({
@@ -1115,6 +1125,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           scheduled_start_at: race.scheduled_start_at!, pack_hash: pack.pack_hash!,
           saved_at: savedAt, confidence: coverage!.confidence!, ranking: ranked!.ranking,
           evaluations: ranked!.evaluations,
+          ...(hitPicks ? { hit_picks: hitPicks } : {}),
         }));
       return;
     }
@@ -1152,6 +1163,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         reason: String(answer.reason ?? "").slice(0, 600),
         missing: missing.slice(0, 120),
         evaluations: (ranked?.evaluations ?? given).slice(0, 20),
+        ...(hitPicks ? { hit_picks: hitPicks } : {}),
       }),
     );
   }

@@ -31,7 +31,7 @@ it("fixes a 600-yen hit plan from the ranking without odds", () => {
   const picks = plan.picks as Row[];
   expect(plan).toMatchObject({ plan_lane: "hit", odds_used: false, budget_yen: HIT_BUDGET_YEN });
   expect(picks.reduce((s, p) => s + Number(p.amount_yen), 0)).toBe(600);
-  expect(new Set(picks.map((p) => p.ticket_type))).toEqual(new Set(["wide", "quinella", "exacta", "trio"]));
+  expect(new Set(picks.map((p) => p.ticket_type))).toEqual(new Set(["wide", "quinella", "exacta", "trio", "trifecta"]));
   // The top-rated horse anchors the likeliest combinations.
   expect(picks.find((p) => p.ticket_type === "exacta")!.selections_json).toEqual([1, 2]);
   expect(JSON.stringify(plan)).not.toContain("odds\":");
@@ -72,4 +72,53 @@ it("merges stored runs into a history answer; a search only fills empty fields",
   ]);
   expect(horses[0].jockey_notes).toHaveLength(1);
   expect(horses[1]).toMatchObject({ horse_number: 2, recent_runs: [] });
+});
+
+it("never picks win bets in evPlan and includes trifecta candidates", () => {
+  const longshotRecord: Row = {
+    race_id: "r2", saved_at: "2026-11-15T01:00:00Z", confidence: 0.76,
+    evaluations: Array.from({ length: 18 }, (_, i) => ({
+      horse_number: i + 1,
+      components: {
+        ability: i === 0 ? 78 : i < 5 ? 65 : 50,
+        course: i === 0 ? 70 : 50,
+        pace: 55, going: 55, draw_weight: 55, horse_jockey_course: 55,
+      },
+    })),
+  };
+  const candidates = evCandidates(longshotRecord, PRIOR_WEIGHTS);
+  expect(candidates.some((c) => c.ticket_type === "trifecta")).toBe(true);
+  const odds = {
+    checked_at: "2026-11-15T05:40:00Z",
+    win_odds: Array.from({ length: 18 }, (_, i) => ({
+      horse_number: i + 1,
+      odds: i === 0 ? 2.5 : 45,
+    })),
+    combo_odds: candidates.map((c) => ({ ...c, odds: c.ticket_type === "trifecta" ? 300 : 40 })),
+  };
+  const plan = evPlan(longshotRecord, odds, PRIOR_WEIGHTS, true, "2026-11-15T05:42:00Z");
+  const picks = plan.picks as Row[];
+  expect(picks.length).toBeGreaterThan(0);
+  expect(picks.every((p) => p.ticket_type !== "win")).toBe(true);
+});
+
+it("uses AI-selected formation picks in hitPlan within 600 yen and excludes win bets", () => {
+  const aiRecord: Row = {
+    ...record,
+    hit_picks: [
+      { ticket_type: "win", selections_json: [1], amount_yen: 100 },
+      { ticket_type: "wide", selections_json: [4, 1], amount_yen: 200 },
+      { ticket_type: "trio", selections_json: [3, 1, 2], amount_yen: 100 },
+      { ticket_type: "trio", selections_json: [4, 1, 2], amount_yen: 100 },
+      { ticket_type: "trifecta", selections_json: [1, 2, 3], amount_yen: 200 },
+      { ticket_type: "quinella", selections_json: [1, 2], amount_yen: 100 }, // exceeds 600 yen budget
+    ],
+  };
+  const plan = hitPlan(aiRecord, PRIOR_WEIGHTS, false, "2026-11-11T01:00:00Z");
+  expect(plan.selection_source).toBe("ai");
+  const picks = plan.picks as Row[];
+  expect(picks.reduce((s, p) => s + Number(p.amount_yen), 0)).toBe(600);
+  expect(picks.every((p) => p.ticket_type !== "win")).toBe(true);
+  expect(picks[0]).toMatchObject({ ticket_type: "wide", selections_json: [1, 4], amount_yen: 200 });
+  expect(picks[3]).toMatchObject({ ticket_type: "trifecta", selections_json: [1, 2, 3], amount_yen: 200 });
 });

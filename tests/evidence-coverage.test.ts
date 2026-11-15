@@ -259,3 +259,53 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   expect(after.learning).toBeNull();
   expect(after.race_stages).toBeDefined();
 });
+
+it("accepts a complete pre-start AI-supplemented evaluation as formal and keeps all scored factors", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = "2026-11-10T01:00:00.000Z";
+  vi.setSystemTime(now);
+  const pack: Row = {
+    ...kawasaki(),
+    pack_hash: "d".repeat(64),
+    information_cutoff_at: now,
+    snapshot_id: "s",
+    evidence: [],
+    race: { race_id: "r1", race_number: 1, jurisdiction: "NAR", scheduled_start_at: "2026-11-10T06:00:00.000Z" },
+  };
+  obj(pack.research).history_version = "official-history-v1";
+  const posted: string[] = [];
+  const api = vi.fn(async (url: string, body?: unknown): Promise<Row> => {
+    if (body) posted.push(url);
+    return url === "/daily-state" ? { races: [] } : { predictions: [] };
+  });
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-ai-formal-"));
+  await immutableLocalFile(path.join(home, "exchange"), `packs/2026-11-10/race-${pack.pack_hash}.json`, JSON.stringify({
+    pack, prediction_path: "predictions/2026-11-10/race.json", prediction_template: {},
+  }));
+  const webFlags: boolean[] = [];
+  const infer = vi.fn(async (_dir: string, prompt: string, _model: string, webSearch?: boolean): Promise<Row> => {
+    if (prompt.includes("最大")) return { races: [], limitations: [] };
+    if (prompt.includes("固定pack.research")) {
+      webFlags.push(Boolean(webSearch));
+      return {
+        horse_evaluations: [
+          { horse_number: 1, horse_name: "A", components: { ability: 75, course: 70, pace: 68, going: 72, draw_weight: 65, horse_jockey_course: 74 } },
+          { horse_number: 6, horse_name: "B", components: { ability: 62, course: 58, pace: 60, going: 64, draw_weight: 55, horse_jockey_course: 52 } },
+        ],
+      };
+    }
+    return { blocked: true, reason: "skip" };
+  });
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer);
+  await worker.init();
+  await worker.tick(new Date(now));
+  await worker.tick(new Date(now));
+  await worker.tick(new Date(now));
+  expect(webFlags).toEqual([true]);
+  expect(posted).toContain("/github-bridge/convert");
+  const labFiles = await readdir(path.join(home, "exchange/lab/2026-11-10"));
+  const formalFile = labFiles.find((f) => f.endsWith("-formal.json"));
+  expect(formalFile).toBeDefined();
+  const formalCopy = JSON.parse(await readFile(path.join(home, "exchange/lab/2026-11-10", formalFile!), "utf8"));
+  expect(formalCopy.evaluations[0].components.going).toBe(72);
+});

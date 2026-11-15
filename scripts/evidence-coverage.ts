@@ -155,9 +155,26 @@ export function formalBlockers(pack: Row, coverage: Row): Row {
   };
 }
 
+/** True when every active runner has numeric scores (0..100) for all six factors. */
+export function completeEvaluations(pack: Row, evaluations: Row[]): boolean {
+  const active = rows(pack.entries).filter((e) => e.status === "active");
+  if (!active.length) return false;
+  return active.every((entry) => {
+    const found = evaluations.find((e) => Number(e.horse_number) === Number(entry.horse_number));
+    if (!found) return false;
+    const components = obj(found.components ?? {});
+    return FACTORS.every((f) => {
+      const v = components[f];
+      return typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100;
+    });
+  });
+}
+
 /** Removes scores for factors with no evidence, and ranks on what remains while
- * reporting how much of the score weight that remainder actually covers. */
-export function provisionalRanking(pack: Row, coverage: Row, evaluations: Row[]) {
+ * reporting how much of the score weight that remainder actually covers.
+ * When keepAllScored is true (e.g. pre-race AI web supplementation), numeric
+ * scores are preserved even if the local pack lacked that factor. */
+export function provisionalRanking(pack: Row, coverage: Row, evaluations: Row[], keepAllScored = false) {
   const weights = weightsOf(pack);
   const total = FACTORS.reduce((sum, f) => sum + weights[f], 0);
   const cleaned = evaluations.map((evaluation) => {
@@ -165,7 +182,7 @@ export function provisionalRanking(pack: Row, coverage: Row, evaluations: Row[])
     const given = obj(evaluation.components ?? {});
     const components = Object.fromEntries(FACTORS.map((f) => {
       const value = given[f];
-      return [f, typeof value === "number" && obj(factors[f] ?? {}).status !== "missing" ? value : null];
+      return [f, typeof value === "number" && (keepAllScored || obj(factors[f] ?? {}).status !== "missing") ? value : null];
     }));
     return { ...evaluation, components } as Row & { components: Record<string, number | null> };
   });
