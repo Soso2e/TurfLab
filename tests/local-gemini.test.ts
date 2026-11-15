@@ -19,7 +19,7 @@ describe("local-gemini and fallback", () => {
     const result = await predictWithHelper(
       "dummy-dir",
       "dummy-prompt",
-      "gemini-3.8-flash-medium",
+      "gemini-4-hydrogen-medium",
       true,
       mockGemini,
       mockCodex,
@@ -28,7 +28,7 @@ describe("local-gemini and fallback", () => {
     expect(mockGemini).toHaveBeenCalledWith(
       "dummy-dir",
       "dummy-prompt",
-      "gemini-3.8-flash-medium",
+      "gemini-4-hydrogen-medium",
       true,
     );
     expect(mockCodex).toHaveBeenCalledWith(
@@ -50,7 +50,7 @@ describe("local-gemini and fallback", () => {
     const result = await predictWithHelper(
       "dummy-dir",
       "dummy-prompt",
-      "gemini-3.8-flash-medium",
+      "gemini-4-hydrogen-medium",
       true,
       mockGemini,
       mockCodex,

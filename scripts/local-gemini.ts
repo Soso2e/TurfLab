@@ -9,7 +9,7 @@ import { emitOperationalEvent } from "../packages/shared/src/operational-event";
 export async function predictWithGemini(
   directory: string,
   prompt: string,
-  model = "gemini-3.8-flash-medium",
+  model = "gemini-4-hydrogen-medium",
   webSearch = true,
 ): Promise<Row> {
   void webSearch;
@@ -130,7 +130,7 @@ export async function predictWithGemini(
 export async function predictWithHelper(
   directory: string,
   prompt: string,
-  model = "gemini-3.8-flash-medium",
+  model = "gemini-4-hydrogen-medium",
   webSearch = true,
   geminiRunner: (
     directory: string,

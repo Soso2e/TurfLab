@@ -1,4 +1,4 @@
-param([string]$DataHome, [string]$Model = 'gpt-6.1-sol', [string]$ReasoningEffort = 'low', [string]$HelperModel = 'gemini-3.8-flash-medium')
+param([string]$DataHome, [string]$Model = 'gpt-6.1-sol', [string]$ReasoningEffort = 'low', [string]$HelperModel = 'gemini-4-hydrogen-medium')
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $runtimeHome = Get-TurfHome $DataHome
 $workerHome = Join-Path $runtimeHome 'local-predictions'

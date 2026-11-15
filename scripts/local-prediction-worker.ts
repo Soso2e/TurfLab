@@ -34,6 +34,7 @@ import { evCandidates, evPlan, hitPlan, marketAnchoredPlan, ticketKey } from "./
 import { csvRecordsFor, gapHints, jockeysCoveredByCsv, mergeResearchRun, statRunsFromCsv } from "./csv-run-fill";
 import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
 import type { NarRun } from "./nar-csv-stats";
+import { runPythonAnalytics } from "./python-analytics";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -207,6 +208,9 @@ export class LocalPredictionWorker {
     private helperInfer?: InferFn,
     private helperModel?: string,
     private maxPredictionCallsPerDay = 6,
+    private freeMode = false,
+    private strategyRules = "",
+    private strategyRulesPath?: string,
   ) {
     this.exchange = path.join(home, "exchange");
     this.bridge = new PredictionBridge(
@@ -419,6 +423,7 @@ export class LocalPredictionWorker {
     const day = jstDate(now.toISOString());
     const hour = new Date(now.getTime() + 9 * 3600000).getUTCHours();
     try {
+      await this.drainUploadedNarCsvs();
       this.csvImport = await importNarCsvInbox(this.home, now);
     } catch (error) {
       this.failedJob("nar-csv-import", error);
@@ -647,60 +652,90 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           );
         const beforeStart = Date.parse(str(race, "scheduled_start_at")) > Date.now();
         const allowWeb = !pack.research || beforeStart;
+        const pythonAnalytics = this.freeMode
+          ? await runPythonAnalytics(pack, { csvDir: path.join(this.home, "nar-csv") }).catch(() => null)
+          : null;
+        const currentStrategyRules = this.strategyRulesPath
+          ? await readFile(this.strategyRulesPath, "utf8").catch(() => this.strategyRules)
+          : this.strategyRules;
+        const freePrompt =
+          "【AI自由予想モード】固定pack.researchとpython_analytics（Pythonによる過去CSV・DBの定量集計）を土台にしつつ、" +
+          (beforeStart
+            ? "発走前の未来レース。Web検索で最新の出馬表・馬場状態・天候・当日傾向・リアルタイムオッズを確認して自由に総合判断する。"
+            : "固定資料とpython_analyticsをもとに分析する。") +
+          "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）を必ず返してよい。\n" +
+          (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
         const answer = await this.generate(
-          day + "-" + str(pack, "pack_hash") + (pack.research ? "-context-v3" : "-context-v1"),
+          day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v1" : pack.research ? "-context-v3" : "-context-v1"),
           `分析開始UTC ${new Date().toISOString()}。情報締切はpack.information_cutoff_at。\n` + common +
-            (pack.research
-              ? (beforeStart
-                  ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。\n"
-                  : "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n") + scoringRules
-              : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
+            (this.freeMode
+              ? freePrompt
+              : pack.research
+                ? (beforeStart
+                    ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。\n"
+                    : "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n") + scoringRules
+                : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
             "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
-            (coverage
-              ? (beforeStart
-                  ? "evidence_coverage はローカルpack時点の根拠の有無。formal_allowed がfalseでも、発走前Web検索で近走・コース適性・脚質・馬場・騎手の根拠を確認できた項目は数値（0〜100）で採点し、確認した事実をrationaleに書く。どうしても根拠が見つからない項目だけnullにし、全頭・全6項目の根拠が揃わない場合だけ " + blockedShape + "\n"
-                  : "evidence_coverage はコードが固定packから判定した根拠の有無。formal_allowed がtrueのときだけ正式回答にする。falseなら暫定予想として " + blockedShape + " statusがmissingの項目だけnull。weakの項目は弱い根拠だとrationaleに明記して低めの確信で採点し、推測で補わない。\n")
-              : "全馬の全6項目に根拠があるときだけ正式回答にする。1つでも根拠が無ければ正式にせず " + blockedShape + "\n") +
+            (this.freeMode
+              ? "free_analysis（文字列）を追加してよい。\n"
+              : coverage
+                ? (beforeStart
+                    ? "evidence_coverage はローカルpack時点の根拠の有無。formal_allowed がfalseでも、発走前Web検索で近走・コース適性・脚質・馬場・騎手の根拠を確認できた項目は数値（0〜100）で採点し、確認した事実をrationaleに書く。どうしても根拠が見つからない項目だけnullにし、全頭・全6項目の根拠が揃わない場合だけ " + blockedShape + "\n"
+                    : "evidence_coverage はコードが固定packから判定した根拠の有無。formal_allowed がtrueのときだけ正式回答にする。falseなら暫定予想として " + blockedShape + " statusがmissingの項目だけnull。weakの項目は弱い根拠だとrationaleに明記して低めの確信で採点し、推測で補わない。\n")
+                : "全馬の全6項目に根拠があるときだけ正式回答にする。1つでも根拠が無ければ正式にせず " + blockedShape + "\n") +
             (trends ? "trends はコードが保存済みの記録から集計した傾向（馬の距離・馬場別成績、当日の同場確定レースの枠・脚質）。標本数を確認し、少ない標本は弱い根拠として扱う。\n" : "") +
+            (pythonAnalytics ? "python_analytics はPythonが過去CSVとDB走から計算したコースバイアス・騎手成績・出走馬のタイム/上がり偏差サマリー。予想の定量根拠として積極的に活用すること。\n" : "") +
             (external ? "external_forecasts は他の予想サイトの印と根拠。まず固定packだけで評価を作り、次に外部と食い違う馬の根拠を固定pack内の事実で確かめる。外部の印だけで点を上げない。pack内で裏付けられた事実だけで評価を変え、変えた馬と理由をrationaleに書く。人気・オッズに基づく記述は使わない。\n" : "") +
             JSON.stringify({ pack, baseline, source_context: sourceContext,
               ...(coverage ? { evidence_coverage: coverage } : {}), ...(trends ? { trends } : {}),
+              ...(pythonAnalytics ? { python_analytics: pythonAnalytics } : {}),
               ...(external ? { external_forecasts: external } : {}) }),
           allowWeb,
         );
         // Code, not the model, decides: an incomplete answer without local evidence stays provisional,
         // while a complete pre-start AI-supplemented evaluation is accepted as formal for learning.
         const aiComplete = Boolean(answer && !answer.blocked && completeEvaluations(pack, rows(answer.horse_evaluations ?? [])));
-        const heldBack = answer && !answer.blocked && coverage && !coverage.formal_allowed && !(beforeStart && aiComplete);
+        const heldBack = !this.freeMode && Boolean(answer && !answer.blocked && coverage && !coverage.formal_allowed && !(beforeStart && aiComplete));
         if (heldBack) {
           this.blockedJobs++;
           this.jobIssues.push({ job: file, reason: "根拠の欠測があるため正式予想にせず暫定として保存" });
         }
-        if (answer?.blocked || heldBack)
-          await this.saveLab(pack, heldBack
+        if (answer?.blocked || (heldBack && answer))
+          await this.saveLab(pack, heldBack && answer
             ? { reason: "根拠の欠測があるため暫定", lab_evaluations: answer.horse_evaluations, hit_picks: answer.hit_picks }
             : answer!, day, coverage);
         if (answer?.blocked || heldBack)
           this.mark(race, 3, "暫定予想を保存（正式予想ではない）");
         if (answer && !answer.blocked && !heldBack) {
-          const document = { ...obj(output.prediction_template), answer };
-          await this.api("/github-bridge/convert", {
-            path: predictionPath,
-            document,
-          });
-          await immutableLocalFile(
-            this.exchange,
-            predictionPath,
-            JSON.stringify(document),
-          );
-          this.mark(race, 3, "正式予想を保存。Coreの確定待ち");
-          // Formal predictions join the same comparison population as provisional ones.
-          if (coverage)
+          let converted = false;
+          if (!this.freeMode || aiComplete) {
+            try {
+              const document = { ...obj(output.prediction_template), answer };
+              await this.api("/github-bridge/convert", {
+                path: predictionPath,
+                document,
+              });
+              await immutableLocalFile(
+                this.exchange,
+                predictionPath,
+                JSON.stringify(document),
+              );
+              converted = true;
+            } catch (error) {
+              if (!this.freeMode) throw error;
+            }
+          }
+          this.mark(race, 3, converted ? "正式予想を保存。Coreの確定待ち" : "AI自由予想を保存（仮想Bet対象）");
+          // Formal & free predictions join the same comparison population.
+          if (coverage || this.freeMode)
             await this.saveLab(pack, {
-              reason: "正式予想の比較用コピー",
-              lab_evaluations: answer.horse_evaluations ?? [],
+              reason: typeof answer.free_analysis === "string"
+                ? answer.free_analysis
+                : (converted ? "正式予想の比較用コピー" : "AI自由予想"),
+              lab_evaluations: answer.horse_evaluations ?? answer.lab_evaluations ?? [],
               hit_picks: answer.hit_picks,
-            }, day, coverage, "formal");
+              free_analysis: answer.free_analysis,
+            }, day, coverage, converted ? "formal" : "free");
         }
       } catch (error) {
         this.failedJob(file, error);
@@ -1107,26 +1142,39 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
 
   /** Blocked (incomplete) analyses are kept as Lab records: not adopted, not
    * sent to Core, immutable and written only before the scheduled start. */
-  private async saveLab(pack: Row, answer: Row, day: string, coverage: Row | null = null, status: "provisional" | "formal" = "provisional") {
+  private async saveLab(pack: Row, answer: Row, day: string, coverage: Row | null = null, status: "provisional" | "formal" | "free" = "provisional") {
     const race = obj(pack.race);
     const savedAt = new Date().toISOString();
     if (Date.parse(str(race, "scheduled_start_at")) <= Date.parse(savedAt)) return;
     const given = rows(answer.lab_evaluations ?? []);
     const missing = coverage ? rows(coverage.missing) : rows(answer.missing ?? []);
-    if (!given.length && !missing.length) return;
-    const name = `lab/${day}/${raceKey(str(race, "race_id"))}-${str(pack, "pack_hash").slice(0, 16)}${coverage ? `-${status}` : ""}.json`;
-    const ranked = coverage ? provisionalRanking(pack, coverage, given, status === "formal") : null;
+    if (!given.length && !missing.length && status !== "free") return;
+    const name = `lab/${day}/${raceKey(str(race, "race_id"))}-${str(pack, "pack_hash").slice(0, 16)}${coverage ? `-${status}` : status === "free" ? "-free" : ""}.json`;
+    const ranked = coverage ? provisionalRanking(pack, coverage, given, status === "formal" || status === "free") : null;
     const hitPicks = Array.isArray(answer.hit_picks) && answer.hit_picks.length ? answer.hit_picks : null;
-    if (status === "formal") {
-      if (!(await readFile(path.join(this.exchange, name), "utf8").catch(() => null)))
+    if (status === "formal" || status === "free") {
+      if (!(await readFile(path.join(this.exchange, name), "utf8").catch(() => null))) {
+        const fallbackRanking = ranked?.ranking ?? given.map((e, idx) => ({
+          horse_number: e.horse_number,
+          horse_name: e.horse_name ?? "",
+          rank: idx + 1,
+          score: typeof e.score === "number" ? e.score : null,
+        }));
         await immutableLocalFile(this.exchange, name, JSON.stringify({
-          schema_version: "1", lane: "lab", adopted: false, prediction_status: "formal",
-          lab_version: "formal-copy-v1", race_id: race.race_id!, race_date_jst: day,
+          schema_version: "1", lane: "lab", adopted: status === "free", prediction_status: status,
+          lab_version: status === "free" ? "free-prediction-v1" : "formal-copy-v1",
+          race_id: race.race_id!, race_date_jst: day,
           scheduled_start_at: race.scheduled_start_at!, pack_hash: pack.pack_hash!,
-          saved_at: savedAt, confidence: coverage!.confidence!, ranking: ranked!.ranking,
-          evaluations: ranked!.evaluations,
+          saved_at: savedAt,
+          model: this.model,
+          confidence: coverage?.confidence ?? 0.7,
+          ranking: fallbackRanking,
+          evaluations: ranked?.evaluations ?? given,
+          ...(typeof answer.free_analysis === "string" ? { free_analysis: answer.free_analysis.slice(0, 2000) } : {}),
+          ...(typeof answer.reason === "string" ? { reason: answer.reason.slice(0, 600) } : {}),
           ...(hitPicks ? { hit_picks: hitPicks } : {}),
         }));
+      }
       return;
     }
     const summary = {
@@ -1555,42 +1603,101 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
               JSON.stringify(document),
             );
           }
-        } else if (raceDay < day && rows(entry.predictions).length) {
+        } else if (raceDay < day && (rows(entry.predictions).length || this.freeMode)) {
           const result = obj(entry.official_result);
           const adoption = rows(entry.adopted_reference ?? []).at(-1) ??
             rows(entry.adopted_prediction ?? []).at(-1);
-          if (result.official_status !== "official" || !adoption ||
-            rows(entry.reviews ?? []).some((r) => r.result_id === result.result_id &&
-              r.prediction_id === adoption.prediction_id)) continue;
+          const labRecord = this.freeMode ? await this.latestLab(raceId) : null;
+          if (result.official_status !== "official" || (!adoption && !labRecord)) continue;
+          if (adoption && rows(entry.reviews ?? []).some((r) => r.result_id === result.result_id &&
+            r.prediction_id === adoption.prediction_id)) continue;
+          const localReviewPath = `reviews/${raceDay}/${key}-v${result.revision}.json`;
+          if (!adoption && await readFile(path.join(this.exchange, localReviewPath), "utf8").catch(() => null))
+            continue;
           const review = await this.generate(
             `${day}-review-${key}-${result.revision}`,
             rules +
-              "保存済みの採用予想と公式結果を比較。観測・仮説・未知・時系列検証計画を observations_json, hypotheses_json, unknowns_json, validation_plan_json の短い配列で返す。着順から実ペースを断定しない。1Rで重みを変更しない。\n" +
-              JSON.stringify({ ...evidence, predictions: rows(entry.predictions)
-                .filter((p) => p.prediction_id === adoption.prediction_id) }),
+              "保存済みの予想（および仮想Betプラン）と公式結果を比較。観測・仮説・未知・時系列検証計画・戦略改善提案を observations_json, hypotheses_json, unknowns_json, validation_plan_json, strategy_adjustment の配列で返す。着順から実ペースを断定しない。\n" +
+              JSON.stringify({
+                ...evidence,
+                predictions: adoption
+                  ? rows(entry.predictions).filter((p) => p.prediction_id === adoption.prediction_id)
+                  : [],
+                ...(labRecord ? { lab_prediction: labRecord } : {}),
+              }),
             false,
           );
           if (review && !review.blocked) {
             const record: Row = {
               review_id: `local-review:${key}:${result.revision}`,
-              prediction_id: adoption.prediction_id!,
+              prediction_id: adoption?.prediction_id ?? `lab:${key}`,
               result_id: result.result_id!,
               observations_json: reviewNotes(review.observations_json),
               hypotheses_json: reviewNotes(review.hypotheses_json),
               unknowns_json: reviewNotes(review.unknowns_json),
               validation_plan_json: reviewNotes(review.validation_plan_json),
+              ...(review.strategy_adjustment ? { strategy_adjustment: reviewNotes(review.strategy_adjustment) } : {}),
             };
             await immutableLocalFile(
               this.exchange,
-              `reviews/${raceDay}/${key}-v${result.revision}.json`,
+              localReviewPath,
               JSON.stringify(record),
             );
-            await this.api("/reviews", record);
+            if (this.freeMode && this.strategyRulesPath && review.strategy_adjustment) {
+              await this.appendStrategyLessons(
+                this.strategyRulesPath,
+                raceDay,
+                reviewNotes(review.strategy_adjustment),
+              ).catch(() => {});
+            }
+            if (adoption) await this.api("/reviews", record);
           }
         }
       } catch (error) {
         this.failedJob(String(obj(entry.race).race_id), error);
       }
     }
+  }
+
+  /** Pulls Web-uploaded NAR CSV/ZIP files into nar-csv-inbox and acknowledges them. */
+  private async drainUploadedNarCsvs() {
+    const res = await this.api("/local-predictions/nar-csv/pending?include_data=1").catch(() => null);
+    const items = rows(res?.items ?? []);
+    if (!items.length) return;
+    const inboxDir = path.join(this.home, "nar-csv-inbox");
+    await mkdir(inboxDir, { recursive: true });
+    const ackIds: string[] = [];
+    for (const item of items) {
+      const id = String(item.id ?? "");
+      const filename = path.basename(String(item.filename ?? ""));
+      const b64 = String(item.content_base64 ?? "");
+      if (!id || !filename || !b64) continue;
+      await writeFile(path.join(inboxDir, `${id}-${filename}`), Buffer.from(b64, "base64"));
+      ackIds.push(id);
+    }
+    if (ackIds.length) {
+      await this.api("/local-predictions/nar-csv/ack", { ids: ackIds }).catch(() => {});
+    }
+  }
+
+  /** Appends new review strategy adjustments to the strategy rules file, deduplicated and capped. */
+  private async appendStrategyLessons(filePath: string, raceDay: string, lessons: string[]) {
+    if (!lessons.length) return;
+    const marker = "<!-- AUTO-LEARNED LESSONS BELOW -->";
+    const current = await readFile(filePath, "utf8").catch(() => "");
+    const parts = current.split(marker);
+    const head = parts[0] ? `${parts[0].trimEnd()}\n${marker}\n` : `${marker}\n`;
+    const existingLines = (parts[1] ?? "")
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("- "));
+    const existingTexts = new Set(existingLines.map((l) => l.replace(/^- (?:\[\d{4}-\d{2}-\d{2}\]\s*)?/, "")));
+    const added = lessons
+      .map((l) => l.replace(/[\r\n]+/g, " ").trim())
+      .filter((l) => l.length > 0 && !existingTexts.has(l))
+      .map((l) => `- [${raceDay}] ${l}`);
+    if (!added.length) return;
+    const merged = [...existingLines, ...added].slice(-30);
+    await writeFile(filePath, `${head}${merged.join("\n")}\n`, "utf8");
   }
 }

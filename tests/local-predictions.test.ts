@@ -343,7 +343,7 @@ it("uses helperInfer for research/result/review tasks and infer for prediction t
   const infer = vi.fn(async () => ({ blocked: true, reason: "prediction mock" }));
   const helperInfer = vi.fn(async () => ({ blocked: true, reason: "helper mock" }));
   const worker = new LocalPredictionWorker(
-    home, api, "", "fixture-model", infer, 0, undefined, 1, helperInfer, "gemini-3.8-flash-medium",
+    home, api, "", "fixture-model", infer, 0, undefined, 1, helperInfer, "gemini-4-hydrogen-medium",
   );
   await worker.init();
   await worker.tick(now);

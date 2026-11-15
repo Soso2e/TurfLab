@@ -121,8 +121,10 @@ export async function readBody(request: Request): Promise<Row> {
   );
   // Catalog receipts include complete source documents; even one normal
   // production backup exceeds the ordinary mutation limit.
-  const restoring = new URL(request.url).pathname === "/api/restore";
-  const limit = restoring ? 16 * 1024 * 1024 : 262144;
+  const largeBody = ["/api/restore", "/api/local-predictions/nar-csv/upload"].includes(
+    new URL(request.url).pathname,
+  );
+  const limit = largeBody ? 16 * 1024 * 1024 : 262144;
   const reader = request.body?.getReader();
   requireCondition(reader, "本文が必要です", 400);
   let length = 0;
@@ -134,7 +136,7 @@ export async function readBody(request: Request): Promise<Row> {
     if (length > limit) {
       await reader.cancel();
       throw new DomainError(
-        restoring ? "復元入力は16MiB以内です" : "入力は256KiB以内です",
+        largeBody ? "アップロードまたは復元入力は16MiB以内です" : "入力は256KiB以内です",
         413,
       );
     }
@@ -519,6 +521,71 @@ export class TurfCoordinator {
             }),
           });
           return response({ status: "saved" });
+        }
+        if (bridgePath === "/api/local-predictions/nar-csv/upload") {
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const input = await readBody(request);
+          const rawName = String(input.filename ?? "").split(/[/\\]/).pop() ?? "";
+          const filename = rawName.replace(/[^\w.\-()\u3000-\u9FFF]/gu, "_");
+          requireCondition(/\.(csv|zip)$/i.test(filename), "CSVまたはZIPファイルのみ対応しています");
+          const b64 = String(input.content_base64 ?? "");
+          requireCondition(b64.length > 0 && b64.length <= 16 * 1024 * 1024, "ファイルサイズが不正です");
+          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+          const chunkSize = 64 * 1024;
+          const chunks = Math.ceil(b64.length / chunkSize);
+          const puts: Record<string, unknown> = {};
+          for (let i = 0; i < chunks; i++) {
+            puts[`nar-csv-chunk:${id}:${i}`] = b64.slice(i * chunkSize, (i + 1) * chunkSize);
+          }
+          const pending = (await this.state.storage.get<Row[]>("nar-csv-pending")) ?? [];
+          pending.push({
+            id,
+            filename,
+            chunks,
+            size_bytes: Math.floor((b64.length * 3) / 4),
+            uploaded_at: new Date().toISOString(),
+          });
+          puts["nar-csv-pending"] = pending;
+          await this.state.storage.put(puts);
+          return response({ ok: true, id, filename, pending_count: pending.length });
+        }
+        if (bridgePath === "/api/local-predictions/nar-csv/pending") {
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          requireCondition(request.method === "GET", "GETが必要です", 405);
+          const includeData = new URL(request.url).searchParams.get("include_data") === "1";
+          const pending = (await this.state.storage.get<Row[]>("nar-csv-pending")) ?? [];
+          if (!includeData) return response({ items: pending });
+          const items: Row[] = [];
+          for (const meta of pending) {
+            const chunks = Number(meta.chunks ?? 0);
+            let b64 = "";
+            for (let i = 0; i < chunks; i++) {
+              b64 += String((await this.state.storage.get<string>(`nar-csv-chunk:${meta.id}:${i}`)) ?? "");
+            }
+            items.push({ ...meta, content_base64: b64 });
+          }
+          return response({ items });
+        }
+        if (bridgePath === "/api/local-predictions/nar-csv/ack") {
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const input = await readBody(request);
+          const ackIds = new Set(Array.isArray(input.ids) ? input.ids.map(String) : []);
+          const pending = (await this.state.storage.get<Row[]>("nar-csv-pending")) ?? [];
+          const remain: Row[] = [];
+          const keysToDelete: string[] = [];
+          for (const meta of pending) {
+            if (ackIds.has(String(meta.id))) {
+              const chunks = Number(meta.chunks ?? 0);
+              for (let i = 0; i < chunks; i++) keysToDelete.push(`nar-csv-chunk:${meta.id}:${i}`);
+            } else {
+              remain.push(meta);
+            }
+          }
+          if (keysToDelete.length) await this.state.storage.delete(keysToDelete);
+          await this.state.storage.put("nar-csv-pending", remain);
+          return response({ ok: true, remaining: remain.length });
         }
         if (
           [

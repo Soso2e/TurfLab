@@ -18,9 +18,10 @@ const { values } = parseArgs({
     once: { type: "boolean" },
     model: { type: "string", default: "gpt-6.1-sol" },
     "reasoning-effort": { type: "string", default: "low" },
-    "helper-model": { type: "string", default: "gemini-3.8-flash-medium" },
+    "helper-model": { type: "string", default: "gemini-4-hydrogen-medium" },
     origin: { type: "string", default: "http://127.0.0.1:8787" },
     "race-url": { type: "string" },
+    "strict-mode": { type: "boolean" },
   },
 });
 if (values["race-url"]) {
@@ -79,6 +80,9 @@ try {
       path.join(process.cwd(), "prompts/prediction-method.md"),
       "utf8",
     ));
+  const strategyRulesPath = path.join(process.cwd(), "prompts/ai-strategy-rules.md");
+  const strategyRules = await readFile(strategyRulesPath, "utf8").catch(() => "");
+  const freeMode = !values["strict-mode"] && process.env.TURFLAB_FREE_MODE !== "off";
   const effort = values["reasoning-effort"] ?? "low";
   const infer = (dir: string, prompt: string, model: string, webSearch?: boolean) =>
     predictWithCodex(dir, prompt, model, webSearch, effort);
@@ -90,6 +94,10 @@ try {
     undefined,
     predictWithHelper,
     values["helper-model"],
+    undefined,
+    freeMode,
+    strategyRules,
+    strategyRulesPath,
   );
   await worker.init();
   let stopping = false;

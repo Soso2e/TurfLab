@@ -51,6 +51,90 @@ const time = (n: Json | undefined) =>
       })
     : "未取得";
 
+function NarCsvUploadPanel({
+  api,
+  busy,
+  action,
+  setNotice,
+}: {
+  api: (path: string, body?: unknown) => Promise<Row>;
+  busy: boolean;
+  action: (fn: () => Promise<void>) => Promise<void>;
+  setNotice: (msg: string) => void;
+}) {
+  const [pending, setPending] = useState<Row[]>([]);
+  const [result, setResult] = useState<string>("");
+
+  const refreshPending = async () => {
+    const res = await api("/local-predictions/nar-csv/pending").catch(() => null);
+    if (res) setPending(rows(res.items));
+  };
+
+  useEffect(() => {
+    void refreshPending();
+  }, []);
+
+  const onFiles = (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    void action(async () => {
+      let okCount = 0;
+      for (const file of Array.from(files)) {
+        const buf = await file.arrayBuffer();
+        const bytes = new Uint8Array(buf);
+        let binary = "";
+        const chunk = 0x8000;
+        for (let i = 0; i < bytes.length; i += chunk) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+        }
+        const content_base64 = btoa(binary);
+        await api("/local-predictions/nar-csv/upload", {
+          filename: file.name,
+          content_base64,
+        });
+        okCount++;
+      }
+      await refreshPending();
+      const msg = `${okCount}件のファイルをアップロードしました（次のWorker周期で自動解凍・Python集計に反映されます）`;
+      setResult(msg);
+      setNotice(msg);
+    });
+  };
+
+  return (
+    <section className="panel">
+      <h2>NAR CSV / ZIP インポート</h2>
+      <p className="muted">
+        地方競馬公式サイトからダウンロードした CSV または ZIP ファイルをそのまま選択すると、ローカルの取り込み箱へ送信され、Pythonの過去データ集計に自動反映されます。
+      </p>
+      <div className="toolbar">
+        <label className="button" style={{ cursor: busy ? "not-allowed" : "pointer" }}>
+          CSV / ZIP を選択してアップロード
+          <input
+            type="file"
+            accept=".csv,.zip"
+            multiple
+            disabled={busy}
+            style={{ display: "none" }}
+            onChange={(e) => {
+              onFiles(e.target.files);
+              e.currentTarget.value = "";
+            }}
+          />
+        </label>
+        <button disabled={busy} onClick={() => void action(refreshPending)}>
+          待機状況を更新
+        </button>
+      </div>
+      {result && <p>{result}</p>}
+      {pending.length > 0 && (
+        <p className="muted">
+          取り込み待ち: {pending.length}件（{pending.map((p) => String(p.filename)).join(", ")}）
+        </p>
+      )}
+    </section>
+  );
+}
+
 function AutomaticBetPlans({ api, race, fieldSize }: {
   api: (path: string) => Promise<Row>;
   race: Row;
@@ -2248,13 +2332,16 @@ function App() {
                   {output && <JsonView value={output} />}
                 </section>
                 {storage === "local" && (
-                  <RaceImportWizard
-                    api={api}
-                    busy={busy}
-                    action={action}
-                    onOpen={openRace}
-                    initialSnapshot={snapshotId}
-                  />
+                  <>
+                    <NarCsvUploadPanel api={api} busy={busy} action={action} setNotice={setNotice} />
+                    <RaceImportWizard
+                      api={api}
+                      busy={busy}
+                      action={action}
+                      onOpen={openRace}
+                      initialSnapshot={snapshotId}
+                    />
+                  </>
                 )}
                 <section className="panel">
                   <div className="section-heading">
