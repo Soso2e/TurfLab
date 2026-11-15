@@ -24,10 +24,16 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconRefresh,
-  IconCheck,
-  IconClose,
   IconArrowRight,
 } from "./Icons";
+import {
+  CopyButton,
+  HoldConfirmButton,
+  MorphIslandToast,
+  NumberRoll,
+  ParallaxCard,
+  useSlidingPill,
+} from "./Motion";
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -652,6 +658,8 @@ function App() {
       await reload();
     });
   }
+  const sidebarPill = useSlidingPill(tab);
+  const trackPill = useSlidingPill(trackFilter, [races.length, trackNames.length, tab]);
   return (
     <div className="app">
       <aside className="sidebar">
@@ -669,7 +677,8 @@ function App() {
           </span>
         </a>
         <div className="side-label">WORKSPACE</div>
-        <nav>
+        <nav ref={sidebarPill.containerRef}>
+          <div className="sidebar-nav-pill" style={sidebarPill.pillStyle} aria-hidden="true" />
           {[
             { id: "today", title: "本日のレース", no: "01", icon: IconRace },
             { id: "import", title: "データを取り込む", no: "02", icon: IconImport },
@@ -682,6 +691,7 @@ function App() {
               <button
                 key={item.id}
                 className={tab === item.id ? "active" : ""}
+                data-pill-active={tab === item.id ? "true" : undefined}
                 onClick={() => {
                   setTab(item.id);
                   if (item.id === "stats")
@@ -816,20 +826,36 @@ function App() {
                 <div className="day-summary">
                   <div>
                     <span>登録レース</span>
-                    <strong>{races.length}<small>R</small></strong>
+                    <strong><NumberRoll value={races.length} format={(n) => String(n)} /><small>R</small></strong>
                   </div>
                   <div>
                     <span>本日の仮想購入</span>
-                    <strong>{yen(data?.spent_yen)}</strong>
+                    <strong>
+                      {typeof data?.spent_yen === "number" ? (
+                        <NumberRoll value={data.spent_yen} format={(n) => yen(n)} />
+                      ) : (
+                        yen(data?.spent_yen)
+                      )}
+                    </strong>
                   </div>
                   <div>
                     <span>予算残 <small>/ ¥5,000</small></span>
-                    <strong className={Number(data?.remaining_yen) <= 0 ? "neg" : ""}>{yen(data?.remaining_yen)}</strong>
+                    <strong className={Number(data?.remaining_yen) <= 0 ? "neg" : ""}>
+                      {typeof data?.remaining_yen === "number" ? (
+                        <NumberRoll value={data.remaining_yen} format={(n) => yen(n)} />
+                      ) : (
+                        yen(data?.remaining_yen)
+                      )}
+                    </strong>
                   </div>
                   <div>
                     <span>精算損益 <small>全期間</small></span>
                     <strong className={Number(purchase.net_yen) > 0 ? "pos" : Number(purchase.net_yen) < 0 ? "neg" : ""}>
-                      {Number(purchase.settled_tickets) > 0 ? signedYen(purchase.net_yen) : "—"}
+                      {Number(purchase.settled_tickets) > 0 ? (
+                        <NumberRoll value={Number(purchase.net_yen ?? 0)} format={(n) => signedYen(n)} />
+                      ) : (
+                        "—"
+                      )}
                     </strong>
                     {Number(purchase.pending_tickets) > 0 && <small>未精算 {String(purchase.pending_tickets)}券</small>}
                   </div>
@@ -837,7 +863,7 @@ function App() {
                 {nextRace && (() => {
                   const cd = countdownInfo(countdownMinutes(nextRace.scheduled_start_at));
                   return (
-                    <button className="next-race" onClick={() => void openRace(String(nextRace.race_id))}>
+                    <ParallaxCard className="next-race" onClick={() => void openRace(String(nextRace.race_id))} maxTilt={3.5}>
                       <span className="next-label">次のレース</span>
                       <span className="next-r">
                         {trackOf(nextRace)} <b>{String(nextRace.race_number)}R</b>
@@ -854,7 +880,7 @@ function App() {
                         ))}
                       </span>
                       <IconArrowRight size={14} />
-                    </button>
+                    </ParallaxCard>
                   );
                 })()}
                 <section className="panel race-panel">
@@ -870,9 +896,11 @@ function App() {
                     </label>
                   </div>
                   {races.length > 0 && trackNames.length > 1 && (
-                    <div className="track-filter-chips">
+                    <div className="track-filter-chips" ref={trackPill.containerRef}>
+                      <div className="track-chip-pill" style={trackPill.pillStyle} aria-hidden="true" />
                       <button
                         className={`track-chip ${trackFilter === "all" ? "active" : ""}`}
+                        data-pill-active={trackFilter === "all" ? "true" : undefined}
                         onClick={() => setTrackFilter("all")}
                       >
                         全場 <small>{races.length}</small>
@@ -881,6 +909,7 @@ function App() {
                         <button
                           key={name}
                           className={`track-chip ${trackFilter === name ? "active" : ""}`}
+                          data-pill-active={trackFilter === name ? "true" : undefined}
                           onClick={() => setTrackFilter(name)}
                         >
                           {name} <small>{races.filter((r) => trackOf(r) === name).length}</small>
@@ -1491,10 +1520,11 @@ function App() {
                           </div>
                         ))}
                       <div className="toolbar">
-                        <button
+                        <HoldConfirmButton
                           className="primary"
                           disabled={busy || selected.status === "locked"}
-                          onClick={() =>
+                          holdHint="長押しでこの予想を確定（ロック）します"
+                          onConfirm={() =>
                             void action(async () => {
                               await api(
                                 "/predictions/" +
@@ -1512,8 +1542,8 @@ function App() {
                             })
                           }
                         >
-                          この予想を確定
-                        </button>
+                          この予想を確定（長押し）
+                        </HoldConfirmButton>
                         <button
                           disabled={busy || selected.status !== "locked"}
                           onClick={() =>
@@ -1606,18 +1636,10 @@ function App() {
                           value={String(output.prompt)}
                           rows={10}
                         />
-                        <button
-                          onClick={() =>
-                            void action(async () => {
-                              await navigator.clipboard.writeText(
-                                String(output.prompt),
-                              );
-                              setNotice("コピーしました");
-                            })
-                          }
-                        >
-                          コピー
-                        </button>
+                        <CopyButton
+                          text={String(output.prompt)}
+                          onCopied={() => setNotice("コピーしました")}
+                        />
                       </>
                     )}
                   </details>
@@ -2361,18 +2383,8 @@ function App() {
         <ChatReviewModal review={selectedChatReview} onClose={() => setSelectedChatReview(null)} />
       )}
 
-      {/* Floating Toast Notification */}
-      {notice && (
-        <div className="floating-toast" role="status">
-          <div className="floating-toast-content">
-            <span className="toast-icon"><IconCheck size={14} /></span>
-            <span>{notice}</span>
-          </div>
-          <button className="toast-close" onClick={() => setNotice("")} title="閉じる">
-            <IconClose size={13} />
-          </button>
-        </div>
-      )}
+      {/* Floating Morph Island Toast */}
+      <MorphIslandToast busy={busy} notice={notice} onDismiss={() => setNotice("")} />
     </div>
   );
 }

@@ -4,6 +4,16 @@
   background: #f4f5f0;
   font-synthesis: none;
   font-size: 14px;
+  --spring-bouncy: linear(
+    0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017, 1.077,
+    1.121 24%, 1.132 25.5%, 1.133 27.1%, 1.116 30.8%, 1.018 41.3%, 0.996 45%,
+    0.986 48.9%, 0.985 52.8%, 1.001 64.9%, 1.003 73.1%, 0.999 88.2%, 1
+  );
+  --spring-quick: linear(
+    0, 0.014, 0.056 2.2%, 0.214 4.7%, 0.631 9.4%, 0.89 13.7%, 1.005 17.6%,
+    1.045 20.8%, 1.053 23.7%, 1.031 30.4%, 1.003 40.3%, 0.996 49.4%, 1
+  );
+  --spring-smooth: cubic-bezier(0.22, 1, 0.36, 1);
 }
 * {
   box-sizing: border-box;
@@ -2181,3 +2191,284 @@ th { font-size: 11px; color: var(--ink-sub); }
   .hide-finished input { min-height: 0; }
 }
 .date-step-btn { white-space: nowrap; }
+
+/* ==========================================================================
+   DesignBookmark Motion — Spring Micro-interactions
+   ========================================================================== */
+
+/* 1. Tab Pill (Sidebar & Track Filter Chips) */
+.sidebar nav {
+  position: relative;
+}
+.sidebar nav button {
+  position: relative;
+  z-index: 1;
+  transition: color 0.2s var(--spring-smooth), transform 0.25s var(--spring-quick);
+}
+.sidebar nav button.active {
+  background: transparent;
+}
+.sidebar nav button:active {
+  transform: scale(0.98);
+}
+.sidebar-nav-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 6px;
+  background: #2b5343;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+  z-index: 0;
+  transition:
+    transform 0.48s var(--spring-bouncy),
+    width 0.36s var(--spring-quick),
+    height 0.36s var(--spring-quick),
+    opacity 0.2s ease;
+}
+
+.track-filter-chips {
+  position: relative;
+}
+.track-chip {
+  position: relative;
+  z-index: 1;
+  transition: color 0.18s ease, border-color 0.18s ease, transform 0.2s var(--spring-quick);
+}
+.track-chip.active {
+  background: transparent;
+  border-color: transparent;
+}
+.track-chip:active {
+  transform: scale(0.96);
+}
+.track-chip-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 14px;
+  background: #1b4d3e;
+  pointer-events: none;
+  z-index: 0;
+  transition:
+    transform 0.44s var(--spring-bouncy),
+    width 0.32s var(--spring-quick),
+    height 0.32s var(--spring-quick),
+    opacity 0.18s ease;
+}
+
+/* 2. Parallax Card & Specular Highlight */
+.motion-parallax {
+  position: relative;
+  overflow: hidden;
+  transform-style: preserve-3d;
+  transition: transform 0.42s var(--spring-smooth), background 0.2s ease, box-shadow 0.3s ease;
+  will-change: transform;
+}
+.motion-parallax-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--glow-opacity, 0);
+  background: radial-gradient(
+    420px circle at var(--mx, 50%) var(--my, 50%),
+    rgba(209, 219, 163, 0.22),
+    transparent 55%
+  );
+  transition: opacity 0.28s ease;
+}
+
+/* 3. Race Card & Summary Hover Spring */
+.race-list .race-card {
+  transition:
+    transform 0.35s var(--spring-quick),
+    background 0.18s ease,
+    box-shadow 0.25s ease,
+    opacity 0.2s ease;
+}
+.race-list .race-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(21, 61, 50, 0.08);
+}
+.race-list .race-card:active {
+  transform: translateY(0) scale(0.995);
+}
+.day-summary > div {
+  transition: background 0.2s ease;
+}
+.day-summary > div:hover {
+  background: #fafcf7;
+}
+
+/* 4. Copy Button (Morph to Check) */
+.motion-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.3s var(--spring-bouncy);
+}
+.motion-copy-btn:active {
+  transform: scale(0.95);
+}
+.motion-copy-btn.is-copied {
+  background: #e8f5ee;
+  border-color: #28765a;
+  color: #153d32;
+  font-weight: 600;
+}
+.motion-copy-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.35s var(--spring-bouncy);
+}
+.motion-copy-btn.is-copied .motion-copy-icon {
+  transform: scale(1.15) rotate(-4deg);
+  color: #28765a;
+}
+
+/* 5. Hold to Confirm Button */
+.motion-hold-btn {
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.25s var(--spring-quick), box-shadow 0.2s ease;
+}
+.motion-hold-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.motion-hold-fill {
+  position: absolute;
+  inset: 0;
+  background: rgba(209, 219, 163, 0.35);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: transform 0.06s linear;
+}
+.motion-hold-btn.primary .motion-hold-fill {
+  background: rgba(255, 255, 255, 0.24);
+}
+.motion-hold-btn:not(.is-holding) .motion-hold-fill {
+  transition: transform 0.35s var(--spring-bouncy);
+}
+.motion-hold-label {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.motion-hold-btn.is-completed {
+  background: #28765a !important;
+  color: #fff !important;
+  border-color: #28765a !important;
+}
+
+/* 6. Morph Island Toast & Goo Thinking Dots */
+.motion-morph-island {
+  border-radius: 999px;
+  padding: 10px 18px;
+  transition:
+    width 0.4s var(--spring-bouncy),
+    padding 0.35s var(--spring-quick),
+    background 0.25s ease,
+    transform 0.45s var(--spring-bouncy);
+  animation: morph-island-in 0.42s var(--spring-bouncy);
+}
+.motion-morph-island.is-thinking {
+  background: #1d4a3d;
+  padding: 9px 16px;
+}
+@keyframes morph-island-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.motion-pop-in {
+  animation: motion-pop 0.38s var(--spring-bouncy);
+}
+@keyframes motion-pop {
+  from {
+    transform: scale(0.4) rotate(-18deg);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+  }
+}
+.goo-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.goo-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #d1dba3;
+  animation: goo-bounce 1.05s infinite ease-in-out;
+}
+.goo-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.goo-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+@keyframes goo-bounce {
+  0%, 80%, 100% {
+    transform: scale(0.65);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
+/* 7. Modal Expand Entrance */
+.modal-backdrop {
+  animation: modal-fade 0.2s ease-out;
+}
+.modal-panel,
+.modal-content {
+  animation: modal-expand 0.4s var(--spring-bouncy);
+}
+@keyframes modal-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes modal-expand {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .motion-parallax {
+    transform: none !important;
+  }
+}
