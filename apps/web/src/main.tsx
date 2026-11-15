@@ -1234,7 +1234,7 @@ function App() {
                     onClose={() => setHorseRuns(null)} />
                 )}
                 <section className="panel">
-                  <h2>出走馬と過去5走</h2>
+                  <h2>出走馬と過去3走</h2>
                   <div className="table-scroll">
                     <table>
                       <thead>
@@ -1249,7 +1249,7 @@ function App() {
                       <tbody>
                         {rows(detail.entries).sort((a, b) => Number(a.horse_number) - Number(b.horse_number)).map((e) => {
                           const observed = rows(research?.horses ?? []).find((h) => h.horse_number === e.horse_number);
-                          const recent = rows(observed?.recent_runs ?? []);
+                          const recent = rows(observed?.recent_runs ?? []).slice(0, 3);
                           const profile = researchProfiles.find((p) => p.horse_id === e.horse_id);
                           return (
                           <tr key={String(e.entry_id)}>
@@ -1289,12 +1289,12 @@ function App() {
                                   </p>
                                 ))}
                               </details>}
-                              {(!observed || rows(e.past5).length > 0) && <details>
+                              {(!observed || rows(e.past3).length > 0) && <details>
                                 <summary>
-                                  過去5走 {rows(e.past5).length}件
+                                  過去3走 {rows(e.past3).length}件
                                 </summary>
-                                {rows(e.past5).length ? (
-                                  <JsonView value={e.past5} />
+                                {rows(e.past3).length ? (
+                                  <JsonView value={e.past3} />
                                 ) : (
                                   <p>未取得。ゼロとして扱いません。</p>
                                 )}

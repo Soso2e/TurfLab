@@ -315,10 +315,10 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
         ...e,
         horse: await get(repo, "horses", str(e, "horse_id")),
         jockey: await get(repo, "jockeys", str(e, "jockey_id")),
-        past5: (await repo.list("performances"))
+        past3: (await repo.list("performances"))
           .filter((p) => p.horse_id === e.horse_id)
           .sort((a, b) => instant(b.valid_as_of) - instant(a.valid_as_of))
-          .slice(0, 5),
+          .slice(0, 3),
       })),
     ),
     predictions,
