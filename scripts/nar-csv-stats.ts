@@ -42,6 +42,14 @@ export function csvSeconds(v: unknown): number | null {
   const sec = (m[1] ? Number(m[1]) * 60 : 0) + Number(m[2]);
   return sec > 0 && sec < 600 ? Math.round(sec * 10) / 10 : null;
 }
+/** NAR's official タイム encodes minutes, seconds and tenths as digits. */
+function narFinishSeconds(v: unknown): number | null {
+  const value = normName(v);
+  const compact = value.match(/^(\d?)([0-5]\d)(\d)$/u);
+  if (!compact) return csvSeconds(value);
+  const seconds = Number(compact[1]) * 60 + Number(`${compact[2]}.${compact[3]}`);
+  return seconds > 0 ? seconds : null;
+}
 const decimal = (v: unknown) => {
   const n = Number(normName(v));
   return normName(v) && Number.isFinite(n) && n > 0 ? n : null;
@@ -202,7 +210,11 @@ export function buildRuns(
     const cell = (r: string[], i: number) => (i >= 0 ? r[i] : undefined);
     for (const r of t.rows) {
       const date = normDate(r[dt]);
-      const raw = normName(r[fin]);
+      const margin = cell(r, opt.margin);
+      // The official horselist puts non-finishing statuses in 着差.
+      const marginStatus = normName(margin);
+      const raw = normName(r[fin]) ||
+        (/^(?:出走取消|競走除外|競走取止め|競走中止|失格)$/u.test(marginStatus) ? marginStatus : "");
       // Future entries in monthly files have no finish yet.
       if (!date || !raw) continue;
       let finish: number | null;
@@ -227,14 +239,14 @@ export function buildRuns(
         jockey: normName(r[jk]),
         finish,
         horse_name: opt.horse_name >= 0 ? normName(r[opt.horse_name]) || null : null,
-        finish_time_s: csvSeconds(cell(r, opt.finish_time_s)),
+        finish_time_s: narFinishSeconds(cell(r, opt.finish_time_s)),
         last_3f_s: (() => {
           const v = csvSeconds(cell(r, opt.last_3f_s));
           return v != null && v < 60 ? v : null;
         })(),
-        carried_weight_kg: opt.carried_weight_kg >= 0 ? decimal(r[opt.carried_weight_kg]) : null,
+        carried_weight_kg: decimal(normName(cell(r, opt.carried_weight_kg)).replace(/^[▲☆◇△★]/u, "")),
         body_weight_kg: opt.body_weight_kg >= 0 ? int(String(r[opt.body_weight_kg]).split(/[(（]/u)[0]) : null,
-        margin: opt.margin >= 0 ? textCell(r[opt.margin], 24) : null,
+        margin: finish == null && raw === marginStatus ? null : textCell(margin, 24),
         race_name: (race?.race_name as string | null) ?? null,
         weather: (race?.weather as string | null) ?? null,
       });

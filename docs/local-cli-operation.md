@@ -55,7 +55,9 @@ CLIは1回15分を上限として直列に実行する。1日の呼出し上限�
 
 ## NAR公式CSV（任意）
 
-公式サイトのデータダウンロードのボタンで本人が保存したZIP（またはCSV）を、展開せずに `%LOCALAPPDATA%\TurfLab\local-predictions\nar-csv-inbox\` へ置く。Workerが毎周期取り込み、`nar-csv\<SHA-256>.csv` に一度だけ保存し、`nar-csv\manifest.json` に出典・取込日時・行数・期間を記録する。同じ内容は重複として無視、NARの表と判別できないCSVは `nar-csv-inbox\rejected\` へ移す（推測で読まない）。取込状況は `status.json` の `nar_csv_import`。
+公式サイトから本人が保存したレース情報ZIP（`*_race.zip`）を、展開せずに `%LOCALAPPDATA%\TurfLab\local-predictions\nar-csv-inbox\` へ置く。Workerが毎周期、レース一覧と出馬表を `nar-csv\<SHA-256>.csv` に一度だけ保存し、`nar-csv\manifest.json` に出典・取込日時・行数・期間を記録する。レース一覧・出馬表はCSVでも投入できる。取込状況は `status.json` の `nar_csv_import`。
+
+現在のWorkerでは、レース情報ZIP内の払戻CSVも `rejected` 件数に含まれる。レース一覧・出馬表が取り込まれたZIPは `nar-csv-inbox\imported\` に移る。月次オッズZIP（`*_odds.zip`）と払戻の原本はローカルの `nar-archive\` に保存し、事後の市場比較や配当検証に使う。月次オッズに収録される時点は成績確定後。 [NARデータダウンロード機能説明書](https://www.keiba.go.jp/pdf/manual/data_pdf_manual.pdf)
 
 **自動ダウンロードはしない。** keiba.go.jp の robots.txt は Googlebot 以外に DataDownload・DataRoom を不許可としており、NARの許諾が得られるまで本人の手動保存だけを入口にする。第三者サイト（netkeiba等）も規約で自動取得を認める記載を確認できていないため取得しない。原本はGit管理外のこのフォルダだけに置き、GitHubへは上げない。
 
@@ -64,7 +66,7 @@ CLIは1回15分を上限として直列に実行する。1日の呼出し上限�
 
 - **CSV優先（2026-11-13）**：近走調査の前に、CSVの行を既知の走（場・日・R・馬番）に当て、`馬名` 列があれば馬名で直近走を探して `performances` に保存する（出典はCSV群のSHA-256）。CSVで埋まった項目はCLIに依頼しない。CSVの値は走ごとの記録として固定入力にも入り、非公開の `TurfLab-data` へ同期される。CSVの原本ファイルはこれまでどおりGitHubへ上げない。走ごとの値を記録に入れず集計だけに使う場合は環境変数 `TURFLAB_CSV_RUN_VALUES=off`。
 - 地方レースの追加調査のたびに、対象レース日の**前日まで**のレースだけで、同じ競馬場・芝ダ・距離の枠番別成績（同じ馬場の内訳付き）と、出走騎手の競馬場別・コース別成績を集計する。集計値・期間・標本数・CSVのSHA-256を固定入力（`research.local_stats`）に入れる。LLMには集計値だけが渡る。
-- 列は説明書の項目名（競馬場、競走年月日、レース番号、芝ダート区分、距離、馬場／枠番、馬番、騎手名、着順）で対応づける。実CSVのヘッダーは未確認のため、置いた後に次で読めるか確認する。`runs_with_course` が0なら列名が合っていない。
+- 列は説明書の項目名で対応づける。月次出馬表の走破時計は `1140` を1分14秒0と読み、着順が空欄の場合は着差欄の中止・失格などを確認する。次のコマンドで取込後の出走数・コース・騎手集計を確認できる。
 
 ```powershell
 npm run nar:check -- --track 佐賀 --date 2026-11-09 --surface ダ --distance 1300 --going 良 --jockey 山口勲

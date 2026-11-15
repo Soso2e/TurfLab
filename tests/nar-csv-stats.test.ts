@@ -60,3 +60,25 @@ it("reports unknown finish values instead of guessing", () => {
   expect(unrecognized).toEqual(["?"]);
   expect(narStats(runs, { track: "佐賀", date: "2026-11-09", surface: "ダ", distance_m: 1300, jockeys: [] }, [])).toBeNull();
 });
+
+it("reads compact times, allowance marks, and start statuses in the official horselist", () => {
+  const [header, ...rows] = parseCsv([
+    "競馬場,競走年月日,レース番号,枠番,馬番,騎手名,着順,負担重量,タイム,着差,上がり3F",
+    "盛岡,20260628,1,8,10,山本政,1,56,1140,,37.6",
+    "盛岡,20260628,1,1,1,騎手A,2,★50,595,ハナ,37.7",
+    "盛岡,20260628,1,2,2,騎手B,,55,,競走中止,",
+    "盛岡,20260628,1,3,3,騎手C,,55,,失格,",
+    "盛岡,20260628,1,4,4,騎手D,,55,,出走取消,",
+    "盛岡,20260628,1,5,5,騎手E,,55,,競走除外,",
+    "盛岡,20260628,2,1,1,騎手F,,55,,競走取止め,",
+    "盛岡,20260629,1,1,1,騎手G,,55,0,,",
+  ].join("\n"));
+  const { runs, unrecognized } = buildRuns([{ header, rows }]);
+  expect(unrecognized).toEqual([]);
+  expect(runs).toMatchObject([
+    { finish: 1, finish_time_s: 74, last_3f_s: 37.6, field_size: 4 },
+    { finish: 2, finish_time_s: 59.5, carried_weight_kg: 50, margin: "ハナ" },
+    { finish: null, finish_time_s: null, margin: null },
+    { finish: null, finish_time_s: null, margin: null },
+  ]);
+});
