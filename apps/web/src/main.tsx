@@ -113,6 +113,106 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
   );
 }
 
+function RaceProvisionalPrediction({ api, race, entries }: {
+  api: (path: string) => Promise<Row>;
+  race: Row;
+  entries: Row[];
+}) {
+  const latest = useRef(api);
+  latest.current = api;
+  const [status, setStatus] = useState<Row>();
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const value = await latest.current("/local-predictions/status");
+        if (active) setStatus(value);
+      } catch {
+        if (active) setStatus({});
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+  const record = rows(status?.race_provisional_predictions ?? []).find(
+    (item) => item.race_id === race.race_id,
+  );
+  if (!status) return <p className="muted">暫定予想を確認中です。</p>;
+  if (!record) return <p className="muted">予想が未取り込みです。</p>;
+  const ranking = rows(record.ranking ?? []);
+  const evaluations = rows(record.evaluations ?? []);
+  const horseName = (num: unknown) =>
+    String(entries.find((e) => e.horse_number === num)?.horse_name ?? "");
+  return (
+    <div className="provisional-prediction">
+      <p>
+        <span className="race-tag">#暫定</span>{" "}
+        <strong>研究ラボ保存（Core未採用）</strong>
+        {record.model ? ` · ${String(record.model)}` : ""}
+        {typeof record.confidence === "number" ? ` · 確信度 ${pct(record.confidence)}` : ""}
+        {typeof record.missing_count === "number" ? ` · 欠測 ${record.missing_count}件` : ""}
+        {record.saved_at ? ` · 保存 ${time(record.saved_at)}` : ""}
+      </p>
+      {(record.not_formal_reason || record.reason) && (
+        <p className="muted">{String(record.reason ?? record.not_formal_reason)}</p>
+      )}
+      {ranking.length > 0 && (
+        <details open>
+          <summary>暫定ランキング（{ranking.length}頭）</summary>
+          <table>
+            <thead>
+              <tr>
+                <th>順位</th>
+                <th>馬番</th>
+                <th>馬名</th>
+                <th>スコア</th>
+                <th>根拠カバー</th>
+              </tr>
+            </thead>
+            <tbody>
+              {ranking.map((r, idx) => (
+                <tr key={String(r.horse_number ?? idx)}>
+                  <td>{idx + 1}</td>
+                  <td>{String(r.horse_number ?? "-")}</td>
+                  <td>{horseName(r.horse_number) || String(r.horse_name ?? "-")}</td>
+                  <td>{typeof r.score === "number" ? r.score.toFixed(1) : "-"}</td>
+                  <td>{typeof r.covered_weight === "number" ? pct(r.covered_weight) : "-"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+      {evaluations.length > 0 && (
+        <details>
+          <summary>各馬の6評価と根拠（{evaluations.length}頭）</summary>
+          {evaluations.map((ev, idx) => {
+            const c = obj(ev.components ?? {});
+            const score = (k: string) => (typeof c[k] === "number" ? String(c[k]) : "欠測");
+            return (
+              <article key={String(ev.horse_number ?? idx)}>
+                <p>
+                  <strong>
+                    {String(ev.horse_number ?? "-")}番{" "}
+                    {String(ev.horse_name ?? horseName(ev.horse_number))}
+                  </strong>
+                  {" · "}能力 {score("ability")} / コース {score("course")} / 展開 {score("pace")} /
+                  馬場 {score("going")} / 枠斤 {score("draw_weight")} / 人馬 {score("horse_jockey_course")}
+                </p>
+                {ev.rationale && <p className="muted">{String(ev.rationale)}</p>}
+              </article>
+            );
+          })}
+        </details>
+      )}
+    </div>
+  );
+}
+
 const today = () =>
   new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const uid = () => crypto.randomUUID();
@@ -1442,6 +1542,12 @@ function App() {
                         Final 優先、なければ Morning です。
                       </p>
                     </>
+                  ) : storage === "local" ? (
+                    <RaceProvisionalPrediction
+                      api={api}
+                      race={race}
+                      entries={rows(detail.entries)}
+                    />
                   ) : (
                     <p className="muted">予想が未取り込みです。</p>
                   )}

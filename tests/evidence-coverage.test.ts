@@ -56,10 +56,14 @@ it("allows formal only once going, draw and jockey evidence are observed", () =>
   expect(evidenceCoverage(kawasaki({ going: null, local_stats: stats })).formal_allowed).toBe(false);
 });
 
-it("labels a nationwide jockey substitute as weak evidence", () => {
+it("labels a nationwide jockey substitute as weak evidence but allows formal with reduced confidence", () => {
   const pack = kawasaki({ going: "良", local_stats: { draw: { races: 40 } } });
   rows(obj(pack.research).horses).forEach((h) => { h.jockey_notes = [{ note: "全国集計の代用 2026/01〜" }]; });
-  expect(evidenceCoverage(pack).formal_allowed).toBe(false);
+  const coverage = evidenceCoverage(pack);
+  expect(coverage.formal_allowed).toBe(true);
+  expect(Number(coverage.confidence)).toBeLessThan(1);
+  const factors = obj(obj(rows(coverage.horses)[0]).factors);
+  expect(obj(factors.horse_jockey_course).status).toBe("weak");
 });
 
 it("drops scores for evidence-free factors and reports covered weight", () => {

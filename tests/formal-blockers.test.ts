@@ -22,7 +22,7 @@ it("names the blocking factors and the distance to each stored-result minimum", 
   const report = formalBlockers(p, evidenceCoverage(p));
   expect(report.formal_allowed).toBe(false);
   const factors = Object.fromEntries((report.blocking as Row[]).map((b) => [b.factor, b.horses]));
-  expect(factors).toEqual({ going: 2, draw_weight: 2, horse_jockey_course: 1 });
+  expect(factors).toEqual({ going: 2, draw_weight: 2 });
   expect(report.progress).toEqual({
     source: "core-results", draw_races: 5, draw_races_needed: CORE_MIN_DRAW_RACES,
     jockeys_below_min: 1, jockey_starts_needed: CORE_MIN_JOCKEY_STARTS, fewest_jockey_starts: 3,

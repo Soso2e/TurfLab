@@ -77,8 +77,9 @@ function horseEvidence(pack: Row, entry: Row): Record<Factor, Evidence> {
   };
 }
 
-/** Formal needs every factor observed. A course "weak" is allowed because a
- * horse new to the track is a fact about the horse, not a gap in the data. */
+/** Formal needs every factor observed, except course and horse_jockey_course
+ * which allow "weak" (e.g. horse new to the track, or nationwide/small-sample
+ * jockey stats) with reduced confidence rather than blocking formal intake. */
 export function evidenceCoverage(pack: Row): Row {
   const weights = weightsOf(pack);
   const total = FACTORS.reduce((sum, f) => sum + weights[f], 0);
@@ -90,7 +91,12 @@ export function evidenceCoverage(pack: Row): Row {
     for (const f of FACTORS) {
       const { status, detail } = factors[f];
       earned += weights[f] * (status === "observed" ? 1 : status === "weak" ? 0.5 : 0);
-      if (status === "missing" || (status === "weak" && f !== "course")) formal = false;
+      if (
+        status === "missing" ||
+        (status === "weak" && f !== "course" && f !== "horse_jockey_course")
+      ) {
+        formal = false;
+      }
       if (status !== "observed")
         missing.push({ horse_number: entry.horse_number!, component: f, status, detail });
     }
@@ -117,7 +123,12 @@ export function evidenceCoverage(pack: Row): Row {
 export function formalBlockers(pack: Row, coverage: Row): Row {
   const blocking = new Map<string, { horses: Set<number>; reasons: Set<string> }>();
   for (const m of rows(coverage.missing)) {
-    if (m.status === "weak" && m.component === "course") continue;
+    if (
+      m.status === "weak" &&
+      (m.component === "course" || m.component === "horse_jockey_course")
+    ) {
+      continue;
+    }
     const entry = blocking.get(String(m.component)) ?? { horses: new Set(), reasons: new Set() };
     entry.horses.add(Number(m.horse_number));
     entry.reasons.add(String(m.detail).replace(/\d+/gu, "N"));

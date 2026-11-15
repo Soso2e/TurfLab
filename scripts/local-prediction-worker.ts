@@ -713,6 +713,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       this.failedJob("race-bet-plans", error);
       return null;
     });
+    const raceProvisionalPredictions = await this.raceLabPredictions(currentRaces).catch((error) => {
+      this.failedJob("race-provisional-predictions", error);
+      return null;
+    });
     const learning = await this.learn(now).catch((error) => {
       this.failedJob("learning-report", error);
       return null;
@@ -734,6 +738,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       provisional_predictions: this.provisional,
       race_stages: [...this.stages.values()],
       ...(raceBetPlans && { race_bet_plans: raceBetPlans, race_bet_plans_date: day }),
+      ...(raceProvisionalPredictions && {
+        race_provisional_predictions: raceProvisionalPredictions,
+        race_provisional_predictions_date: day,
+      }),
       nar_csv_import: this.csvImport,
       learning,
       model: this.model,
@@ -937,7 +945,7 @@ JSON: {sources:[{site,source_url,published_at:ISOまたはnull,method:"記者|�
   jockey: entries.find((e) => e.horse_number === g.horse_number)?.jockey_name ?? null,
 })))}
 - ability / pace / course / past_runs: その馬の過去走を公式の競走成績表で確認し recent_runs に（日付・競走番号・レース名・場・芝ダ・距離・馬場・天候・頭数・当時の馬番/枠番・着順・通過順・時計・上がり・着差・斤量・騎手・ペース・出典URL）。past_runs の detail に missing_fields がある走は、その項目だけ調べて日付と出典URLを付けて返す。
-- horse_jockey_course: 騎手の今回の競馬場での成績（公式の騎手リーディング等、集計期間付き）を jockey_notes に。今回の場で絞れない場合は「全国集計の代用」と明記。
+- horse_jockey_course: 騎手の今回の競馬場での成績（公式の騎手リーディングや公開の場別・コース別騎手成績集計など、集計期間・騎乗数・出典URL付き）を jockey_notes に。今回の場で絞れない場合は「全国集計の代用」と明記。
 - draw_weight: 今回の競馬場・距離の枠番別成績（出典・期間・標本数付き）を track_notes に「枠」を含む文で。
 見つからない項目は limitations に理由を書く。
 JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_number,horse_name,jockey_notes:[{source_url,note}],recent_runs:[{date_jst,track,race_no,race_name,surface,distance_m,going,weather,field_size,horse_number,draw_number,finish,corners:[],finish_time_s,last_3f_s,margin,carried_weight_kg,body_weight_kg,jockey,pace:{first_3f_s,race_last_3f_s,laps_s:[]},source_url}]}]}`,
@@ -1268,6 +1276,37 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       .map(({ value }) => value)
       .filter((value) => value.race_id === raceId && Array.isArray(value.ranking))
       .sort((a, b) => String(b.saved_at).localeCompare(String(a.saved_at)))[0] ?? null;
+  }
+
+  /** Publish the latest Lab provisional predictions for the Web race detail view. */
+  private async raceLabPredictions(races: Row[]): Promise<Row[]> {
+    const labs = (await this.exchangeJson("lab")).map(({ value }) => value);
+    const byRace = new Map<string, Row>();
+    for (const record of labs) {
+      if (!Array.isArray(record.ranking)) continue;
+      const raceId = String(record.race_id ?? "");
+      const prev = byRace.get(raceId);
+      if (!prev || String(record.saved_at) > String(prev.saved_at)) {
+        byRace.set(raceId, record);
+      }
+    }
+    return races.flatMap((entry) => {
+      const raceId = String(obj(entry.race).race_id ?? "");
+      const record = byRace.get(raceId);
+      if (!record) return [];
+      return [{
+        race_id: raceId,
+        prediction_status: record.prediction_status ?? "provisional",
+        saved_at: record.saved_at ?? null,
+        model: record.model ?? null,
+        confidence: record.confidence ?? null,
+        reason: record.reason ?? null,
+        not_formal_reason: record.not_formal_reason ?? null,
+        missing_count: Array.isArray(record.missing) ? record.missing.length : 0,
+        ranking: rows(record.ranking ?? []).slice(0, 18),
+        evaluations: rows(record.evaluations ?? []).slice(0, 20),
+      }];
+    });
   }
 
   /** Weights fitted only on days before `day`; the prior until 30 races exist. */

@@ -484,17 +484,31 @@ export class TurfCoordinator {
           if (request.method === "GET") {
             const status = await this.state.storage.get<Row>("local-predictions-status") ?? { status: "disabled" };
             const plans = await this.state.storage.get<Row>("local-prediction-bet-plans");
-            return response({ ...status, ...plans });
+            const provisional = await this.state.storage.get<Row>("local-prediction-provisional");
+            return response({ ...status, ...plans, ...provisional });
           }
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);
           requireCondition(["healthy", "failed", "running"].includes(String(input.status)), "状態が不正です");
-          const { race_bet_plans, race_bet_plans_date, ...status } = input;
+          const {
+            race_bet_plans,
+            race_bet_plans_date,
+            race_provisional_predictions,
+            race_provisional_predictions_date,
+            ...status
+          } = input;
           await this.state.storage.put({
             "local-predictions-status": status,
             ...(input.status === "healthy" && Array.isArray(race_bet_plans) &&
               typeof race_bet_plans_date === "string" && {
               "local-prediction-bet-plans": { race_bet_plans, race_bet_plans_date },
+            }),
+            ...(input.status === "healthy" && Array.isArray(race_provisional_predictions) &&
+              typeof race_provisional_predictions_date === "string" && {
+              "local-prediction-provisional": {
+                race_provisional_predictions,
+                race_provisional_predictions_date,
+              },
             }),
           });
           return response({ status: "saved" });
