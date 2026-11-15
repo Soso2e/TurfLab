@@ -264,4 +264,34 @@ describe("CSV first", () => {
     expect(runs).toHaveLength(2);
     expect(runs[0]).toMatchObject({ horse_name: "アルファ", finish_time_s: 96.4, field_size: 2, last_3f_s: null });
   });
+  it("repairs legacy string corner_positions_json rows during backfill", async () => {
+    const r = await repo();
+    const lines = [
+      "１コーナー ( 1 , 6 ) , ( 2 , 4 )-( 5 , 7 )- 3",
+      "２コーナー 1 , 6 , ( 2 , 4 )-( 5 , 7 ) = 3",
+      "３コーナー ( 1 , 6 ) , 2 , 4 , ( 5 , 7 )- 3",
+      "４コーナー ( 1 , 6 )- 2 , ( 5 , 4 ) , 7 - 3",
+    ];
+    expect(cornersByHorse(lines).get(4)).toEqual([3, 3, 4, 4]);
+    r.data.set(
+      "performances",
+      new Map([
+        [
+          "performance:auto:r1:4",
+          {
+            schema_version: "0.2",
+            performance_id: "performance:auto:r1:4",
+            horse_id: "h1",
+            race_id: "r1",
+            horse_number: 4,
+            finish_position: 5,
+            corner_positions_json: lines,
+          },
+        ],
+      ]),
+    );
+    await backfillRunRecords(r, now);
+    const repaired = await r.get("performances", "performance:auto:r1:4");
+    expect(repaired?.corner_positions_json).toEqual([3, 3, 4, 4]);
+  });
 });

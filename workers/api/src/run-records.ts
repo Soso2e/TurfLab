@@ -295,7 +295,11 @@ export function cornersByHorse(lines: Json): Map<number, number[]> {
   const out = new Map<number, number[]>();
   const list = Array.isArray(lines) ? lines.filter((l): l is string => typeof l === "string") : [];
   for (const line of list.slice(0, 4)) {
-    const body = line.replace(/^[^\s]*角\s*/u, "").replace(/^[^\d(]*/u, "").normalize("NFKC");
+    const body = line
+      .normalize("NFKC")
+      .trim()
+      .replace(/^(?:\d+周目\s*)?\d*(?:コーナー|角)\s*/u, "")
+      .replace(/^[^\d(]*/u, "");
     if (!/^[\d,\-=()（）.\s*]+$/u.test(body)) continue;
     let rank = 0;
     const seen = new Set<number>();
@@ -318,8 +322,26 @@ export function cornersByHorse(lines: Json): Map<number, number[]> {
 /** Moves legacy horse-run-v1 features and race-only performance rows into run
  * records. Idempotent; the legacy rows stay as they were. */
 export async function backfillRunRecords(repo: Repository, now: string): Promise<Row> {
+  let repairedCorners = 0;
+  for (const p of await repo.list("performances")) {
+    if (
+      Array.isArray(p.corner_positions_json) &&
+      (p.corner_positions_json.some((v) => typeof v !== "number") ||
+        p.corner_positions_json.length > 4)
+    ) {
+      const horseNo =
+        typeof p.horse_number === "number"
+          ? p.horse_number
+          : Number(String(p.performance_id ?? "").match(/:(\d+)$/)?.[1] ?? 0);
+      const parsed = horseNo > 0 ? cornersByHorse(p.corner_positions_json).get(horseNo) ?? [] : [];
+      const limit = typeof p.field_size === "number" ? p.field_size : 18;
+      const valid = parsed.every((n) => Number.isInteger(n) && n >= 1 && n <= limit) ? parsed : [];
+      await repo.put("performances", { ...p, corner_positions_json: valid });
+      repairedCorners++;
+    }
+  }
   const index = await runIndex(repo);
-  let fromFeatures = 0, fromResults = 0;
+  let fromFeatures = 0, fromResults = repairedCorners;
   for (const f of await repo.list("entity_features")) {
     if (f.feature_version !== LEGACY_HORSE_RUN || !f.horse_id) continue;
     const run = obj(f.features_json);
