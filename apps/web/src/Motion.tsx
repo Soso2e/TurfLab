@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { IconCheck } from "./Icons";
 
 /**
@@ -829,6 +830,7 @@ export function GooMarkMenu({
   radius?: number;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const portalRef = useRef<HTMLDivElement | null>(null);
   const mainBlobRef = useRef<HTMLDivElement | null>(null);
   const mainBtnRef = useRef<HTMLButtonElement | null>(null);
   const plusRef = useRef<HTMLSpanElement | null>(null);
@@ -837,8 +839,15 @@ export function GooMarkMenu({
   const bubBtnRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const [open, setOpen] = useState(false);
+  const [portalActive, setPortalActive] = useState(false);
+  const [anchorPos, setAnchorPos] = useState<{ left: number; top: number; flipDown: boolean }>({
+    left: 0,
+    top: 0,
+    flipDown: false,
+  });
   const [toastInfo, setToastInfo] = useState<GooMarkOption | null>(null);
   const openRef = useRef(false);
+  const toastActiveRef = useRef(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
 
@@ -847,12 +856,16 @@ export function GooMarkMenu({
   const OX = 115;
   const OY = 112;
 
-  const home = useRef(
-    [-168, -140, -112, -68, -40, -12].map((deg) => {
-      const a = (deg * Math.PI) / 180;
-      return { x: Math.cos(a) * radius, y: Math.sin(a) * radius };
-    }),
-  ).current;
+  const getHome = useCallback(
+    (flipDown: boolean) =>
+      [-168, -140, -112, -68, -40, -12].map((deg) => {
+        const d = flipDown ? -deg : deg;
+        const a = (d * Math.PI) / 180;
+        return { x: Math.cos(a) * radius, y: Math.sin(a) * radius };
+      }),
+    [radius],
+  );
+  const homeRef = useRef(getHome(false));
 
   const simRef = useRef<{
     main: { sc: GooSpringState; w: GooSpringState; rot: GooSpringState };
@@ -974,6 +987,9 @@ export function GooMarkMenu({
         sim.raf = requestAnimationFrame(tick);
       } else {
         sim.raf = null;
+        if (!openRef.current && !toastActiveRef.current) {
+          setPortalActive(false);
+        }
       }
     };
 
@@ -984,18 +1000,45 @@ export function GooMarkMenu({
       }
     };
 
-    renderFrame();
+    if (portalActive) {
+      renderFrame();
+      sim.wake();
+    }
 
     return () => {
       if (sim.raf !== null) cancelAnimationFrame(sim.raf);
+      sim.raf = null;
+    };
+  }, [portalActive]);
+
+  useEffect(() => {
+    const sim = simRef.current!;
+    return () => {
       if (sim.toastTimer !== null) window.clearTimeout(sim.toastTimer);
       sim.timers.forEach((t) => window.clearTimeout(t));
-      sim.raf = null;
     };
   }, []);
 
+  const syncAnchor = useCallback(() => {
+    const el = rootRef.current;
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const flipDown = rect.top < 125;
+    homeRef.current = getHome(flipDown);
+    setAnchorPos({
+      left: rect.left + rect.width / 2,
+      top: rect.top + rect.height / 2,
+      flipDown,
+    });
+    return true;
+  }, [getHome]);
+
   const setMenuOpen = useCallback((next: boolean) => {
     if (next === openRef.current) return;
+    if (next) {
+      syncAnchor();
+      setPortalActive(true);
+    }
     openRef.current = next;
     setOpen(next);
     const sim = simRef.current!;
@@ -1005,7 +1048,7 @@ export function GooMarkMenu({
     sim.main.sc.v -= next ? 3 : 1.6;
     sim.bubs.forEach((b, i) => {
       if (next) {
-        b.pending = { t: i * stagger, pos: home[i], k: 230, c: 15 };
+        b.pending = { t: i * stagger, pos: homeRef.current[i], k: 230, c: 15 };
         b.s.t = 1;
         gooTuneSpring(b.s, 300, 14, reduce);
       } else {
@@ -1020,12 +1063,13 @@ export function GooMarkMenu({
       }
     });
     sim.wake();
-  }, [home]);
+  }, [syncAnchor]);
 
   const endToast = useCallback(() => {
     const sim = simRef.current!;
     const reduce = prefersReducedMotion();
     sim.toastTimer = null;
+    toastActiveRef.current = false;
     setToastInfo(null);
     gooTuneSpring(sim.main.w, 320, 22, reduce);
     sim.main.w.t = MS;
@@ -1037,6 +1081,7 @@ export function GooMarkMenu({
     (opt: GooMarkOption) => {
       const sim = simRef.current!;
       const reduce = prefersReducedMotion();
+      toastActiveRef.current = true;
       setToastInfo(opt);
       requestAnimationFrame(() => {
         const tw = toastRef.current ? toastRef.current.scrollWidth : 64;
@@ -1066,20 +1111,32 @@ export function GooMarkMenu({
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      if (
+        rootRef.current &&
+        !rootRef.current.contains(target) &&
+        (!portalRef.current || !portalRef.current.contains(target))
+      ) {
         setMenuOpen(false);
       }
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setMenuOpen(false);
     };
+    const onScrollOrResize = () => {
+      syncAnchor();
+    };
     document.addEventListener("click", onDocClick);
     window.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
     return () => {
       document.removeEventListener("click", onDocClick);
       window.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
     };
-  }, [open, setMenuOpen]);
+  }, [open, setMenuOpen, syncAnchor]);
 
   const band = (r: number, d = 54) => d * (1 - 1 / ((r * 0.55) / d + 1));
   const activeOpt = GOO_MARK_OPTIONS.find((o) => o.mark === value && value !== "");
@@ -1090,158 +1147,192 @@ export function GooMarkMenu({
       className={`goo-mark-wrap ${open ? "is-open" : ""}`}
       onClick={(e) => e.stopPropagation()}
     >
-      <div className="goo-mark-stage" aria-hidden={!open}>
-        <div className="goo-mark-layer">
-          {GOO_MARK_OPTIONS.map((opt, i) => (
-            <div
-              key={opt.tone}
-              ref={(el) => {
-                bubBlobRefs.current[i] = el;
-              }}
-              className={`goo-mark-blob goo-bub-blob tone-${opt.tone}`}
-              style={{ width: BS, height: BS }}
-            />
-          ))}
+      <button
+        type="button"
+        className={`goo-mark-trigger ${activeOpt ? `has-mark tone-${activeOpt.tone}` : ""}`}
+        style={{ visibility: portalActive ? "hidden" : "visible" }}
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (simRef.current!.toastTimer !== null) {
+            window.clearTimeout(simRef.current!.toastTimer);
+            endToast();
+          }
+          setMenuOpen(!openRef.current);
+        }}
+      >
+        {value ? (
+          <span className="goo-current-mark">{value}</span>
+        ) : (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        )}
+      </button>
+      {portalActive &&
+        createPortal(
           <div
-            ref={mainBlobRef}
-            className={`goo-mark-blob goo-main-blob ${activeOpt ? `tone-${activeOpt.tone}` : ""}`}
-            style={{ width: MS, height: MS }}
-          />
-        </div>
-        <div className="goo-mark-ui">
-          {GOO_MARK_OPTIONS.map((opt, i) => (
-            <button
-              key={opt.tone}
-              type="button"
-              ref={(el) => {
-                bubBtnRefs.current[i] = el;
-              }}
-              className={`goo-mark-btn goo-bub-btn tone-${opt.tone} ${value === opt.mark && opt.mark !== "" ? "is-selected" : ""}`}
-              style={{ width: BS, height: BS }}
-              tabIndex={open ? 0 : -1}
-              aria-label={`${ariaLabel}: ${opt.mark || "解除"} (${opt.label})`}
-              onPointerEnter={() => {
-                if (!openRef.current) return;
-                const b = simRef.current!.bubs[i];
-                b.s.t = 1.14;
-                gooTuneSpring(b.s, 500, 18, prefersReducedMotion());
-                simRef.current!.wake();
-              }}
-              onPointerLeave={() => {
-                const b = simRef.current!.bubs[i];
-                if (openRef.current && !b.drag) {
-                  b.s.t = 1;
-                  simRef.current!.wake();
-                }
-              }}
-              onPointerDown={(e) => {
-                if (!openRef.current) return;
-                const b = simRef.current!.bubs[i];
-                b.drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, live: false };
-                try {
-                  e.currentTarget.setPointerCapture(e.pointerId);
-                } catch {
-                  /* ignore */
-                }
-                b.s.t = 0.92;
-                simRef.current!.wake();
-              }}
-              onPointerMove={(e) => {
-                const b = simRef.current!.bubs[i];
-                const d = b.drag;
-                if (!d || d.id !== e.pointerId) return;
-                const dx = e.clientX - d.x0;
-                const dy = e.clientY - d.y0;
-                const r = Math.hypot(dx, dy);
-                if (!d.live && r > 4) {
-                  d.live = true;
-                  b.s.t = 1.08;
-                }
-                if (!d.live) return;
-                const k = band(r) / (r || 1);
-                b.pending = null;
-                const reduce = prefersReducedMotion();
-                gooTuneSpring(b.x, 900, 50, reduce);
-                gooTuneSpring(b.y, 900, 50, reduce);
-                b.x.t = home[i].x + dx * k;
-                b.y.t = home[i].y + dy * k;
-                simRef.current!.wake();
-              }}
-              onPointerUp={(e) => {
-                const b = simRef.current!.bubs[i];
-                const d = b.drag;
-                if (!d || d.id !== e.pointerId) return;
-                b.drag = null;
-                const reduce = prefersReducedMotion();
-                if (d.live) {
-                  gooTuneSpring(b.x, 300, 12, reduce);
-                  gooTuneSpring(b.y, 300, 12, reduce);
-                  b.x.t = home[i].x;
-                  b.y.t = home[i].y;
-                  b.s.t = 1;
-                  simRef.current!.wake();
-                } else {
-                  b.s.t = 1;
-                  b.s.v += 4;
-                  simRef.current!.wake();
-                  selectOption(i);
-                }
-              }}
-              onPointerCancel={(e) => {
-                const b = simRef.current!.bubs[i];
-                if (b.drag && b.drag.id === e.pointerId) {
-                  b.drag = null;
-                  const reduce = prefersReducedMotion();
-                  gooTuneSpring(b.x, 300, 12, reduce);
-                  gooTuneSpring(b.y, 300, 12, reduce);
-                  b.x.t = home[i].x;
-                  b.y.t = home[i].y;
-                  b.s.t = 1;
-                  simRef.current!.wake();
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  selectOption(i);
-                }
-              }}
-            >
-              <span className="goo-bub-glyph">{opt.mark || "✕"}</span>
-              <span className="goo-tip">{opt.label}</span>
-            </button>
-          ))}
-          <button
-            type="button"
-            ref={mainBtnRef}
-            className={`goo-mark-btn goo-main-btn ${toastInfo ? "toasting" : ""} ${activeOpt ? `has-mark tone-${activeOpt.tone}` : ""}`}
-            style={{ width: MS, height: MS }}
-            aria-label={ariaLabel}
-            aria-expanded={open}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (simRef.current!.toastTimer !== null) {
-                window.clearTimeout(simRef.current!.toastTimer);
-                endToast();
-              }
-              setMenuOpen(!openRef.current);
-            }}
+            ref={portalRef}
+            className={`goo-mark-portal ${open ? "is-open" : ""} ${anchorPos.flipDown ? "flip-down" : ""}`}
+            style={{ left: anchorPos.left, top: anchorPos.top }}
+            onClick={(e) => e.stopPropagation()}
           >
-            <span ref={plusRef} className="goo-plus">
-              {value && !open ? (
-                <span className="goo-current-mark">{value}</span>
-              ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              )}
-            </span>
-            <span ref={toastRef} className="goo-toast">
-              {toastInfo ? `${toastInfo.mark || "✕"} ${toastInfo.label}` : ""}
-            </span>
-          </button>
-        </div>
-      </div>
+            <div className="goo-mark-stage">
+              <div className="goo-mark-layer">
+                {GOO_MARK_OPTIONS.map((opt, i) => (
+                  <div
+                    key={opt.tone}
+                    ref={(el) => {
+                      bubBlobRefs.current[i] = el;
+                    }}
+                    className={`goo-mark-blob goo-bub-blob tone-${opt.tone}`}
+                    style={{ width: BS, height: BS }}
+                  />
+                ))}
+                <div
+                  ref={mainBlobRef}
+                  className={`goo-mark-blob goo-main-blob ${activeOpt ? `tone-${activeOpt.tone}` : ""}`}
+                  style={{ width: MS, height: MS }}
+                />
+              </div>
+              <div className="goo-mark-ui">
+                {GOO_MARK_OPTIONS.map((opt, i) => (
+                  <button
+                    key={opt.tone}
+                    type="button"
+                    ref={(el) => {
+                      bubBtnRefs.current[i] = el;
+                    }}
+                    className={`goo-mark-btn goo-bub-btn tone-${opt.tone} ${value === opt.mark && opt.mark !== "" ? "is-selected" : ""}`}
+                    style={{ width: BS, height: BS }}
+                    tabIndex={open ? 0 : -1}
+                    aria-label={`${ariaLabel}: ${opt.mark || "解除"} (${opt.label})`}
+                    onPointerEnter={() => {
+                      if (!openRef.current) return;
+                      const b = simRef.current!.bubs[i];
+                      b.s.t = 1.14;
+                      gooTuneSpring(b.s, 500, 18, prefersReducedMotion());
+                      simRef.current!.wake();
+                    }}
+                    onPointerLeave={() => {
+                      const b = simRef.current!.bubs[i];
+                      if (openRef.current && !b.drag) {
+                        b.s.t = 1;
+                        simRef.current!.wake();
+                      }
+                    }}
+                    onPointerDown={(e) => {
+                      if (!openRef.current) return;
+                      const b = simRef.current!.bubs[i];
+                      b.drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, live: false };
+                      try {
+                        e.currentTarget.setPointerCapture(e.pointerId);
+                      } catch {
+                        /* ignore */
+                      }
+                      b.s.t = 0.92;
+                      simRef.current!.wake();
+                    }}
+                    onPointerMove={(e) => {
+                      const b = simRef.current!.bubs[i];
+                      const d = b.drag;
+                      if (!d || d.id !== e.pointerId) return;
+                      const dx = e.clientX - d.x0;
+                      const dy = e.clientY - d.y0;
+                      const r = Math.hypot(dx, dy);
+                      if (!d.live && r > 4) {
+                        d.live = true;
+                        b.s.t = 1.08;
+                      }
+                      if (!d.live) return;
+                      const k = band(r) / (r || 1);
+                      b.pending = null;
+                      const reduce = prefersReducedMotion();
+                      gooTuneSpring(b.x, 900, 50, reduce);
+                      gooTuneSpring(b.y, 900, 50, reduce);
+                      b.x.t = homeRef.current[i].x + dx * k;
+                      b.y.t = homeRef.current[i].y + dy * k;
+                      simRef.current!.wake();
+                    }}
+                    onPointerUp={(e) => {
+                      const b = simRef.current!.bubs[i];
+                      const d = b.drag;
+                      if (!d || d.id !== e.pointerId) return;
+                      b.drag = null;
+                      const reduce = prefersReducedMotion();
+                      if (d.live) {
+                        gooTuneSpring(b.x, 300, 12, reduce);
+                        gooTuneSpring(b.y, 300, 12, reduce);
+                        b.x.t = homeRef.current[i].x;
+                        b.y.t = homeRef.current[i].y;
+                        b.s.t = 1;
+                        simRef.current!.wake();
+                      } else {
+                        b.s.t = 1;
+                        b.s.v += 4;
+                        simRef.current!.wake();
+                        selectOption(i);
+                      }
+                    }}
+                    onPointerCancel={(e) => {
+                      const b = simRef.current!.bubs[i];
+                      if (b.drag && b.drag.id === e.pointerId) {
+                        b.drag = null;
+                        const reduce = prefersReducedMotion();
+                        gooTuneSpring(b.x, 300, 12, reduce);
+                        gooTuneSpring(b.y, 300, 12, reduce);
+                        b.x.t = homeRef.current[i].x;
+                        b.y.t = homeRef.current[i].y;
+                        b.s.t = 1;
+                        simRef.current!.wake();
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        selectOption(i);
+                      }
+                    }}
+                  >
+                    <span className="goo-bub-glyph">{opt.mark || "✕"}</span>
+                    <span className="goo-tip">{opt.label}</span>
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  ref={mainBtnRef}
+                  className={`goo-mark-btn goo-main-btn ${toastInfo ? "toasting" : ""} ${activeOpt ? `has-mark tone-${activeOpt.tone}` : ""}`}
+                  style={{ width: MS, height: MS }}
+                  aria-label={ariaLabel}
+                  aria-expanded={open}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (simRef.current!.toastTimer !== null) {
+                      window.clearTimeout(simRef.current!.toastTimer);
+                      endToast();
+                    }
+                    setMenuOpen(!openRef.current);
+                  }}
+                >
+                  <span ref={plusRef} className="goo-plus">
+                    {value && !open ? (
+                      <span className="goo-current-mark">{value}</span>
+                    ) : (
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    )}
+                  </span>
+                  <span ref={toastRef} className="goo-toast">
+                    {toastInfo ? `${toastInfo.mark || "✕"} ${toastInfo.label}` : ""}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

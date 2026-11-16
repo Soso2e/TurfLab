@@ -115,6 +115,45 @@ function computeAutoJockeyMarks(detail: Row | undefined, research: Row | undefin
   return out;
 }
 
+const EXTERNAL_MARK_ORDER = ["◎", "○", "▲", "△", "☆", "注"];
+
+/** 外部サイトの予想印（馬のみ）を馬番ごとに累積集計する。 */
+function computeExternalMarkCounts(
+  status: Row | undefined,
+  raceId: string,
+): Map<number, { mark: string; count: number }[]> {
+  const out = new Map<number, Map<string, number>>();
+  if (!status || !raceId) return new Map();
+  const record = rows(status.race_external_forecasts ?? []).find(
+    (item) => item.race_id === raceId,
+  );
+  for (const src of rows(record?.sources ?? [])) {
+    for (const m of rows(src.marks ?? [])) {
+      const no = Number(m.horse_number);
+      const mark = String(m.mark ?? "").trim();
+      if (!Number.isFinite(no) || !mark) continue;
+      let counts = out.get(no);
+      if (!counts) {
+        counts = new Map();
+        out.set(no, counts);
+      }
+      counts.set(mark, (counts.get(mark) ?? 0) + 1);
+    }
+  }
+  const result = new Map<number, { mark: string; count: number }[]>();
+  for (const [no, counts] of out.entries()) {
+    const items = [...counts.entries()]
+      .map(([mark, count]) => ({ mark, count }))
+      .sort((a, b) => {
+        const ia = EXTERNAL_MARK_ORDER.indexOf(a.mark);
+        const ib = EXTERNAL_MARK_ORDER.indexOf(b.mark);
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      });
+    result.set(no, items);
+  }
+  return result;
+}
+
 function RaceExternalForecasts({
   status,
   race,
@@ -899,6 +938,27 @@ function App() {
     : [];
   const autoJockeyMarks = computeAutoJockeyMarks(detail, research);
   const currentRaceId = String(race?.race_id ?? "");
+  const externalMarkCounts = computeExternalMarkCounts(localStatus, currentRaceId);
+  const codexHorseRanks = (() => {
+    const map = new Map<number, number>();
+    if (selectedEvaluations.length > 0) {
+      for (const e of selectedEvaluations) {
+        const entry = entryById(e.entry_id);
+        const no = Number(entry?.horse_number);
+        const r = Number(e.rank);
+        if (Number.isFinite(no) && Number.isFinite(r) && r >= 1) map.set(no, r);
+      }
+      return map;
+    }
+    const prov = rows(localStatus?.race_provisional_predictions ?? []).find(
+      (item) => item.race_id === currentRaceId,
+    );
+    rows(prov?.ranking ?? []).forEach((r, idx) => {
+      const no = Number(r.horse_number);
+      if (Number.isFinite(no) && !map.has(no)) map.set(no, idx + 1);
+    });
+    return map;
+  })();
   const updateHorseMark = (horseNo: string, mark: string) => {
     setCustomMarks((prev) => {
       const horses = { ...prev.horses };
@@ -1531,38 +1591,64 @@ function App() {
                       {selectedEvaluations.map((e) => {
                         const entry = entryById(e.entry_id);
                         const hNo = String(entry?.horse_number ?? "");
+                        const hNum = Number(entry?.horse_number);
                         const jKey = String(entry?.jockey_id ?? obj(entry?.jockey ?? {}).jockey_name ?? hNo);
                         const autoHorseMark = markOf(e.rank);
                         const customHorseMark = customMarks.horses[hNo] ?? "";
-                        const autoJockey = autoJockeyMarks.get(Number(entry?.horse_number));
+                        const autoJockey = autoJockeyMarks.get(hNum);
                         const customJockeyMark = customMarks.jockeys[jKey] ?? "";
-                        const laneMark = customHorseMark || autoHorseMark || customJockeyMark || autoJockey?.mark || "";
+                        const extMarks = externalMarkCounts.get(hNum) ?? [];
+                        const laneMark =
+                          customHorseMark ||
+                          customJockeyMark ||
+                          autoHorseMark ||
+                          autoJockey?.mark ||
+                          extMarks[0]?.mark ||
+                          "";
                         const laneCls = markToneClass(laneMark);
                         return (
                           <div className={"marks-row" + (Number(e.rank) <= 3 ? " top" : "") + (laneCls ? ` ${laneCls}` : "")} key={String(e.evaluation_id)}>
-                            <div className="marks-col-pair">
-                              <Mark rank={e.rank} />
-                              <GooMarkMenu
-                                value={customHorseMark}
-                                onChange={(next) => updateHorseMark(hNo, next)}
-                                ariaLabel={`${hNo}番 馬の手動印`}
-                              />
+                            <div className="entry-marks-flow">
+                              <span className="entry-mark-stage" title="自分の印（馬 / 騎手）">
+                                <GooMarkMenu
+                                  value={customHorseMark}
+                                  onChange={(next) => updateHorseMark(hNo, next)}
+                                  ariaLabel={`${hNo}番 馬の手動印`}
+                                />
+                                <GooMarkMenu
+                                  value={customJockeyMark}
+                                  onChange={(next) => updateJockeyMark(jKey, next)}
+                                  ariaLabel={`${String(obj(entry?.jockey ?? {}).jockey_name ?? "騎手")}の手動印`}
+                                />
+                              </span>
+                              <span className="entry-mark-arrow" aria-hidden="true">→</span>
+                              <span className="entry-mark-stage" title="Codexの印（馬 / 騎手）">
+                                {autoHorseMark ? <Mark rank={e.rank} /> : <span className="mark mark-none">—</span>}
+                                {autoJockey && (
+                                  <span className={`jockey-auto-badge ${markToneClass(autoJockey.mark)}`} title={autoJockey.rateLabel}>
+                                    騎{autoJockey.mark}
+                                  </span>
+                                )}
+                              </span>
+                              {extMarks.length > 0 && (
+                                <>
+                                  <span className="entry-mark-arrow" aria-hidden="true">→</span>
+                                  <span className="entry-mark-stage entry-mark-external" title="外部サイトの印（馬のみ・累積）">
+                                    {extMarks.map((em) => (
+                                      <span key={em.mark} className={`ext-acc-chip ${markToneClass(em.mark)}`}>
+                                        {em.mark}{em.count > 1 ? `×${em.count}` : ""}
+                                      </span>
+                                    ))}
+                                  </span>
+                                </>
+                              )}
                             </div>
                             <HorseNo n={entry?.horse_number} fieldSize={fieldSize} />
                             <div className="marks-horse">
                               <strong>{String(obj(entry?.horse ?? {}).horse_name ?? "不明")}</strong>
                               <small className="jockey-inline">
                                 <span>{String(obj(entry?.jockey ?? {}).jockey_name ?? "")}</span>
-                                {autoJockey && (
-                                  <span className={`jockey-auto-badge ${markToneClass(autoJockey.mark)}`} title={autoJockey.rateLabel}>
-                                    騎{autoJockey.mark}
-                                  </span>
-                                )}
-                                <GooMarkMenu
-                                  value={customJockeyMark}
-                                  onChange={(next) => updateJockeyMark(jKey, next)}
-                                  ariaLabel={`${String(obj(entry?.jockey ?? {}).jockey_name ?? "騎手")}の手動印`}
-                                />
+                                {autoJockey && <span className="jockey-rate-hint">{autoJockey.rateLabel}</span>}
                                 {entry?.carried_weight_kg != null && ` · ${String(entry.carried_weight_kg)}kg`}
                                 {e.expected_position && ` · ${String(e.expected_position)}`}
                               </small>
@@ -1619,7 +1705,7 @@ function App() {
                     <table>
                       <thead>
                         <tr>
-                          <th>印 (馬 / 騎)</th>
+                          <th>印（自分 → Codex → 外部）</th>
                           <th>馬番</th>
                           <th>馬 / 騎手</th>
                           <th>斤量</th>
@@ -1632,39 +1718,63 @@ function App() {
                           const observed = rows(research?.horses ?? []).find((h) => h.horse_number === e.horse_number);
                           const recent = rows(observed?.recent_runs ?? []).slice(0, 3);
                           const profile = researchProfiles.find((p) => p.horse_id === e.horse_id);
-                          const evalRow = selectedEvaluations.find((ev) => ev.entry_id === e.entry_id);
-                          const aiHorseRank = evalRow ? Number(evalRow.rank) : undefined;
+                          const hNum = Number(e.horse_number);
+                          const aiHorseRank = codexHorseRanks.get(hNum);
                           const aiHorseMark = aiHorseRank && aiHorseRank <= 5 ? ["◎", "○", "▲", "△", "☆"][aiHorseRank - 1] : "";
                           const hNo = String(e.horse_number ?? "");
                           const jKey = String(e.jockey_id ?? obj(e.jockey).jockey_name ?? hNo);
                           const customHorseMark = customMarks.horses[hNo] ?? "";
-                          const autoJockey = autoJockeyMarks.get(Number(e.horse_number));
+                          const autoJockey = autoJockeyMarks.get(hNum);
                           const customJockeyMark = customMarks.jockeys[jKey] ?? "";
-                          const laneMark = customHorseMark || aiHorseMark || customJockeyMark || autoJockey?.mark || "";
+                          const extMarks = externalMarkCounts.get(hNum) ?? [];
+                          const laneMark =
+                            customHorseMark ||
+                            customJockeyMark ||
+                            aiHorseMark ||
+                            autoJockey?.mark ||
+                            extMarks[0]?.mark ||
+                            "";
                           const laneCls = markToneClass(laneMark);
                           return (
                           <tr key={String(e.entry_id)} className={laneCls ? `entry-marked-row ${laneCls}` : ""}>
                             <td className="entry-marks-cell">
-                              <div className="entry-marks-pair">
-                                <span className="entry-mark-group" title="馬の予想印（AI＋手動）">
-                                  {aiHorseRank && aiHorseRank <= 5 && <Mark rank={aiHorseRank} />}
+                              <div className="entry-marks-flow">
+                                <span className="entry-mark-stage" title="自分の印（馬 / 騎手）">
                                   <GooMarkMenu
                                     value={customHorseMark}
                                     onChange={(next) => updateHorseMark(hNo, next)}
                                     ariaLabel={`${hNo}番 馬の手動印`}
                                   />
-                                </span>
-                                <span className="entry-mark-group" title={autoJockey?.rateLabel ?? "騎手の予想印"}>
-                                  {autoJockey && (
-                                    <span className={`jockey-auto-badge ${markToneClass(autoJockey.mark)}`}>
-                                      騎{autoJockey.mark}
-                                    </span>
-                                  )}
                                   <GooMarkMenu
                                     value={customJockeyMark}
                                     onChange={(next) => updateJockeyMark(jKey, next)}
                                     ariaLabel={`${String(obj(e.jockey).jockey_name ?? "騎手")}の手動印`}
                                   />
+                                </span>
+                                <span className="entry-mark-arrow" aria-hidden="true">→</span>
+                                <span className="entry-mark-stage" title="Codexの印（馬 / 騎手）">
+                                  {aiHorseRank && aiHorseRank <= 5 ? (
+                                    <Mark rank={aiHorseRank} />
+                                  ) : (
+                                    <span className="mark mark-none">—</span>
+                                  )}
+                                  {autoJockey && (
+                                    <span className={`jockey-auto-badge ${markToneClass(autoJockey.mark)}`} title={autoJockey.rateLabel}>
+                                      騎{autoJockey.mark}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="entry-mark-arrow" aria-hidden="true">→</span>
+                                <span className="entry-mark-stage entry-mark-external" title="外部サイトの印（馬のみ・累積）">
+                                  {extMarks.length > 0 ? (
+                                    extMarks.map((em) => (
+                                      <span key={em.mark} className={`ext-acc-chip ${markToneClass(em.mark)}`}>
+                                        {em.mark}{em.count > 1 ? `×${em.count}` : ""}
+                                      </span>
+                                    ))
+                                  ) : (
+                                    <span className="mark mark-none">—</span>
+                                  )}
                                 </span>
                               </div>
                             </td>
