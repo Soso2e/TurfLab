@@ -8,7 +8,7 @@ import {
   type Json,
 } from "../../../packages/shared/src/domain";
 import "./style.css";
-import { HorseNo, Mark, ProbBar, TicketChip, countdownInfo, ticketTypeName } from "./RaceUi";
+import { HorseNo, Mark, markOf, ProbBar, TicketChip, countdownInfo, ticketTypeName } from "./RaceUi";
 import { RaceImportWizard } from "./RaceImportWizard";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
@@ -30,12 +30,173 @@ import {
   CopyButton,
   ExpandCardList,
   type ExpandCardItem,
+  GooFilterSvg,
+  GooMarkMenu,
   HoldConfirmButton,
   MorphIslandToast,
   NumberRoll,
   ParallaxCard,
   useSlidingPill,
 } from "./Motion";
+const MARK_RANK_MAP: Record<string, number> = {
+  "◎": 1,
+  "○": 2,
+  "▲": 3,
+  "△": 4,
+  "☆": 5,
+};
+const markToneClass = (mark: string | undefined | null) => {
+  if (!mark) return "";
+  if (MARK_RANK_MAP[mark]) return `mark-lane-${MARK_RANK_MAP[mark]}`;
+  if (mark === "注") return "mark-lane-note";
+  return "";
+};
+
+type CustomMarksState = {
+  horses: Record<string, string>;
+  jockeys: Record<string, string>;
+};
+
+function readCustomMarks(raceId: string): CustomMarksState {
+  if (!raceId) return { horses: {}, jockeys: {} };
+  try {
+    const raw = localStorage.getItem(`turflab:custom-marks:${raceId}`);
+    if (!raw) return { horses: {}, jockeys: {} };
+    const parsed = JSON.parse(raw) as Partial<CustomMarksState>;
+    return {
+      horses: parsed.horses && typeof parsed.horses === "object" ? parsed.horses : {},
+      jockeys: parsed.jockeys && typeof parsed.jockeys === "object" ? parsed.jockeys : {},
+    };
+  } catch {
+    return { horses: {}, jockeys: {} };
+  }
+}
+
+function writeCustomMarks(raceId: string, next: CustomMarksState) {
+  if (!raceId) return;
+  try {
+    localStorage.setItem(`turflab:custom-marks:${raceId}`, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 騎手統計（jockey_stats）から上位1〜5位の騎手に自動印（◎○▲△☆）を割り当てる。 */
+function computeAutoJockeyMarks(detail: Row | undefined, research: Row | undefined): Map<number, { rank: number; mark: string; rateLabel: string }> {
+  const out = new Map<number, { rank: number; mark: string; rateLabel: string }>();
+  if (!detail) return out;
+  const featureRows = rows(detail.jockey_stats ?? []);
+  const statList: Row[] = featureRows.length
+    ? featureRows.map((f) => obj(f.features_json))
+    : rows(obj(research?.jockey_stats ?? {}).jockeys ?? []);
+  if (!statList.length) return out;
+
+  const scored: { horseNumber: number; score: number; rateLabel: string; starts: number }[] = [];
+  for (const item of statList) {
+    const horseNumber = Number(item.horse_number);
+    if (!Number.isFinite(horseNumber)) continue;
+    const atTrack = obj(item.at_track ?? {});
+    const overall = obj(item.overall ?? {});
+    const useTrack = Number(atTrack.starts ?? 0) >= 5;
+    const bucket = useTrack ? atTrack : overall;
+    const starts = Number(bucket.starts ?? 0);
+    if (starts <= 0) continue;
+    const top3Rate = Number(bucket.top3_rate ?? 0);
+    const winRate = Number(bucket.win_rate ?? 0);
+    const score = top3Rate * 0.65 + winRate * 0.35;
+    const rateLabel = `${useTrack ? "同場" : "通算"}複勝${Math.round(top3Rate * 100)}% (${starts}戦)`;
+    scored.push({ horseNumber, score, rateLabel, starts });
+  }
+  scored.sort((a, b) => b.score - a.score || b.starts - a.starts);
+  const symbols = ["◎", "○", "▲", "△", "☆"];
+  scored.slice(0, 5).forEach((s, idx) => {
+    out.set(s.horseNumber, { rank: idx + 1, mark: symbols[idx], rateLabel: s.rateLabel });
+  });
+  return out;
+}
+
+function RaceExternalForecasts({
+  status,
+  race,
+  entries,
+  fieldSize,
+}: {
+  status: Row | undefined;
+  race: Row;
+  entries: Row[];
+  fieldSize: number;
+}) {
+  const record = rows(status?.race_external_forecasts ?? []).find(
+    (item) => item.race_id === race.race_id,
+  );
+  const sources = rows(record?.sources ?? []);
+  const horseName = (num: unknown) => {
+    const found = entries.find((e) => Number(e.horse_number) === Number(num));
+    return found ? String(obj(found.horse).horse_name ?? "") : "";
+  };
+  return (
+    <details className="panel external-forecasts-panel">
+      <summary className="external-forecasts-summary">
+        <span>他の予想サイトの予想印</span>
+        <span className="external-forecasts-count">
+          {sources.length > 0 ? `${sources.length}サイト` : "未取得"}
+        </span>
+      </summary>
+      <div className="external-forecasts-body">
+        {sources.length === 0 ? (
+          <p className="muted">このレースの他サイト予想印はまだ取得されていません。</p>
+        ) : (
+          <div className="external-source-list">
+            {sources.map((src, idx) => {
+              const marks = rows(src.marks ?? []);
+              const reasons = rows(src.reasons ?? []);
+              return (
+                <article className="external-source-card" key={idx}>
+                  <div className="external-source-head">
+                    <strong>{String(src.site ?? "外部サイト")}</strong>
+                    <span className="race-tag">{String(src.method ?? "予想")}</span>
+                    {src.published_at && <small>{time(src.published_at)}</small>}
+                    {src.source_url && (
+                      <a href={String(src.source_url)} target="_blank" rel="noreferrer">
+                        出典
+                      </a>
+                    )}
+                  </div>
+                  {marks.length > 0 && (
+                    <div className="external-marks-row">
+                      {marks.map((m, mi) => (
+                        <span
+                          key={mi}
+                          className={`external-mark-chip ${markToneClass(String(m.mark ?? ""))}`}
+                        >
+                          <span className="external-mark-symbol">{String(m.mark ?? "")}</span>
+                          <HorseNo n={m.horse_number} fieldSize={fieldSize} size="sm" />
+                          <span className="external-mark-name">
+                            {horseName(m.horse_number)}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {reasons.length > 0 && (
+                    <ul className="external-reasons">
+                      {reasons.slice(0, 4).map((r, ri) => (
+                        <li key={ri}>
+                          <b>{String(r.horse_number)}番</b> {String(r.reason ?? "")}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </details>
+  );
+}
+
 const yen = (n: Json | undefined) =>
   typeof n === "number" ? `¥${n.toLocaleString("ja-JP")}` : "—";
 const pct = (n: Json | undefined) =>
@@ -596,6 +757,8 @@ function App() {
   const [modelId, setModelId] = useState("");
   const [cutoff, setCutoff] = useState("");
   const [storage, setStorage] = useState("");
+  const [localStatus, setLocalStatus] = useState<Row>();
+  const [customMarks, setCustomMarks] = useState<CustomMarksState>({ horses: {}, jockeys: {} });
   async function api(path: string, body?: unknown): Promise<Row> {
     const r = await fetch("/api" + path, {
       method: body ? "POST" : "GET",
@@ -623,6 +786,9 @@ function App() {
       setData(d);
       setStorage(String(s.storage_mode));
       setChatReviews(rows(reviewsRes.reviews));
+      if (String(s.storage_mode) === "local") {
+        api("/local-predictions/status").then(setLocalStatus).catch(() => {});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "読み込みに失敗しました");
     } finally {
@@ -658,6 +824,7 @@ function App() {
     await action(async () => {
       const d = await api("/races/" + encodeURIComponent(id));
       setDetail(d);
+      setCustomMarks(readCustomMarks(id));
       setTab("detail");
       const ps = rows(d.predictions);
       setActivePrediction(
@@ -730,6 +897,52 @@ function App() {
         .filter((e) => e.prediction_id === activePrediction)
         .sort((a, b) => Number(a.rank) - Number(b.rank))
     : [];
+  const autoJockeyMarks = computeAutoJockeyMarks(detail, research);
+  const currentRaceId = String(race?.race_id ?? "");
+  const updateHorseMark = (horseNo: string, mark: string) => {
+    setCustomMarks((prev) => {
+      const horses = { ...prev.horses };
+      if (mark) horses[horseNo] = mark;
+      else delete horses[horseNo];
+      const next = { ...prev, horses };
+      writeCustomMarks(currentRaceId, next);
+      return next;
+    });
+  };
+  const updateJockeyMark = (jockeyKey: string, mark: string) => {
+    setCustomMarks((prev) => {
+      const jockeys = { ...prev.jockeys };
+      if (mark) jockeys[jockeyKey] = mark;
+      else delete jockeys[jockeyKey];
+      const next = { ...prev, jockeys };
+      writeCustomMarks(currentRaceId, next);
+      return next;
+    });
+  };
+  const hitSummary = (() => {
+    if (!localStatus || localStatus.race_bet_plans_date !== date) {
+      return { stake: 0, returned: 0, fixedCount: 0 };
+    }
+    let stake = 0;
+    let returned = 0;
+    let fixedCount = 0;
+    for (const rec of rows(localStatus.race_bet_plans ?? [])) {
+      const hitPlan = rows(rec.plans ?? []).find((p) => p.lane === "hit");
+      const picks = rows(hitPlan?.picks ?? []);
+      if (picks.length > 0) {
+        fixedCount++;
+        stake += picks.reduce((s, p) => s + Number(p.amount_yen ?? 0), 0);
+        if (typeof hitPlan?.returned_yen === "number") {
+          returned += hitPlan.returned_yen;
+        }
+      }
+    }
+    return { stake, returned, fixedCount };
+  })();
+  const remainingCapital =
+    typeof data?.remaining_yen === "number"
+      ? data.remaining_yen - hitSummary.stake + hitSummary.returned
+      : undefined;
   const canEditBet =
     race?.status === "scheduled" &&
     Date.now() < Date.parse(String(race.scheduled_start_at));
@@ -781,6 +994,7 @@ function App() {
   ];
   return (
     <div className="app app-dock-layout">
+      <GooFilterSvg />
       <main>
         <header>
           <div className="header-left">
@@ -924,14 +1138,20 @@ function App() {
                     </strong>
                   </div>
                   <div>
-                    <span>予算残 <small>/ ¥5,000</small></span>
-                    <strong className={Number(data?.remaining_yen) <= 0 ? "neg" : ""}>
-                      {typeof data?.remaining_yen === "number" ? (
-                        <NumberRoll value={data.remaining_yen} format={(n) => yen(n)} />
+                    <span>本日の資本残 <small>/ ¥5,000</small></span>
+                    <strong className={Number(remainingCapital) <= 0 ? "neg" : Number(remainingCapital) > 5000 ? "pos" : ""}>
+                      {typeof remainingCapital === "number" ? (
+                        <NumberRoll value={remainingCapital} format={(n) => yen(n)} />
                       ) : (
-                        yen(data?.remaining_yen)
+                        yen(remainingCapital)
                       )}
                     </strong>
+                    {hitSummary.fixedCount > 0 && (
+                      <small>
+                        Hit確定 -{yen(hitSummary.stake)}
+                        {hitSummary.returned > 0 ? ` / 払戻 +${yen(hitSummary.returned)}` : ""}
+                      </small>
+                    )}
                   </div>
                   <div>
                     <span>精算損益 <small>全期間</small></span>
@@ -1310,14 +1530,39 @@ function App() {
                     <div className="marks-list">
                       {selectedEvaluations.map((e) => {
                         const entry = entryById(e.entry_id);
+                        const hNo = String(entry?.horse_number ?? "");
+                        const jKey = String(entry?.jockey_id ?? obj(entry?.jockey ?? {}).jockey_name ?? hNo);
+                        const autoHorseMark = markOf(e.rank);
+                        const customHorseMark = customMarks.horses[hNo] ?? "";
+                        const autoJockey = autoJockeyMarks.get(Number(entry?.horse_number));
+                        const customJockeyMark = customMarks.jockeys[jKey] ?? "";
+                        const laneMark = customHorseMark || autoHorseMark || customJockeyMark || autoJockey?.mark || "";
+                        const laneCls = markToneClass(laneMark);
                         return (
-                          <div className={"marks-row" + (Number(e.rank) <= 3 ? " top" : "")} key={String(e.evaluation_id)}>
-                            <Mark rank={e.rank} />
+                          <div className={"marks-row" + (Number(e.rank) <= 3 ? " top" : "") + (laneCls ? ` ${laneCls}` : "")} key={String(e.evaluation_id)}>
+                            <div className="marks-col-pair">
+                              <Mark rank={e.rank} />
+                              <GooMarkMenu
+                                value={customHorseMark}
+                                onChange={(next) => updateHorseMark(hNo, next)}
+                                ariaLabel={`${hNo}番 馬の手動印`}
+                              />
+                            </div>
                             <HorseNo n={entry?.horse_number} fieldSize={fieldSize} />
                             <div className="marks-horse">
                               <strong>{String(obj(entry?.horse ?? {}).horse_name ?? "不明")}</strong>
-                              <small>
-                                {String(obj(entry?.jockey ?? {}).jockey_name ?? "")}
+                              <small className="jockey-inline">
+                                <span>{String(obj(entry?.jockey ?? {}).jockey_name ?? "")}</span>
+                                {autoJockey && (
+                                  <span className={`jockey-auto-badge ${markToneClass(autoJockey.mark)}`} title={autoJockey.rateLabel}>
+                                    騎{autoJockey.mark}
+                                  </span>
+                                )}
+                                <GooMarkMenu
+                                  value={customJockeyMark}
+                                  onChange={(next) => updateJockeyMark(jKey, next)}
+                                  ariaLabel={`${String(obj(entry?.jockey ?? {}).jockey_name ?? "騎手")}の手動印`}
+                                />
                                 {entry?.carried_weight_kg != null && ` · ${String(entry.carried_weight_kg)}kg`}
                                 {e.expected_position && ` · ${String(e.expected_position)}`}
                               </small>
@@ -1331,6 +1576,14 @@ function App() {
                       })}
                     </div>
                   </section>
+                )}
+                {storage === "local" && (
+                  <RaceExternalForecasts
+                    status={localStatus}
+                    race={race}
+                    entries={rows(detail.entries)}
+                    fieldSize={fieldSize}
+                  />
                 )}
                 <section className="panel">
                   <h2>コースと固定入力</h2>
@@ -1366,6 +1619,7 @@ function App() {
                     <table>
                       <thead>
                         <tr>
+                          <th>印 (馬 / 騎)</th>
                           <th>馬番</th>
                           <th>馬 / 騎手</th>
                           <th>斤量</th>
@@ -1378,8 +1632,42 @@ function App() {
                           const observed = rows(research?.horses ?? []).find((h) => h.horse_number === e.horse_number);
                           const recent = rows(observed?.recent_runs ?? []).slice(0, 3);
                           const profile = researchProfiles.find((p) => p.horse_id === e.horse_id);
+                          const evalRow = selectedEvaluations.find((ev) => ev.entry_id === e.entry_id);
+                          const aiHorseRank = evalRow ? Number(evalRow.rank) : undefined;
+                          const aiHorseMark = aiHorseRank && aiHorseRank <= 5 ? ["◎", "○", "▲", "△", "☆"][aiHorseRank - 1] : "";
+                          const hNo = String(e.horse_number ?? "");
+                          const jKey = String(e.jockey_id ?? obj(e.jockey).jockey_name ?? hNo);
+                          const customHorseMark = customMarks.horses[hNo] ?? "";
+                          const autoJockey = autoJockeyMarks.get(Number(e.horse_number));
+                          const customJockeyMark = customMarks.jockeys[jKey] ?? "";
+                          const laneMark = customHorseMark || aiHorseMark || customJockeyMark || autoJockey?.mark || "";
+                          const laneCls = markToneClass(laneMark);
                           return (
-                          <tr key={String(e.entry_id)}>
+                          <tr key={String(e.entry_id)} className={laneCls ? `entry-marked-row ${laneCls}` : ""}>
+                            <td className="entry-marks-cell">
+                              <div className="entry-marks-pair">
+                                <span className="entry-mark-group" title="馬の予想印（AI＋手動）">
+                                  {aiHorseRank && aiHorseRank <= 5 && <Mark rank={aiHorseRank} />}
+                                  <GooMarkMenu
+                                    value={customHorseMark}
+                                    onChange={(next) => updateHorseMark(hNo, next)}
+                                    ariaLabel={`${hNo}番 馬の手動印`}
+                                  />
+                                </span>
+                                <span className="entry-mark-group" title={autoJockey?.rateLabel ?? "騎手の予想印"}>
+                                  {autoJockey && (
+                                    <span className={`jockey-auto-badge ${markToneClass(autoJockey.mark)}`}>
+                                      騎{autoJockey.mark}
+                                    </span>
+                                  )}
+                                  <GooMarkMenu
+                                    value={customJockeyMark}
+                                    onChange={(next) => updateJockeyMark(jKey, next)}
+                                    ariaLabel={`${String(obj(e.jockey).jockey_name ?? "騎手")}の手動印`}
+                                  />
+                                </span>
+                              </div>
+                            </td>
                             <td>
                               <HorseNo n={e.horse_number} fieldSize={fieldSize} />
                             </td>
@@ -1387,7 +1675,10 @@ function App() {
                               <button className="link-button" title="過去走を表示" onClick={() => setHorseRuns(String(e.horse_id))}>
                                 <strong>{String(obj(e.horse).horse_name)}</strong>
                               </button>
-                              <small>{String(obj(e.jockey).jockey_name)}</small>
+                              <small className="jockey-inline">
+                                <span>{String(obj(e.jockey).jockey_name)}</span>
+                                {autoJockey && <span className="jockey-rate-hint">{autoJockey.rateLabel}</span>}
+                              </small>
                               {profile && <small>過去の位置取り · {String(obj(profile.features_json).early_position_group)}</small>}
                             </td>
                             <td>{e.carried_weight_kg != null ? `${String(e.carried_weight_kg)}kg` : "—"}</td>

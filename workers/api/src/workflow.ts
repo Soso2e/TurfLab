@@ -325,6 +325,8 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
     snapshots: await select("race_snapshots"),
     research_baselines: (await repo.list("entity_features")).filter((f) =>
       obj(f.features_json ?? {}).race_id === raceId && String(f.feature_id).startsWith("baseline:")),
+    jockey_stats: (await repo.list("entity_features")).filter((f) =>
+      obj(f.features_json ?? {}).race_id === raceId && f.feature_version === "jockey-stats-v1"),
     evaluations: await select("horse_evaluations"),
     simulations: await select("simulation_runs"),
     recommendations: await select("recommendations"),

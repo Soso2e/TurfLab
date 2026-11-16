@@ -762,3 +762,486 @@ export function ExpandCardList({
     </div>
   );
 }
+
+/**
+ * 6. GooMarkMenu (Goo Menu インスパイア)
+ * SVG Goo フィルターとスプリング物理（tokens.css 準拠: out 230/15, in 520/34,
+ * release 300/12, toast 260/17）で、液体のように弾ける手動予想印ピッカー。
+ */
+export function GooFilterSvg() {
+  return (
+    <svg width="0" height="0" style={{ position: "absolute", pointerEvents: "none" }} aria-hidden="true">
+      <defs>
+        <filter id="turflab-goo" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b" />
+          <feColorMatrix
+            in="b"
+            mode="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -10"
+            result="g"
+          />
+          <feComposite in="SourceGraphic" in2="g" operator="atop" />
+        </filter>
+      </defs>
+    </svg>
+  );
+}
+
+export interface GooMarkOption {
+  mark: string;
+  label: string;
+  tone: string;
+}
+
+export const GOO_MARK_OPTIONS: GooMarkOption[] = [
+  { mark: "◎", label: "本命", tone: "m1" },
+  { mark: "○", label: "対抗", tone: "m2" },
+  { mark: "▲", label: "単穴", tone: "m3" },
+  { mark: "△", label: "連下", tone: "m4" },
+  { mark: "☆", label: "星", tone: "m5" },
+  { mark: "", label: "解除", tone: "clear" },
+];
+
+type GooSpringState = { x: number; v: number; t: number; k: number; c: number };
+
+const gooMakeSpring = (x: number, k = 400, c = 30): GooSpringState => ({ x, v: 0, t: x, k, c });
+const gooTuneSpring = (s: GooSpringState, k: number, c: number, reduce: boolean) => {
+  s.k = k;
+  s.c = reduce ? 2 * Math.sqrt(k) : c;
+};
+const gooStepSpring = (s: GooSpringState, dt: number) => {
+  const a = -s.k * (s.x - s.t) - s.c * s.v;
+  s.v += a * dt;
+  s.x += s.v * dt;
+};
+const gooSpringSettled = (s: GooSpringState) =>
+  Math.abs(s.x - s.t) < 0.05 && Math.abs(s.v) < 0.05;
+
+export function GooMarkMenu({
+  value,
+  onChange,
+  ariaLabel = "手動予想印",
+  radius = 84,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  ariaLabel?: string;
+  radius?: number;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const mainBlobRef = useRef<HTMLDivElement | null>(null);
+  const mainBtnRef = useRef<HTMLButtonElement | null>(null);
+  const plusRef = useRef<HTMLSpanElement | null>(null);
+  const toastRef = useRef<HTMLSpanElement | null>(null);
+  const bubBlobRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const bubBtnRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const [open, setOpen] = useState(false);
+  const [toastInfo, setToastInfo] = useState<GooMarkOption | null>(null);
+  const openRef = useRef(false);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  const MS = 36;
+  const BS = 36;
+  const OX = 115;
+  const OY = 112;
+
+  const home = useRef(
+    [-168, -140, -112, -68, -40, -12].map((deg) => {
+      const a = (deg * Math.PI) / 180;
+      return { x: Math.cos(a) * radius, y: Math.sin(a) * radius };
+    }),
+  ).current;
+
+  const simRef = useRef<{
+    main: { sc: GooSpringState; w: GooSpringState; rot: GooSpringState };
+    bubs: {
+      x: GooSpringState;
+      y: GooSpringState;
+      s: GooSpringState;
+      pending: { t: number; pos: { x: number; y: number }; k: number; c: number } | null;
+      drag: { id: number; x0: number; y0: number; live: boolean } | null;
+    }[];
+    raf: number | null;
+    last: number;
+    toastTimer: number | null;
+    timers: number[];
+    wake: () => void;
+  } | null>(null);
+
+  if (!simRef.current) {
+    simRef.current = {
+      main: {
+        sc: gooMakeSpring(1, 520, 16),
+        w: gooMakeSpring(MS, 300, 20),
+        rot: gooMakeSpring(0, 320, 20),
+      },
+      bubs: GOO_MARK_OPTIONS.map(() => ({
+        x: gooMakeSpring(0),
+        y: gooMakeSpring(0),
+        s: gooMakeSpring(0.5, 420, 22),
+        pending: null,
+        drag: null,
+      })),
+      raf: null,
+      last: 0,
+      toastTimer: null,
+      timers: [],
+      wake: () => {},
+    };
+  }
+
+  useEffect(() => {
+    const sim = simRef.current!;
+    const reduce = prefersReducedMotion();
+
+    const renderFrame = () => {
+      const mainBlob = mainBlobRef.current;
+      const mainBtn = mainBtnRef.current;
+      const plus = plusRef.current;
+      if (mainBlob && mainBtn) {
+        const w = sim.main.w.x;
+        const s = sim.main.sc.x;
+        const mt = `translate(${OX - w / 2}px, ${OY - MS / 2}px) scale(${s})`;
+        mainBlob.style.width = `${w}px`;
+        mainBlob.style.transform = mt;
+        mainBtn.style.width = `${w}px`;
+        mainBtn.style.transform = mt;
+      }
+      if (plus) {
+        plus.style.transform = `rotate(${sim.main.rot.x}deg)`;
+      }
+      sim.bubs.forEach((b, i) => {
+        const blob = bubBlobRefs.current[i];
+        const btn = bubBtnRefs.current[i];
+        const x = OX + b.x.x - BS / 2;
+        const y = OY + b.y.x - BS / 2;
+        const sc = b.s.x;
+        const sp = Math.hypot(b.x.v, b.y.v);
+        const st = 1 + Math.min(sp / 2600, 0.32);
+        const a = Math.atan2(b.y.v, b.x.v);
+        if (blob) {
+          blob.style.transform = `translate(${x}px, ${y}px) rotate(${a}rad) scale(${sc * st}, ${sc / st})`;
+        }
+        if (btn) {
+          btn.style.transform = `translate(${x}px, ${y}px) scale(${sc})`;
+          const dist = Math.hypot(b.x.x, b.y.x);
+          btn.style.opacity = String(Math.max(0, Math.min(1, (dist - 12) / 30)));
+          btn.style.pointerEvents = openRef.current ? "auto" : "none";
+        }
+      });
+    };
+
+    const tick = (now: number) => {
+      const dt = Math.min((now - sim.last) / 1000, 1 / 30);
+      sim.last = now;
+      const sub = 4;
+      const subDt = dt / sub;
+      for (let k = 0; k < sub; k++) {
+        sim.bubs.forEach((b) => {
+          if (b.pending && (b.pending.t -= subDt) <= 0) {
+            const p = b.pending;
+            b.pending = null;
+            gooTuneSpring(b.x, p.k, p.c, reduce);
+            gooTuneSpring(b.y, p.k, p.c, reduce);
+            b.x.t = p.pos.x;
+            b.y.t = p.pos.y;
+          }
+          gooStepSpring(b.x, subDt);
+          gooStepSpring(b.y, subDt);
+          gooStepSpring(b.s, subDt);
+        });
+        gooStepSpring(sim.main.sc, subDt);
+        gooStepSpring(sim.main.w, subDt);
+        gooStepSpring(sim.main.rot, subDt);
+      }
+      renderFrame();
+
+      const busy =
+        !gooSpringSettled(sim.main.sc) ||
+        !gooSpringSettled(sim.main.w) ||
+        !gooSpringSettled(sim.main.rot) ||
+        sim.bubs.some(
+          (b) =>
+            b.pending !== null ||
+            b.drag !== null ||
+            !gooSpringSettled(b.x) ||
+            !gooSpringSettled(b.y) ||
+            !gooSpringSettled(b.s),
+        );
+      if (busy) {
+        sim.raf = requestAnimationFrame(tick);
+      } else {
+        sim.raf = null;
+      }
+    };
+
+    sim.wake = () => {
+      if (sim.raf === null) {
+        sim.last = performance.now();
+        sim.raf = requestAnimationFrame(tick);
+      }
+    };
+
+    renderFrame();
+
+    return () => {
+      if (sim.raf !== null) cancelAnimationFrame(sim.raf);
+      if (sim.toastTimer !== null) window.clearTimeout(sim.toastTimer);
+      sim.timers.forEach((t) => window.clearTimeout(t));
+      sim.raf = null;
+    };
+  }, []);
+
+  const setMenuOpen = useCallback((next: boolean) => {
+    if (next === openRef.current) return;
+    openRef.current = next;
+    setOpen(next);
+    const sim = simRef.current!;
+    const reduce = prefersReducedMotion();
+    const stagger = 0.045;
+    sim.main.rot.t = next ? 135 : 0;
+    sim.main.sc.v -= next ? 3 : 1.6;
+    sim.bubs.forEach((b, i) => {
+      if (next) {
+        b.pending = { t: i * stagger, pos: home[i], k: 230, c: 15 };
+        b.s.t = 1;
+        gooTuneSpring(b.s, 300, 14, reduce);
+      } else {
+        b.pending = {
+          t: (sim.bubs.length - 1 - i) * stagger * 0.66,
+          pos: { x: 0, y: 0 },
+          k: 520,
+          c: 34,
+        };
+        b.s.t = 0.5;
+        gooTuneSpring(b.s, 420, 30, reduce);
+      }
+    });
+    sim.wake();
+  }, [home]);
+
+  const endToast = useCallback(() => {
+    const sim = simRef.current!;
+    const reduce = prefersReducedMotion();
+    sim.toastTimer = null;
+    setToastInfo(null);
+    gooTuneSpring(sim.main.w, 320, 22, reduce);
+    sim.main.w.t = MS;
+    sim.main.sc.v -= 1.5;
+    sim.wake();
+  }, []);
+
+  const triggerToast = useCallback(
+    (opt: GooMarkOption) => {
+      const sim = simRef.current!;
+      const reduce = prefersReducedMotion();
+      setToastInfo(opt);
+      requestAnimationFrame(() => {
+        const tw = toastRef.current ? toastRef.current.scrollWidth : 64;
+        gooTuneSpring(sim.main.w, 260, 17, reduce);
+        sim.main.w.t = Math.max(MS, tw + 28);
+        sim.main.sc.v -= 2;
+        sim.wake();
+      });
+      if (sim.toastTimer !== null) window.clearTimeout(sim.toastTimer);
+      sim.toastTimer = window.setTimeout(endToast, 1400);
+    },
+    [endToast],
+  );
+
+  const selectOption = useCallback(
+    (idx: number) => {
+      const opt = GOO_MARK_OPTIONS[idx];
+      const sim = simRef.current!;
+      onChangeRef.current(opt.mark);
+      const t1 = window.setTimeout(() => setMenuOpen(false), 70);
+      const t2 = window.setTimeout(() => triggerToast(opt), 260);
+      sim.timers.push(t1, t2);
+    },
+    [setMenuOpen, triggerToast],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    document.addEventListener("click", onDocClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("click", onDocClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, setMenuOpen]);
+
+  const band = (r: number, d = 54) => d * (1 - 1 / ((r * 0.55) / d + 1));
+  const activeOpt = GOO_MARK_OPTIONS.find((o) => o.mark === value && value !== "");
+
+  return (
+    <div
+      ref={rootRef}
+      className={`goo-mark-wrap ${open ? "is-open" : ""}`}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="goo-mark-stage" aria-hidden={!open}>
+        <div className="goo-mark-layer">
+          {GOO_MARK_OPTIONS.map((opt, i) => (
+            <div
+              key={opt.tone}
+              ref={(el) => {
+                bubBlobRefs.current[i] = el;
+              }}
+              className={`goo-mark-blob goo-bub-blob tone-${opt.tone}`}
+              style={{ width: BS, height: BS }}
+            />
+          ))}
+          <div
+            ref={mainBlobRef}
+            className={`goo-mark-blob goo-main-blob ${activeOpt ? `tone-${activeOpt.tone}` : ""}`}
+            style={{ width: MS, height: MS }}
+          />
+        </div>
+        <div className="goo-mark-ui">
+          {GOO_MARK_OPTIONS.map((opt, i) => (
+            <button
+              key={opt.tone}
+              type="button"
+              ref={(el) => {
+                bubBtnRefs.current[i] = el;
+              }}
+              className={`goo-mark-btn goo-bub-btn tone-${opt.tone} ${value === opt.mark && opt.mark !== "" ? "is-selected" : ""}`}
+              style={{ width: BS, height: BS }}
+              tabIndex={open ? 0 : -1}
+              aria-label={`${ariaLabel}: ${opt.mark || "解除"} (${opt.label})`}
+              onPointerEnter={() => {
+                if (!openRef.current) return;
+                const b = simRef.current!.bubs[i];
+                b.s.t = 1.14;
+                gooTuneSpring(b.s, 500, 18, prefersReducedMotion());
+                simRef.current!.wake();
+              }}
+              onPointerLeave={() => {
+                const b = simRef.current!.bubs[i];
+                if (openRef.current && !b.drag) {
+                  b.s.t = 1;
+                  simRef.current!.wake();
+                }
+              }}
+              onPointerDown={(e) => {
+                if (!openRef.current) return;
+                const b = simRef.current!.bubs[i];
+                b.drag = { id: e.pointerId, x0: e.clientX, y0: e.clientY, live: false };
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  /* ignore */
+                }
+                b.s.t = 0.92;
+                simRef.current!.wake();
+              }}
+              onPointerMove={(e) => {
+                const b = simRef.current!.bubs[i];
+                const d = b.drag;
+                if (!d || d.id !== e.pointerId) return;
+                const dx = e.clientX - d.x0;
+                const dy = e.clientY - d.y0;
+                const r = Math.hypot(dx, dy);
+                if (!d.live && r > 4) {
+                  d.live = true;
+                  b.s.t = 1.08;
+                }
+                if (!d.live) return;
+                const k = band(r) / (r || 1);
+                b.pending = null;
+                const reduce = prefersReducedMotion();
+                gooTuneSpring(b.x, 900, 50, reduce);
+                gooTuneSpring(b.y, 900, 50, reduce);
+                b.x.t = home[i].x + dx * k;
+                b.y.t = home[i].y + dy * k;
+                simRef.current!.wake();
+              }}
+              onPointerUp={(e) => {
+                const b = simRef.current!.bubs[i];
+                const d = b.drag;
+                if (!d || d.id !== e.pointerId) return;
+                b.drag = null;
+                const reduce = prefersReducedMotion();
+                if (d.live) {
+                  gooTuneSpring(b.x, 300, 12, reduce);
+                  gooTuneSpring(b.y, 300, 12, reduce);
+                  b.x.t = home[i].x;
+                  b.y.t = home[i].y;
+                  b.s.t = 1;
+                  simRef.current!.wake();
+                } else {
+                  b.s.t = 1;
+                  b.s.v += 4;
+                  simRef.current!.wake();
+                  selectOption(i);
+                }
+              }}
+              onPointerCancel={(e) => {
+                const b = simRef.current!.bubs[i];
+                if (b.drag && b.drag.id === e.pointerId) {
+                  b.drag = null;
+                  const reduce = prefersReducedMotion();
+                  gooTuneSpring(b.x, 300, 12, reduce);
+                  gooTuneSpring(b.y, 300, 12, reduce);
+                  b.x.t = home[i].x;
+                  b.y.t = home[i].y;
+                  b.s.t = 1;
+                  simRef.current!.wake();
+                }
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  selectOption(i);
+                }
+              }}
+            >
+              <span className="goo-bub-glyph">{opt.mark || "✕"}</span>
+              <span className="goo-tip">{opt.label}</span>
+            </button>
+          ))}
+          <button
+            type="button"
+            ref={mainBtnRef}
+            className={`goo-mark-btn goo-main-btn ${toastInfo ? "toasting" : ""} ${activeOpt ? `has-mark tone-${activeOpt.tone}` : ""}`}
+            style={{ width: MS, height: MS }}
+            aria-label={ariaLabel}
+            aria-expanded={open}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (simRef.current!.toastTimer !== null) {
+                window.clearTimeout(simRef.current!.toastTimer);
+                endToast();
+              }
+              setMenuOpen(!openRef.current);
+            }}
+          >
+            <span ref={plusRef} className="goo-plus">
+              {value && !open ? (
+                <span className="goo-current-mark">{value}</span>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              )}
+            </span>
+            <span ref={toastRef} className="goo-toast">
+              {toastInfo ? `${toastInfo.mark || "✕"} ${toastInfo.label}` : ""}
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

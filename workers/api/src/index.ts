@@ -494,7 +494,8 @@ export class TurfCoordinator {
             const status = await this.state.storage.get<Row>("local-predictions-status") ?? { status: "disabled" };
             const plans = await this.state.storage.get<Row>("local-prediction-bet-plans");
             const provisional = await this.state.storage.get<Row>("local-prediction-provisional");
-            return response({ ...status, ...plans, ...provisional });
+            const external = await this.state.storage.get<Row>("local-prediction-external-forecasts");
+            return response({ ...status, ...plans, ...provisional, ...external });
           }
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);
@@ -504,6 +505,8 @@ export class TurfCoordinator {
             race_bet_plans_date,
             race_provisional_predictions,
             race_provisional_predictions_date,
+            race_external_forecasts,
+            race_external_forecasts_date,
             ...status
           } = input;
           await this.state.storage.put({
@@ -517,6 +520,13 @@ export class TurfCoordinator {
               "local-prediction-provisional": {
                 race_provisional_predictions,
                 race_provisional_predictions_date,
+              },
+            }),
+            ...(input.status === "healthy" && Array.isArray(race_external_forecasts) &&
+              typeof race_external_forecasts_date === "string" && {
+              "local-prediction-external-forecasts": {
+                race_external_forecasts,
+                race_external_forecasts_date,
               },
             }),
           });

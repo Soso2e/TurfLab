@@ -761,6 +761,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       this.failedJob("race-provisional-predictions", error);
       return null;
     });
+    const raceExternalForecasts = await this.raceExternalForecasts(currentRaces, day).catch((error) => {
+      this.failedJob("race-external-forecasts", error);
+      return null;
+    });
     const learning = await this.learn(now).catch((error) => {
       this.failedJob("learning-report", error);
       return null;
@@ -785,6 +789,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       ...(raceProvisionalPredictions && {
         race_provisional_predictions: raceProvisionalPredictions,
         race_provisional_predictions_date: day,
+      }),
+      ...(raceExternalForecasts && {
+        race_external_forecasts: raceExternalForecasts,
+        race_external_forecasts_date: day,
       }),
       nar_csv_import: this.csvImport,
       learning,
@@ -1367,6 +1375,30 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         evaluations: rows(record.evaluations ?? []).slice(0, 20),
       }];
     });
+  }
+
+  /** Publish the saved external forecast marks for the Web race detail view. */
+  private async raceExternalForecasts(races: Row[], day: string): Promise<Row[]> {
+    const out: Row[] = [];
+    for (const entry of races) {
+      const race = obj(entry.race);
+      const raceId = str(race, "race_id");
+      const raceDay = typeof race.race_date_jst === "string" ? race.race_date_jst : day;
+      const key = raceKey(raceId);
+      const record = await readFile(path.join(this.exchange, "external", raceDay, `${key}.json`), "utf8")
+        .then((raw) => obj(JSON.parse(raw)), (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+      if (!record || record.race_id !== raceId) continue;
+      out.push({
+        race_id: raceId,
+        viewed_at: record.viewed_at ?? null,
+        sources: rows(record.sources ?? []).slice(0, 5),
+        limitations: Array.isArray(record.limitations) ? record.limitations.slice(0, 5) : [],
+      });
+    }
+    return out;
   }
 
   /** Weights fitted only on days before `day`; the prior until 30 races exist. */

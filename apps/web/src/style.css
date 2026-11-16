@@ -2187,11 +2187,14 @@ button:focus-visible {
 .marks-list { display: grid; }
 .marks-row {
   display: grid;
-  grid-template-columns: 28px 34px minmax(0, 1fr) minmax(0, 340px);
+  grid-template-columns: auto 34px minmax(0, 1fr) minmax(0, 340px);
   align-items: center;
   gap: 12px;
-  padding: 10px 4px;
+  padding: 10px 8px;
   border-bottom: 1px solid var(--line);
+  border-left: 4px solid transparent;
+  border-radius: 6px;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 .marks-row:last-child { border-bottom: 0; }
 .marks-row.top { background: #fbfcf8; }
@@ -2869,4 +2872,332 @@ th { font-size: 11px; color: var(--ink-sub); }
   padding: 5px 12px;
   font-size: 12px;
   border-radius: 999px;
+}
+
+/* ---------- 印が付いたレーン・確定ベットレーンの色分け ---------- */
+.marks-col-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.entry-marks-cell {
+  white-space: nowrap;
+}
+.entry-marks-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.entry-mark-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.jockey-inline {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.jockey-auto-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  background: #edf2eb;
+  color: #243730;
+  border: 1px solid rgba(36, 55, 48, 0.14);
+}
+.jockey-auto-badge.mark-lane-1 { background: #fdecec; color: #b42318; border-color: #f4b6b2; }
+.jockey-auto-badge.mark-lane-2 { background: #eaf2fe; color: #1d4ed8; border-color: #b7d2fc; }
+.jockey-auto-badge.mark-lane-3 { background: #e8f7ee; color: #166534; border-color: #a9e0be; }
+.jockey-auto-badge.mark-lane-4 { background: #fef7e6; color: #b45309; border-color: #f8d894; }
+.jockey-auto-badge.mark-lane-5 { background: #f3eefc; color: #6d28d9; border-color: #d7c3fa; }
+.jockey-rate-hint {
+  font-size: 11px;
+  color: var(--ink-mute);
+}
+
+.marks-row.mark-lane-1,
+tr.entry-marked-row.mark-lane-1 {
+  background: #fdf2f2;
+  border-left: 4px solid #c0392b;
+}
+.marks-row.mark-lane-2,
+tr.entry-marked-row.mark-lane-2 {
+  background: #f0f6ff;
+  border-left: 4px solid #1f5fbf;
+}
+.marks-row.mark-lane-3,
+tr.entry-marked-row.mark-lane-3 {
+  background: #eef9f2;
+  border-left: 4px solid #1f7a46;
+}
+.marks-row.mark-lane-4,
+tr.entry-marked-row.mark-lane-4 {
+  background: #fef9ec;
+  border-left: 4px solid #c2660a;
+}
+.marks-row.mark-lane-5,
+tr.entry-marked-row.mark-lane-5 {
+  background: #f6f2fd;
+  border-left: 4px solid #6d28d9;
+}
+.marks-row.mark-lane-note,
+tr.entry-marked-row.mark-lane-note {
+  background: #eef8fa;
+  border-left: 4px solid #0e7490;
+}
+
+/* 自動ベットの確定レーンをトーンごとに色変え */
+.expand-card:has(.tone-emerald) {
+  background: linear-gradient(135deg, #f2fbf6 0%, #ffffff 72%);
+  border-color: #9ddcb9;
+  border-left: 4px solid #1f7a46;
+}
+.expand-card:has(.tone-amber) {
+  background: linear-gradient(135deg, #fffaf0 0%, #ffffff 72%);
+  border-color: #f4cc83;
+  border-left: 4px solid #c2660a;
+}
+.expand-card:has(.tone-blue) {
+  background: linear-gradient(135deg, #f2f7ff 0%, #ffffff 72%);
+  border-color: #a9c7fb;
+  border-left: 4px solid #1f5fbf;
+}
+
+/* ---------- 他の予想サイトの予想印（折りたたみ） ---------- */
+.external-forecasts-panel summary.external-forecasts-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 16px;
+  cursor: pointer;
+  list-style: none;
+}
+.external-forecasts-summary::-webkit-details-marker {
+  display: none;
+}
+.external-forecasts-count {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #edf2eb;
+  color: #29463b;
+}
+.external-forecasts-body {
+  margin-top: 14px;
+}
+.external-source-list {
+  display: grid;
+  gap: 12px;
+}
+.external-source-card {
+  border: 1px solid #d4ddd5;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fbfcfa;
+  display: grid;
+  gap: 8px;
+}
+.external-source-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.external-marks-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.external-mark-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid #d4ddd5;
+  background: #ffffff;
+  font-size: 12px;
+}
+.external-mark-chip.mark-lane-1 { background: #fdf2f2; border-color: #f4b6b2; }
+.external-mark-chip.mark-lane-2 { background: #f0f6ff; border-color: #b7d2fc; }
+.external-mark-chip.mark-lane-3 { background: #eef9f2; border-color: #a9e0be; }
+.external-mark-chip.mark-lane-4 { background: #fef9ec; border-color: #f8d894; }
+.external-mark-chip.mark-lane-5 { background: #f6f2fd; border-color: #d7c3fa; }
+.external-mark-symbol {
+  font-weight: 800;
+}
+.external-mark-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+.external-reasons {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--ink-sub);
+  display: grid;
+  gap: 3px;
+}
+
+/* ---------- GooMarkMenu (DesignBookmark Motion Goo Menu 準拠) ---------- */
+.goo-mark-wrap {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 36px;
+  vertical-align: middle;
+  z-index: 2;
+}
+.goo-mark-wrap.is-open {
+  z-index: 80;
+}
+.goo-mark-stage {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+}
+.goo-mark-layer,
+.goo-mark-ui {
+  position: absolute;
+  left: -115px;
+  top: -112px;
+  width: 230px;
+  height: 150px;
+}
+.goo-mark-layer {
+  filter: url(#turflab-goo);
+  pointer-events: none;
+}
+.goo-mark-ui {
+  pointer-events: none;
+}
+.goo-mark-blob {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: 999px;
+  background: #e6ebe6;
+  will-change: transform;
+}
+.goo-mark-blob.tone-m1 { background: #f9dada; }
+.goo-mark-blob.tone-m2 { background: #dbeafe; }
+.goo-mark-blob.tone-m3 { background: #dcfce7; }
+.goo-mark-blob.tone-m4 { background: #fef3c7; }
+.goo-mark-blob.tone-m5 { background: #ede9fe; }
+.goo-mark-blob.tone-clear { background: #e5e7eb; }
+.goo-mark-btn {
+  position: absolute;
+  left: 0;
+  top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #243730;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  cursor: pointer;
+  pointer-events: auto;
+  outline: none;
+  touch-action: none;
+  font-weight: 700;
+}
+.goo-mark-btn:hover {
+  background: transparent;
+}
+.goo-bub-btn {
+  font-size: 15px;
+}
+.goo-bub-btn.tone-m1 { color: #b42318; }
+.goo-bub-btn.tone-m2 { color: #1d4ed8; }
+.goo-bub-btn.tone-m3 { color: #166534; }
+.goo-bub-btn.tone-m4 { color: #b45309; }
+.goo-bub-btn.tone-m5 { color: #6d28d9; }
+.goo-bub-btn.tone-clear { color: #4b5563; font-size: 13px; }
+.goo-bub-btn.is-selected {
+  box-shadow: inset 0 0 0 2px currentColor;
+}
+.goo-main-btn {
+  height: 36px;
+  overflow: hidden;
+  border: 1px solid #d4ddd5;
+}
+.goo-main-btn.has-mark.tone-m1 { color: #b42318; border-color: #f4b6b2; }
+.goo-main-btn.has-mark.tone-m2 { color: #1d4ed8; border-color: #b7d2fc; }
+.goo-main-btn.has-mark.tone-m3 { color: #166534; border-color: #a9e0be; }
+.goo-main-btn.has-mark.tone-m4 { color: #b45309; border-color: #f8d894; }
+.goo-main-btn.has-mark.tone-m5 { color: #6d28d9; border-color: #d7c3fa; }
+.goo-plus {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin: -9px 0 0 -9px;
+  display: grid;
+  place-items: center;
+  transition: opacity 0.2s;
+}
+.goo-plus svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+.goo-current-mark {
+  font-size: 16px;
+  line-height: 1;
+  font-weight: 800;
+}
+.goo-main-btn.toasting .goo-plus {
+  opacity: 0;
+}
+.goo-toast {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateY(5px);
+  transition: opacity 0.15s, filter 0.15s, transform 0.2s;
+}
+.goo-main-btn.toasting .goo-toast {
+  opacity: 1;
+  filter: none;
+  transform: none;
+  transition: opacity 0.35s 0.08s, filter 0.35s 0.08s, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.08s;
+}
+.goo-tip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 6px);
+  transform: translate(-50%, 4px) scale(0.9);
+  background: #243730;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s, transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.goo-bub-btn:hover .goo-tip,
+.goo-bub-btn:focus-visible .goo-tip {
+  opacity: 1;
+  transform: translate(-50%, 0) scale(1);
 }
