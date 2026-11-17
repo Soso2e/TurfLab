@@ -35,6 +35,7 @@ import { csvRecordsFor, gapHints, jockeysCoveredByCsv, mergeResearchRun, statRun
 import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
 import type { NarRun } from "./nar-csv-stats";
 import { runPythonAnalytics } from "./python-analytics";
+import { runPythonLedger } from "./python-ledger";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -778,6 +779,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       path.join(this.home, "rank-evaluation.json.tmp"),
       path.join(this.home, "rank-evaluation.json"),
     );
+    const ledger = await this.refreshLedger(day).catch(() => null);
     return {
       ...this.bridge.status(),
       provider: "codex",
@@ -794,11 +796,24 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         race_external_forecasts: raceExternalForecasts,
         race_external_forecasts_date: day,
       }),
+      ...(ledger ? { ledger } : {}),
       nar_csv_import: this.csvImport,
       learning,
       model: this.model,
       checked_at: new Date().toISOString(),
     };
+  }
+
+  /** Recompute capital & P&L ledger deterministically via Python and push immediately. */
+  private async refreshLedger(day: string): Promise<Row | null> {
+    const ledger = await runPythonLedger({
+      exchangeDir: this.exchange,
+      targetDate: day,
+    });
+    if (ledger) {
+      await this.api("/local-predictions/ledger", { ledger }).catch(() => {});
+    }
+    return ledger;
   }
   /** Latest stage of a race in this tick, for the Web status. */
   private mark(race: Row, stage: RaceStage, detail: string) {
@@ -1259,9 +1274,11 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         const { weights, calibrated } = await this.planWeights(day);
         // Stage 3 lane: 600 yen, fixed with the prediction, never reads odds.
         const hitName = `plans/${day}/${key}-hit.json`;
-        if (!(await exists(hitName)))
+        if (!(await exists(hitName))) {
           await immutableLocalFile(this.exchange, hitName, JSON.stringify(
             hitPlan(record, weights, calibrated, new Date().toISOString())));
+          await this.refreshLedger(day).catch(() => {});
+        }
         // Stage 4 lane: 400 yen from the time-stamped pre-race odds.
         const name = `plans/${day}/${key}.json`;
         const odds = await readFile(path.join(this.exchange, "prerace", day, `${key}.json`), "utf8")
@@ -1287,6 +1304,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         }
         await immutableLocalFile(this.exchange, name, JSON.stringify(
           evPlan(record, odds, weights, calibrated, new Date().toISOString())));
+        await this.refreshLedger(day).catch(() => {});
         this.mark(race, 4, "的中狙い600円・期待値買い400円を固定済み");
       } catch (error) {
         this.failedJob(String(obj(entry.race).race_id), error);
@@ -1634,6 +1652,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
               file,
               JSON.stringify(document),
             );
+            await this.refreshLedger(day).catch(() => {});
           }
         } else if (raceDay < day && (rows(entry.predictions).length || this.freeMode)) {
           const result = obj(entry.official_result);

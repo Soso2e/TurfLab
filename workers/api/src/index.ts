@@ -495,7 +495,14 @@ export class TurfCoordinator {
             const plans = await this.state.storage.get<Row>("local-prediction-bet-plans");
             const provisional = await this.state.storage.get<Row>("local-prediction-provisional");
             const external = await this.state.storage.get<Row>("local-prediction-external-forecasts");
-            return response({ ...status, ...plans, ...provisional, ...external });
+            const ledger = await this.state.storage.get<Row>("local-prediction-ledger");
+            return response({
+              ...status,
+              ...plans,
+              ...provisional,
+              ...external,
+              ...(ledger ? { ledger } : {}),
+            });
           }
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);
@@ -507,6 +514,7 @@ export class TurfCoordinator {
             race_provisional_predictions_date,
             race_external_forecasts,
             race_external_forecasts_date,
+            ledger,
             ...status
           } = input;
           await this.state.storage.put({
@@ -529,7 +537,19 @@ export class TurfCoordinator {
                 race_external_forecasts_date,
               },
             }),
+            ...(ledger && typeof ledger === "object" && {
+              "local-prediction-ledger": ledger as Row,
+            }),
           });
+          return response({ status: "saved" });
+        }
+        if (bridgePath === "/api/local-predictions/ledger") {
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const input = await readBody(request);
+          const ledger = input.ledger;
+          requireCondition(Boolean(ledger && typeof ledger === "object"), "台帳データが不正です");
+          await this.state.storage.put("local-prediction-ledger", ledger as Row);
           return response({ status: "saved" });
         }
         if (bridgePath === "/api/local-predictions/nar-csv/upload") {

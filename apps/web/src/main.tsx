@@ -572,6 +572,7 @@ const statusNames: Record<string, string> = {
   locked: "確定",
   validated: "確認待ち",
   missing: "未取り込み",
+  free: "自由予想",
   scheduled: "発走前",
   started: "発走済み",
   official: "公式確定",
@@ -979,25 +980,48 @@ function App() {
       return next;
     });
   };
+  const ledger =
+    localStatus?.ledger && obj(localStatus.ledger).version === "python-ledger-v1"
+      ? obj(localStatus.ledger)
+      : null;
+  const ledgerDay = ledger
+    ? rows(ledger.by_date ?? []).find((d) => d.date === date) ?? null
+    : null;
   const hitSummary = (() => {
-    if (!localStatus || localStatus.race_bet_plans_date !== date) {
-      return { stake: 0, returned: 0, fixedCount: 0 };
+    if (ledgerDay) {
+      return {
+        stake: Number(ledgerDay.stake_yen ?? 0),
+        returned: Number(ledgerDay.return_yen ?? 0),
+        pending: Number(ledgerDay.pending_stake_yen ?? 0),
+        fixedCount: Number(ledgerDay.stake_yen ?? 0) > 0 ? 1 : 0,
+      };
     }
+    if (!localStatus || localStatus.race_bet_plans_date !== date) {
+      return { stake: 0, returned: 0, pending: 0, fixedCount: 0 };
+    }
+    const dayRaceIds = new Set(races.map((r) => String(r.race_id)));
     let stake = 0;
     let returned = 0;
+    let pending = 0;
     let fixedCount = 0;
     for (const rec of rows(localStatus.race_bet_plans ?? [])) {
-      const hitPlan = rows(rec.plans ?? []).find((p) => p.lane === "hit");
-      const picks = rows(hitPlan?.picks ?? []);
-      if (picks.length > 0) {
-        fixedCount++;
-        stake += picks.reduce((s, p) => s + Number(p.amount_yen ?? 0), 0);
-        if (typeof hitPlan?.returned_yen === "number") {
-          returned += hitPlan.returned_yen;
+      if (!dayRaceIds.has(String(rec.race_id))) continue;
+      for (const plan of rows(rec.plans ?? [])) {
+        if (plan.lane !== "hit" && plan.lane !== "ev") continue;
+        const picks = rows(plan.picks ?? []);
+        if (picks.length > 0) {
+          fixedCount++;
+          const planStake = picks.reduce((s, p) => s + Number(p.amount_yen ?? 0), 0);
+          stake += planStake;
+          if (typeof plan.returned_yen === "number") {
+            returned += plan.returned_yen;
+          } else {
+            pending += planStake;
+          }
         }
       }
     }
-    return { stake, returned, fixedCount };
+    return { stake, returned, pending, fixedCount };
   })();
   const remainingCapital =
     typeof data?.remaining_yen === "number"
@@ -1206,13 +1230,26 @@ function App() {
                         yen(remainingCapital)
                       )}
                     </strong>
-                    {hitSummary.fixedCount > 0 && (
+                    {hitSummary.stake > 0 && (
                       <small>
-                        Hit確定 -{yen(hitSummary.stake)}
+                        自動Bet -{yen(hitSummary.stake)}
                         {hitSummary.returned > 0 ? ` / 払戻 +${yen(hitSummary.returned)}` : ""}
                       </small>
                     )}
                   </div>
+                  {ledger && (
+                    <div>
+                      <span>総資産 <small>Python集計</small></span>
+                      <strong className={Number(ledger.settled_net_yen) > 0 ? "pos" : Number(ledger.settled_net_yen) < 0 ? "neg" : ""}>
+                        <NumberRoll value={Number(ledger.total_assets_yen ?? 0)} format={(n) => yen(n)} />
+                      </strong>
+                      <small>
+                        現金残 {yen(ledger.cash_balance_yen)}
+                        {Number(ledger.pending_stake_yen) > 0 ? ` · 未精算 ${yen(ledger.pending_stake_yen)}` : ""}
+                        {` · 損益 ${signedYen(ledger.settled_net_yen)}`}
+                      </small>
+                    </div>
+                  )}
                   <div>
                     <span>精算損益 <small>全期間</small></span>
                     <strong className={Number(purchase.net_yen) > 0 ? "pos" : Number(purchase.net_yen) < 0 ? "neg" : ""}>
@@ -1309,7 +1346,43 @@ function App() {
                               const cd = countdownInfo(mins);
                               const finished = raceFinished(r);
                               const field = Number(r.entry_count) || undefined;
-                              const picks = rows(r.picks);
+                              const provisional = rows(localStatus?.race_provisional_predictions ?? []).find(
+                                (item) => item.race_id === r.race_id,
+                              );
+                              const betPlanRecord = rows(localStatus?.race_bet_plans ?? []).find(
+                                (item) => item.race_id === r.race_id,
+                              );
+                              const autoPlans = rows(betPlanRecord?.plans ?? []).filter(
+                                (p) => (p.lane === "hit" || p.lane === "ev") && rows(p.picks ?? []).length > 0,
+                              );
+                              const autoStake = autoPlans.reduce(
+                                (sum, p) => sum + rows(p.picks ?? []).reduce((s, pk) => s + Number(pk.amount_yen ?? 0), 0),
+                                0,
+                              );
+                              const autoAllSettled = autoPlans.length > 0 && autoPlans.every((p) => typeof p.returned_yen === "number");
+                              const autoReturn = autoPlans.reduce(
+                                (sum, p) => sum + (typeof p.returned_yen === "number" ? p.returned_yen : 0),
+                                0,
+                              );
+                              const hasFreeOrProvisional = Boolean(provisional || autoPlans.length > 0);
+                              const corePicks = rows(r.picks);
+                              const picks = corePicks.length > 0
+                                ? corePicks
+                                : rows(provisional?.ranking ?? []).slice(0, 4).map((item, idx) => ({
+                                    rank: idx + 1,
+                                    horse_number: item.horse_number,
+                                    horse_name: item.horse_name,
+                                    win_probability: null,
+                                  }));
+                              const missingItems = arr(r, "missing").filter(
+                                (msg) => !(hasFreeOrProvisional && msg === "予想が未取り込み"),
+                              );
+                              const effectivePredStatus =
+                                r.prediction_status === "missing" && hasFreeOrProvisional
+                                  ? provisional?.prediction_status === "free"
+                                    ? "free"
+                                    : "provisional"
+                                  : String(r.prediction_status);
                               const top3 = Array.isArray(r.finish_top3) ? r.finish_top3 : [];
                               return (
                                 <button
@@ -1363,14 +1436,14 @@ function App() {
                                         ))}
                                       </div>
                                     ) : null}
-                                    {arr(r, "missing").length > 0 && (
-                                      <small className="missing">{arr(r, "missing").join(" / ")}</small>
+                                    {missingItems.length > 0 && (
+                                      <small className="missing">{missingItems.join(" / ")}</small>
                                     )}
                                     <div className="race-tags">{renderRaceTags(r).map((t, idx) => (<span key={idx} className={"race-tag " + t.cls}>{t.label}</span>))}</div>
                                   </div>
                                   <div className="race-side">
-                                    <span className={"badge " + r.prediction_status}>
-                                      {statusNames[String(r.prediction_status)]}
+                                    <span className={"badge " + effectivePredStatus}>
+                                      {statusNames[effectivePredStatus] ?? effectivePredStatus}
                                     </span>
                                     {Number(r.bet_count) > 0 ? (
                                       <span className="bet-info">
@@ -1380,6 +1453,17 @@ function App() {
                                         ) : (
                                           <b className={Number(r.settlement_net_yen) > 0 ? "pos" : Number(r.settlement_net_yen) < 0 ? "neg" : ""}>
                                             {signedYen(r.settlement_net_yen)}
+                                          </b>
+                                        )}
+                                      </span>
+                                    ) : autoStake > 0 ? (
+                                      <span className="bet-info">
+                                        自動Bet {yen(autoStake)}
+                                        {!autoAllSettled ? (
+                                          <small>精算待ち</small>
+                                        ) : (
+                                          <b className={autoReturn - autoStake > 0 ? "pos" : autoReturn - autoStake < 0 ? "neg" : ""}>
+                                            {signedYen(autoReturn - autoStake)}
                                           </b>
                                         )}
                                       </span>
