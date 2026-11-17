@@ -116,7 +116,7 @@ def _load_results(exchange_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def _load_plans(exchange_dir: Path) -> list[dict[str, Any]]:
-    """Load bet plan files (hit & ev lanes; excludes evm record-only plans)."""
+    """Load bet plan files (hit, ev, and selective lanes; excludes evm record-only plans)."""
     plans_dir = exchange_dir / "plans"
     items: list[dict[str, Any]] = []
     if not plans_dir.is_dir():
@@ -126,7 +126,12 @@ def _load_plans(exchange_dir: Path) -> list[dict[str, Any]]:
         name = path.name
         if name.endswith("-evm.json"):
             continue
-        lane = "hit" if name.endswith("-hit.json") else "ev"
+        if name.endswith("-hit.json"):
+            lane = "hit"
+        elif name.endswith("-selective.json"):
+            lane = "selective"
+        else:
+            lane = "ev"
         try:
             doc = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -140,7 +145,7 @@ def _load_plans(exchange_dir: Path) -> list[dict[str, Any]]:
             continue
         items.append({
             "date": date_str,
-            "lane": doc_lane if doc_lane in ("hit", "ev") else lane,
+            "lane": doc_lane if doc_lane in ("hit", "ev", "selective") else lane,
             "doc": doc,
         })
     return items
@@ -169,6 +174,7 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
     by_lane: dict[str, dict[str, int]] = {
         "hit": {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0},
         "ev": {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0},
+        "selective": {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0, "skipped_races": 0},
     }
     by_date_map: dict[str, dict[str, int]] = {}
 
@@ -179,6 +185,8 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
         race_id = str(doc.get("race_id") or "")
         picks = doc.get("picks") or []
         if not isinstance(picks, list) or len(picks) == 0:
+            if lane == "selective":
+                by_lane["selective"]["skipped_races"] += 1
             continue
 
         stake = sum(int(p.get("amount_yen") or 0) for p in picks if isinstance(p, dict))
@@ -196,9 +204,6 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
                     refund, payout = _financial_outcome(p, res_doc)
                     returned += refund + payout
 
-        total_stake += stake
-        total_return += returned
-
         lane_bucket = by_lane.setdefault(
             lane,
             {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0},
@@ -206,6 +211,17 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
         lane_bucket["stake_yen"] += stake
         lane_bucket["return_yen"] += returned
         lane_bucket["races"] += 1
+        if is_settled:
+            lane_bucket["settled_stake_yen"] += stake
+        else:
+            lane_bucket["pending_stake_yen"] += stake
+
+        # Keep selective lane isolated from hit+ev capital balance so comparison stays clean.
+        if lane == "selective":
+            continue
+
+        total_stake += stake
+        total_return += returned
 
         day_bucket = by_date_map.setdefault(
             date_str,
@@ -228,13 +244,11 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
         if is_settled:
             settled_stake += stake
             settled_return += returned
-            lane_bucket["settled_stake_yen"] += stake
             day_bucket["settled_stake_yen"] += stake
             if race_id:
                 settled_races.add(race_id)
         else:
             pending_stake += stake
-            lane_bucket["pending_stake_yen"] += stake
             day_bucket["pending_stake_yen"] += stake
             if race_id:
                 pending_races.add(race_id)

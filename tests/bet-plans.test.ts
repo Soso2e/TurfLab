@@ -1,7 +1,8 @@
 import { expect, it } from "vitest";
 import type { Row } from "../packages/shared/src/domain";
 import {
-  evCandidates, evPlan, EV_BUDGET_YEN, HIT_BUDGET_YEN, hitPlan, simulateOrders, ticketKey,
+  evCandidates, evPlan, EV_BUDGET_YEN, HIT_BUDGET_YEN, hitPlan, SELECTIVE_MAX_RACE_YEN,
+  selectivePlan, simulateOrders, ticketKey,
 } from "../scripts/bet-plans";
 import { PRIOR_WEIGHTS } from "../scripts/lab-learning";
 import { withMemory } from "../scripts/local-prediction-worker";
@@ -121,4 +122,75 @@ it("uses AI-selected formation picks in hitPlan within 600 yen and excludes win 
   expect(picks.every((p) => p.ticket_type !== "win")).toBe(true);
   expect(picks[0]).toMatchObject({ ticket_type: "wide", selections_json: [1, 4], amount_yen: 200 });
   expect(picks[3]).toMatchObject({ ticket_type: "trifecta", selections_json: [1, 2, 3], amount_yen: 200 });
+});
+
+it("selectivePlan picks 0-3 tickets without fabricating EV when uncalibrated, avoids torigami, and respects daily cap", () => {
+  const rankedRecord: Row = {
+    race_id: "sel-1",
+    saved_at: "2026-11-16T01:00:00Z",
+    confidence: 0.85,
+    ranking: [
+      { horse_number: 1, score: 78 },
+      { horse_number: 2, score: 72 },
+      { horse_number: 3, score: 63 },
+      { horse_number: 4, score: 55 },
+    ],
+    evaluations: record.evaluations,
+  };
+  const odds = {
+    checked_at: "2026-11-16T05:00:00Z",
+    odds_complete: true,
+    win_odds: [
+      { horse_number: 1, odds: 2.6 },
+      { horse_number: 2, odds: 5.0 },
+      { horse_number: 3, odds: 10.0 },
+      { horse_number: 4, odds: 20.0 },
+    ],
+    combo_odds: [
+      { ticket_type: "quinella", selections_json: [1, 2], odds: 4.5 },
+      { ticket_type: "wide", selections_json: [1, 2], odds: 1.5 }, // torigami wide should not be preferred
+      { ticket_type: "trio", selections_json: [1, 2, 3], odds: 12.0 },
+    ],
+  };
+
+  const plan = selectivePlan(rankedRecord, odds, PRIOR_WEIGHTS, false, "2026-11-16T05:05:00Z");
+  expect(plan.plan_lane).toBe("selective");
+  expect(plan.odds_used_for_prediction).toBe(false);
+  expect(plan.probability_mode).toBe("uncalibrated_rank_and_odds_rules");
+  const picks = plan.picks as Row[];
+  expect(picks.length).toBeGreaterThanOrEqual(1);
+  expect(picks.length).toBeLessThanOrEqual(3);
+  const stake = picks.reduce((s, p) => s + Number(p.amount_yen), 0);
+  expect(stake).toBeLessThanOrEqual(SELECTIVE_MAX_RACE_YEN);
+  // No fabricated EV/probability on uncalibrated picks
+  expect(picks.every((p) => p.ev == null && p.probability == null)).toBe(true);
+  // Does not pick the 1.5x wide torigami
+  expect(picks.some((p) => p.ticket_type === "wide")).toBe(false);
+
+  // Skips when daily budget is exhausted
+  const capped = selectivePlan(rankedRecord, odds, PRIOR_WEIGHTS, false, "2026-11-16T05:05:00Z", {
+    remainingDailyBudgetYen: 0,
+  });
+  expect(capped.picks).toEqual([]);
+  expect(String(capped.skip_reason)).toContain("5,000円");
+
+  // Skips when low confidence and tight field
+  const chaotic = selectivePlan(
+    {
+      ...rankedRecord,
+      confidence: 0.55,
+      ranking: [
+        { horse_number: 1, score: 62 },
+        { horse_number: 2, score: 61 },
+        { horse_number: 3, score: 60 },
+        { horse_number: 4, score: 59 },
+      ],
+    },
+    odds,
+    PRIOR_WEIGHTS,
+    false,
+    "2026-11-16T05:05:00Z",
+  );
+  expect(chaotic.picks).toEqual([]);
+  expect(String(chaotic.skip_reason)).toContain("見送り");
 });

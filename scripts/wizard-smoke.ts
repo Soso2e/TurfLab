@@ -169,7 +169,7 @@ try {
   await page.getByLabel("本人用接続キー").fill(token);
   await page.getByRole("button", { name: "接続する" }).click();
   await page.getByRole("heading", { name: "本日のレース" }).waitFor();
-  await page.getByRole("button", { name: /データを取り込む/ }).click();
+  await page.getByRole("tab", { name: /設定/ }).click();
   await page
     .getByLabel("公式出馬表JSON", { exact: true })
     .fill(JSON.stringify(draft));

@@ -412,10 +412,10 @@ await page.screenshot({
   path: `${outputDir}/turflab-mobile-edit.png`,
   fullPage: true,
 });
-await page.getByRole("button", { name: /成績と検証/ }).click();
+await page.getByRole("tab", { name: /ダッシュボード/ }).click();
 await page.getByRole("heading", { name: "本人購入の成績" }).waitFor();
 await page.getByRole("heading", { name: "推奨買い目の参考収支" }).waitFor();
-await page.getByRole("button", { name: /データを取り込む/ }).click();
+await page.getByRole("tab", { name: /設定/ }).click();
 if (
   !(await page
     .getByLabel("入力種別")
@@ -430,7 +430,7 @@ await page
   .click();
 await page.getByText("保存と読み返しを完了しました").waitFor();
 await page.getByText('"SKIPPED"', { exact: false }).waitFor();
-await page.getByRole("button", { name: /本日のレース/ }).click();
+await page.getByRole("tab", { name: /レース/ }).click();
 await page.locator('input[type="date"]').fill(coreDate);
 await page
   .locator("button.race-card")
@@ -438,7 +438,7 @@ await page
   .click();
 await page.getByRole("button", { name: "見送る", exact: true }).click();
 await page.getByText("見送り記録：", { exact: false }).waitFor();
-await page.getByRole("button", { name: /本日のレース/ }).click();
+await page.getByRole("tab", { name: /レース/ }).click();
 await page
   .locator("button.race-card")
   .filter({ hasText: new RegExp(`Core架空レース ${runId} 1`) })
@@ -451,13 +451,13 @@ await page.screenshot({
   path: `${outputDir}/turflab-mobile-core.png`,
   fullPage: true,
 });
-await page.getByRole("button", { name: /データを取り込む/ }).click();
+await page.getByRole("tab", { name: /設定/ }).click();
 await page.getByLabel("入力種別").selectOption("prediction");
 await page.getByLabel("取り込みJSON").fill("{");
 await page.getByRole("button", { name: "検証・プレビュー" }).click();
 await page.getByRole("alert").waitFor();
 await page.setViewportSize({ width: 390, height: 844 });
-await page.getByRole("button", { name: /本日のレース/ }).click();
+await page.getByRole("tab", { name: /レース/ }).click();
 await page.getByRole("heading", { name: "本日のレース" }).waitFor();
 await page.locator('input[type="date"]').fill(coreDate);
 // The per-race pipeline history is collapsed by default on the home screen.

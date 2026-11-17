@@ -18,6 +18,11 @@
 * {
   box-sizing: border-box;
 }
+html,
+body {
+  overflow-x: clip;
+  max-width: 100%;
+}
 body {
   margin: 0;
 }
@@ -311,6 +316,8 @@ header {
 }
 .panel {
   min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
   overflow-wrap: anywhere;
   background: #fff;
   border: 1px solid #dce3d5;
@@ -774,6 +781,9 @@ button:focus-visible {
   main {
     margin: 0;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: clip;
     padding: 0 17px;
   }
   header {
@@ -2237,9 +2247,11 @@ th { font-size: 11px; color: var(--ink-sub); }
   .race-no b { font-size: 19px; }
   .race-list .race-title h3 { font-size: 15px; }
   .marks-row {
-    grid-template-columns: 26px 30px minmax(0, 1fr);
+    grid-template-columns: auto 30px minmax(0, 1fr);
     gap: 8px 10px;
   }
+  .marks-row > * { min-width: 0; }
+  .marks-col-pair { flex-wrap: wrap; }
   .marks-probs { grid-column: 1 / -1; }
   .next-name { flex-basis: 100%; }
   .hide-finished input { min-height: 0; }

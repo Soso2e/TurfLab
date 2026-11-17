@@ -388,6 +388,14 @@ export function labOutcome(record: Row, result: Row, labPath: string, pace: Row 
   }
   const top1 = ranking[0] ? Number(ranking[0].horse_number) : null;
   const predicted3 = ranking.slice(0, 3).map((r) => Number(r.horse_number));
+  const top3Overlap = predicted3.filter((n) => top3.includes(n)).length;
+  const top1Win = top1 != null && winners.includes(top1);
+  const top1Top3 = top1 != null && top3.includes(top1);
+  const predictedPace = typeof record.main_pace === "string" ? record.main_pace : null;
+  const actualPace = pace && typeof pace.actual_pace === "string" ? String(pace.actual_pace) : null;
+  const paceMiss = Boolean(predictedPace && actualPace && predictedPace !== actualPace);
+  const top2Actual = top3.slice(0, 2);
+  const predictionMiss = top3Overlap === 0 || (!top1Top3 && !predicted3.some((n) => top2Actual.includes(n)));
   return {
     schema_version: "1",
     outcome_version: "lab-outcome-v1",
@@ -401,11 +409,16 @@ export function labOutcome(record: Row, result: Row, labPath: string, pace: Row 
     result_revision: result.revision!,
     predicted_top1: top1,
     predicted_top3: predicted3,
+    predicted_main_pace: predictedPace,
     actual_winners: winners,
     actual_top3: top3,
-    top1_win: top1 != null && winners.includes(top1),
-    top1_top3: top1 != null && top3.includes(top1),
-    top3_overlap: predicted3.filter((n) => top3.includes(n)).length,
+    top1_win: top1Win,
+    top1_top3: top1Top3,
+    top3_overlap: top3Overlap,
+    error_flags: {
+      prediction_miss: predictionMiss,
+      pace_miss: paceMiss,
+    },
     evaluations: rows(record.evaluations ?? []).map((e) => ({ horse_number: e.horse_number!, components: e.components ?? {} })),
     top1_flat: top1 == null ? null : {
       win: flat("win", top1, result),
@@ -459,6 +472,29 @@ export function planOutcome(plan: Row, result: Row): { stake: number; returned: 
     returned += outcome.payout + outcome.refund;
   }
   return { stake, returned };
+}
+
+export function planOutcomeDetailed(plan: Row, result: Row): {
+  stake: number;
+  returned: number;
+  pick_outcomes: { ticket_type: string; stake: number; returned: number; hit: boolean }[];
+} {
+  let stake = 0, returned = 0;
+  const pick_outcomes: { ticket_type: string; stake: number; returned: number; hit: boolean }[] = [];
+  for (const pick of rows(plan.picks ?? [])) {
+    const outcome = financialOutcome(pick, result, rows(result.payouts ?? []));
+    const s = Number(pick.amount_yen);
+    const r = outcome.payout + outcome.refund;
+    stake += s;
+    returned += r;
+    pick_outcomes.push({
+      ticket_type: String(pick.ticket_type ?? "unknown"),
+      stake: s,
+      returned: r,
+      hit: r > 0,
+    });
+  }
+  return { stake, returned, pick_outcomes };
 }
 
 /** Training/evaluation rows from compared records, with pre-race win odds when saved. */
@@ -575,6 +611,195 @@ export function pickProfile(plans: Row[]): Row {
   };
 }
 
+function pickCountBucket(count: number): string {
+  if (count <= 0) return "0";
+  if (count <= 3) return String(count);
+  return "4+";
+}
+
+function stakeBucket(stake: number): string {
+  if (stake <= 0) return "0";
+  if (stake <= 300) return "100-300";
+  if (stake <= 600) return "400-600";
+  if (stake <= 1000) return "700-1000";
+  return "1001+";
+}
+
+export function planBreakdown(plans: Row[]): Row {
+  const byTicketType = new Map<string, { picks: number; hits: number; stake_yen: number; returned_yen: number }>();
+  const byPickCount = new Map<string, { races: number; hit_races: number; stake_yen: number; returned_yen: number }>();
+  const byStakeBucket = new Map<string, { races: number; hit_races: number; stake_yen: number; returned_yen: number }>();
+
+  for (const plan of plans) {
+    if (!plan.settled) continue;
+    const settled = obj(plan.settled);
+    const stake = Number(settled.stake ?? 0);
+    const returned = Number(settled.returned ?? 0);
+    const picks = rows(plan.picks ?? []);
+
+    const pcKey = pickCountBucket(picks.length);
+    const pc = byPickCount.get(pcKey) ?? { races: 0, hit_races: 0, stake_yen: 0, returned_yen: 0 };
+    pc.races++;
+    if (returned > 0) pc.hit_races++;
+    pc.stake_yen += stake;
+    pc.returned_yen += returned;
+    byPickCount.set(pcKey, pc);
+
+    const sbKey = stakeBucket(stake);
+    const sb = byStakeBucket.get(sbKey) ?? { races: 0, hit_races: 0, stake_yen: 0, returned_yen: 0 };
+    sb.races++;
+    if (returned > 0) sb.hit_races++;
+    sb.stake_yen += stake;
+    sb.returned_yen += returned;
+    byStakeBucket.set(sbKey, sb);
+
+    for (const po of rows(settled.pick_outcomes ?? [])) {
+      const tt = String(po.ticket_type ?? "unknown");
+      const cur = byTicketType.get(tt) ?? { picks: 0, hits: 0, stake_yen: 0, returned_yen: 0 };
+      cur.picks++;
+      if (po.hit) cur.hits++;
+      cur.stake_yen += Number(po.stake ?? 0);
+      cur.returned_yen += Number(po.returned ?? 0);
+      byTicketType.set(tt, cur);
+    }
+  }
+
+  const withRoi = <T extends { stake_yen: number; returned_yen: number }>(row: T) => ({
+    ...row,
+    return_rate: row.stake_yen > 0 ? round(row.returned_yen / row.stake_yen) : null,
+  });
+
+  return {
+    by_ticket_type: Object.fromEntries([...byTicketType.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, withRoi(v)])),
+    by_pick_count: Object.fromEntries(["0", "1", "2", "3", "4+"].filter((k) => byPickCount.has(k)).map((k) => [k, withRoi(byPickCount.get(k)!)])),
+    by_stake_bucket: Object.fromEntries(["0", "100-300", "400-600", "700-1000", "1001+"].filter((k) => byStakeBucket.has(k)).map((k) => [k, withRoi(byStakeBucket.get(k)!)])),
+  };
+}
+
+export function compareStrategies(plans: Row[]): Row {
+  const byRace = new Map<string, { current: { stake: number; returned: number; picks: number } | null; selective: { stake: number; returned: number; picks: number } | null }>();
+  for (const plan of plans) {
+    if (!plan.settled) continue;
+    const raceId = String(plan.race_id ?? "");
+    if (!raceId) continue;
+    const lane = plan.plan_lane === "hit" ? "hit" : plan.plan_lane === "evm" ? "evm" : plan.plan_lane === "selective" ? "selective" : "ev";
+    if (lane === "evm") continue;
+    const settled = obj(plan.settled);
+    const stake = Number(settled.stake ?? 0);
+    const returned = Number(settled.returned ?? 0);
+    const picks = rows(plan.picks ?? []).length;
+    const entry = byRace.get(raceId) ?? { current: null, selective: null };
+    if (lane === "selective") {
+      entry.selective = { stake, returned, picks };
+    } else {
+      entry.current = entry.current
+        ? { stake: entry.current.stake + stake, returned: entry.current.returned + returned, picks: entry.current.picks + picks }
+        : { stake, returned, picks };
+    }
+    byRace.set(raceId, entry);
+  }
+
+  const paired = [...byRace.entries()].filter(([, v]) => v.current != null && v.selective != null);
+  const currentBets: { stake: number; returned: number }[] = [];
+  const selectiveBets: { stake: number; returned: number }[] = [];
+  let selectiveBetter = 0, currentBetter = 0, tied = 0;
+  let currentSkipped = 0, selectiveSkipped = 0;
+
+  for (const [, v] of paired) {
+    const c = v.current!;
+    const s = v.selective!;
+    if (c.stake === 0) currentSkipped++;
+    if (s.stake === 0) selectiveSkipped++;
+    if (c.stake > 0) currentBets.push({ stake: c.stake, returned: c.returned });
+    if (s.stake > 0) selectiveBets.push({ stake: s.stake, returned: s.returned });
+    const cNet = c.returned - c.stake;
+    const sNet = s.returned - s.stake;
+    if (sNet > cNet) selectiveBetter++;
+    else if (cNet > sNet) currentBetter++;
+    else tied++;
+  }
+
+  const curSummary = returnRate(currentBets);
+  const selSummary = returnRate(selectiveBets);
+  const curNet = Number(curSummary.returned_yen ?? 0) - Number(curSummary.stake_yen ?? 0);
+  const selNet = Number(selSummary.returned_yen ?? 0) - Number(selSummary.stake_yen ?? 0);
+
+  return {
+    paired_races: paired.length,
+    current: { ...curSummary, skipped: currentSkipped, net_yen: curNet },
+    selective: { ...selSummary, skipped: selectiveSkipped, net_yen: selNet },
+    head_to_head: {
+      selective_better: selectiveBetter,
+      tied,
+      current_better: currentBetter,
+      net_diff_yen: selNet - curNet,
+    },
+  };
+}
+
+export function errorSummary(outcomes: Row[], plans: Row[]): Row {
+  const plansByRace = new Map<string, Row[]>();
+  for (const p of plans) {
+    if (!p.settled || p.plan_lane === "evm") continue;
+    const rid = String(p.race_id ?? "");
+    const list = plansByRace.get(rid) ?? [];
+    list.push(p);
+    plansByRace.set(rid, list);
+  }
+
+  const counts = {
+    races: outcomes.length,
+    prediction_miss: 0,
+    pace_miss: 0,
+    bet_decision_miss: 0,
+    hit_or_profit: 0,
+    skipped_good: 0,
+    skipped_missed: 0,
+  };
+
+  for (const o of outcomes) {
+    const rid = String(o.race_id);
+    const flags = obj(o.error_flags ?? {});
+    const pred3 = (o.predicted_top3 ?? []) as number[];
+    const act3 = (o.actual_top3 ?? []) as number[];
+    const overlap = Number(o.top3_overlap ?? pred3.filter((n) => act3.includes(n)).length);
+    const top1Top3 = Boolean(o.top1_top3);
+    const predMiss = typeof flags.prediction_miss === "boolean"
+      ? flags.prediction_miss
+      : overlap === 0 || (!top1Top3 && !pred3.some((n) => act3.slice(0, 2).includes(n)));
+
+    const predPace = typeof o.predicted_main_pace === "string" ? o.predicted_main_pace : null;
+    const actPace = o.pace_observation && typeof obj(o.pace_observation).actual_pace === "string"
+      ? String(obj(o.pace_observation).actual_pace)
+      : null;
+    const paceMiss = typeof flags.pace_miss === "boolean"
+      ? flags.pace_miss
+      : Boolean(predPace && actPace && predPace !== actPace);
+
+    if (predMiss) counts.prediction_miss++;
+    if (paceMiss) counts.pace_miss++;
+
+    const racePlans = plansByRace.get(rid) ?? [];
+    const targetPlan = racePlans.find((p) => p.plan_lane === "selective") ?? racePlans[0] ?? null;
+    if (targetPlan) {
+      const settled = obj(targetPlan.settled);
+      const stake = Number(settled.stake ?? 0);
+      const returned = Number(settled.returned ?? 0);
+      if (stake === 0) {
+        if (!predMiss && (Boolean(o.top1_win) || overlap >= 2)) counts.skipped_missed++;
+        else counts.skipped_good++;
+      } else if (returned > stake) {
+        counts.hit_or_profit++;
+      } else if (!predMiss) {
+        // Prediction caught the horses, but betting structure / sizing lost money
+        counts.bet_decision_miss++;
+      }
+    }
+  }
+
+  return counts;
+}
+
 /** One sample per race: the last pre-start record is what the race was judged on. */
 export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<string, Row>, now: string): Row {
   const judged = latestPerRace(outcomes);
@@ -587,8 +812,14 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
   });
   // race-flow-v2: the 600-yen hit lane and the 400-yen EV lane are settled apart.
   // The market-anchored lane ("evm") is a third, separately settled record.
-  const laneOf = (p: Row) => (p.plan_lane === "hit" ? "hit" : p.plan_lane === "evm" ? "evm" : "ev");
-  const lane = (name: "hit" | "ev" | "evm") => plans.filter((p) => laneOf(p) === name);
+  // selective-plan-v1 ("selective") is the 0..3 pick flexible lane.
+  const laneOf = (p: Row) => (
+    p.plan_lane === "hit" ? "hit"
+      : p.plan_lane === "evm" ? "evm"
+        : p.plan_lane === "selective" ? "selective"
+          : "ev"
+  );
+  const lane = (name: "hit" | "ev" | "evm" | "selective") => plans.filter((p) => laneOf(p) === name);
   const settledOf = (list: Row[]) =>
     list.filter((p) => p.settled).map((p) => obj(p.settled) as unknown as { stake: number; returned: number });
   const planBets = settledOf(lane("ev"));
@@ -597,6 +828,8 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
   const hitReturn = returnRate(hitBets.filter((b) => b.stake > 0));
   const anchoredBets = settledOf(lane("evm"));
   const anchoredReturn = returnRate(anchoredBets.filter((b) => b.stake > 0));
+  const selectiveBets = settledOf(lane("selective"));
+  const selectiveReturn = returnRate(selectiveBets.filter((b) => b.stake > 0));
   const win = returnRate(bets("win"));
   const count = judged.length;
   return {
@@ -626,6 +859,14 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
       verdict: roiVerdict(planReturn),
       pick_profile: pickProfile(lane("ev")),
     },
+    selective_plans: {
+      fixed: lane("selective").length,
+      settled: selectiveBets.length,
+      skipped: selectiveBets.filter((b) => b.stake === 0).length,
+      hit_races: selectiveBets.filter((b) => b.returned > 0).length,
+      ...selectiveReturn,
+      verdict: roiVerdict(selectiveReturn),
+    },
     market_anchored_plans: {
       fixed: lane("evm").length,
       settled: anchoredBets.length,
@@ -633,6 +874,12 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
       ...anchoredReturn,
       verdict: roiVerdict(anchoredReturn),
     },
+    strategy_comparison: compareStrategies(plans),
+    breakdown: {
+      current: planBreakdown([...lane("hit"), ...lane("ev")]),
+      selective: planBreakdown(lane("selective")),
+    },
+    error_summary: errorSummary(judged, plans),
     recorded_probabilities: recordedCalibration(plans, judged, oddsByRace),
     market_blend: walkForwardBlend(samples),
     learning: walkForward(samples),

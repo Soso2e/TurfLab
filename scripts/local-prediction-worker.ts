@@ -28,9 +28,11 @@ import { importNarCsvInbox } from "./nar-csv-import";
 import { completeEvaluations, evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
 import {
   fitBlend, fitScale, fitWeights, labOutcome, latestPerRace, learningReport, MIN_TRAIN_RACES,
-  outcomeSamples, planOutcome, PRIOR_WEIGHTS, walkForwardBlend, type Sample,
+  outcomeSamples, planOutcome, planOutcomeDetailed, PRIOR_WEIGHTS, walkForwardBlend, type Sample,
 } from "./lab-learning";
-import { evCandidates, evPlan, hitPlan, marketAnchoredPlan, ticketKey } from "./bet-plans";
+import {
+  evCandidates, evPlan, hitPlan, marketAnchoredPlan, SELECTIVE_DAILY_BUDGET_YEN, selectivePlan, ticketKey,
+} from "./bet-plans";
 import { csvRecordsFor, gapHints, jockeysCoveredByCsv, mergeResearchRun, statRunsFromCsv } from "./csv-run-fill";
 import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
 import type { NarRun } from "./nar-csv-stats";
@@ -662,9 +664,9 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         const freePrompt =
           "【AI自由予想モード】固定pack.researchとpython_analytics（Pythonによる過去CSV・DBの定量集計）を土台にしつつ、" +
           (beforeStart
-            ? "発走前の未来レース。Web検索で最新の出馬表・馬場状態・天候・当日傾向・リアルタイムオッズを確認して自由に総合判断する。"
+            ? "発走前の未来レース。Web検索で最新の出馬表・馬場状態・天候・当日傾向を確認して全頭分析と3展開予想を行う。オッズ・人気は馬の能力・着順予想・3展開予想には一切使わない（予想固定後の購入期待値評価にのみ使用する）。"
             : "固定資料とpython_analyticsをもとに分析する。") +
-          "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）を必ず返してよい。\n" +
+          "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、3展開予想（scenarios: slow/middle/high と main_pace）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]。比較用に保持）を返してよい。\n" +
           (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
         const answer = await this.generate(
           day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v1" : pack.research ? "-context-v3" : "-context-v1"),
@@ -736,6 +738,9 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
               lab_evaluations: answer.horse_evaluations ?? answer.lab_evaluations ?? [],
               hit_picks: answer.hit_picks,
               free_analysis: answer.free_analysis,
+              main_pace: answer.main_pace,
+              main_pace_reason: answer.main_pace_reason,
+              scenarios: answer.scenarios,
             }, day, coverage, converted ? "formal" : "free");
         }
       } catch (error) {
@@ -1195,6 +1200,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           evaluations: ranked?.evaluations ?? given,
           ...(typeof answer.free_analysis === "string" ? { free_analysis: answer.free_analysis.slice(0, 2000) } : {}),
           ...(typeof answer.reason === "string" ? { reason: answer.reason.slice(0, 600) } : {}),
+          ...(typeof answer.main_pace === "string" ? { main_pace: answer.main_pace } : {}),
+          ...(typeof answer.main_pace_reason === "string" ? { main_pace_reason: answer.main_pace_reason.slice(0, 600) } : {}),
+          ...(Array.isArray(answer.scenarios) && answer.scenarios.length ? { scenarios: answer.scenarios } : {}),
           ...(hitPicks ? { hit_picks: hitPicks } : {}),
         }));
       }
@@ -1304,8 +1312,26 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         }
         await immutableLocalFile(this.exchange, name, JSON.stringify(
           evPlan(record, odds, weights, calibrated, new Date().toISOString())));
+        // Selective lane: 0-3 picks, flexible ticket type, active skip, daily 5,000 yen cap.
+        const selectiveName = `plans/${day}/${key}-selective.json`;
+        if (!(await exists(selectiveName))) {
+          const dayFiles = await readdir(path.join(this.exchange, "plans", day)).catch(() => []);
+          let spentToday = 0;
+          for (const f of dayFiles) {
+            if (!f.endsWith("-selective.json")) continue;
+            const existingSel = await readFile(path.join(this.exchange, "plans", day, f), "utf8")
+              .then((raw) => obj(JSON.parse(raw))).catch(() => null);
+            for (const pk of rows(existingSel?.picks ?? [])) {
+              spentToday += Number(pk.amount_yen ?? 0);
+            }
+          }
+          await immutableLocalFile(this.exchange, selectiveName, JSON.stringify(
+            selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
+              remainingDailyBudgetYen: Math.max(0, SELECTIVE_DAILY_BUDGET_YEN - spentToday),
+            })));
+        }
         await this.refreshLedger(day).catch(() => {});
-        this.mark(race, 4, "的中狙い600円・期待値買い400円を固定済み");
+        this.mark(race, 4, "的中狙い600円・期待値買い400円・新方式を固定済み");
       } catch (error) {
         this.failedJob(String(obj(entry.race).race_id), error);
       }
@@ -1325,14 +1351,15 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             if (error.code === "ENOENT") return null;
             throw error;
           });
-      const [hit, ev, market, odds] = await Promise.all([
+      const [hit, ev, market, selective, odds] = await Promise.all([
         read("plans", key + "-hit.json"),
         read("plans", key + ".json"),
         read("plans", key + "-evm.json"),
+        read("plans", key + "-selective.json"),
         read("prerace", key + ".json"),
       ]);
       const result = obj(entry.official_result ?? {});
-      const plans = [["hit", hit], ["ev", ev], ["evm", market]] as const;
+      const plans = [["hit", hit], ["ev", ev], ["evm", market], ["selective", selective]] as const;
       const closed = Date.parse(String(race.scheduled_start_at)) <= Date.now() ||
         result.official_status === "official" || race.status === "cancelled";
       return {
@@ -1481,7 +1508,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       .map(({ value }) => [String(value.race_id), value]));
     const plans = savedPlans.map(({ value }) => {
       const result = results.get(value.race_id!);
-      return result ? { ...value, settled: planOutcome(value, result) } : value;
+      return result ? { ...value, settled: planOutcomeDetailed(value, result) } : value;
     });
     const report = learningReport([...newest.values()], plans, odds, now.toISOString());
     await writeFile(path.join(this.home, "learning-report.json.tmp"), JSON.stringify(report));

@@ -143,4 +143,66 @@ describe("python-ledger", () => {
     expect(ledger!.cash_balance_yen).toBe(50000);
     expect(ledger!.total_assets_yen).toBe(50000);
   });
+
+  it("tracks selective lane separately without polluting hit+ev capital balance", async () => {
+    const exchange = await makeTempExchange();
+    const raceId = "name-only:race:test-race-3";
+    const key = "name-only_race_test-race-3";
+
+    await mkdir(path.join(exchange, "plans", "2026-11-17"), { recursive: true });
+    await writeFile(
+      path.join(exchange, "plans", "2026-11-17", `${key}-hit.json`),
+      JSON.stringify({
+        race_id: raceId,
+        plan_lane: "hit",
+        picks: [{ ticket_type: "wide", selections_json: [1, 2], amount_yen: 600 }],
+      }),
+    );
+    await writeFile(
+      path.join(exchange, "plans", "2026-11-17", `${key}-selective.json`),
+      JSON.stringify({
+        race_id: raceId,
+        plan_lane: "selective",
+        picks: [{ ticket_type: "win", selections_json: [1], amount_yen: 200 }],
+      }),
+    );
+    await writeFile(
+      path.join(exchange, "plans", "2026-11-17", `${key}-skip-selective.json`),
+      JSON.stringify({
+        race_id: `${raceId}-skip`,
+        plan_lane: "selective",
+        picks: [],
+      }),
+    );
+    await mkdir(path.join(exchange, "results", "2026-11-17"), { recursive: true });
+    await writeFile(
+      path.join(exchange, "results", "2026-11-17", `${key}-official-v1.json`),
+      JSON.stringify({
+        result: {
+          race_id: raceId,
+          revision: 1,
+          official_status: "official",
+          entry_status_json: { "1": "finished", "2": "finished" },
+        },
+        payouts: [{ ticket_type: "win", selections_json: [1], payout_per_100_yen: 350, refund_rule_json: null }],
+      }),
+    );
+
+    const ledger = await runPythonLedger({
+      exchangeDir: exchange,
+      targetDate: "2026-11-17",
+      initialCapitalYen: 100000,
+    });
+    expect(ledger).not.toBeNull();
+    // Main balance reflects only hit+ev (600 stake, 0 return)
+    expect(ledger!.settled_stake_yen).toBe(600);
+    expect(ledger!.settled_return_yen).toBe(0);
+    expect(ledger!.total_assets_yen).toBe(99400);
+    // Selective lane tracked separately
+    const sel = obj(obj(ledger!.by_lane).selective);
+    expect(sel.stake_yen).toBe(200);
+    expect(sel.return_yen).toBe(700);
+    expect(sel.races).toBe(1);
+    expect(sel.skipped_races).toBe(1);
+  });
 });
