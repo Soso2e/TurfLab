@@ -261,3 +261,333 @@ export function marketAnchoredPlan(record: Row, odds: Row, blend: Blend, evidenc
 }
 
 export const isHitPlan = (plan: Row) => obj(plan).plan_lane === "hit";
+
+export const SELECTIVE_MAX_RACE_YEN = 1000;
+export const SELECTIVE_DAILY_BUDGET_YEN = 5000;
+export const SELECTIVE_MAX_PICKS = 3;
+const ALL_TICKET_TYPES = new Set(["win", "place", "wide", "quinella", "exacta", "trio", "trifecta"]);
+const UNORDERED_ALL = new Set(["wide", "quinella", "trio"]);
+
+type RankedHorse = { number: number; score: number };
+
+function rankedHorses(record: Row, weights: number[]): RankedHorse[] {
+  const fromRecord = rows(record.ranking ?? [])
+    .filter((r) => Number.isInteger(Number(r.horse_number)) && typeof r.score === "number" && Number.isFinite(Number(r.score)))
+    .map((r) => ({ number: Number(r.horse_number), score: Number(r.score) }))
+    .sort((a, b) => b.score - a.score || a.number - b.number);
+  if (fromRecord.length >= 2) return fromRecord;
+
+  const horses = features(rows(record.evaluations ?? []));
+  const p = probabilities(horses, weights);
+  return [...p.entries()]
+    .map(([number, prob]) => ({ number, score: round(prob * 100, 2) }))
+    .sort((a, b) => b.score - a.score || a.number - b.number);
+}
+
+type SelectiveCandidate = {
+  ticket_type: string;
+  selections_json: number[];
+  odds: number;
+  amount_yen: number;
+  probability: number | null;
+  ev: number | null;
+  rationale: string;
+};
+
+function findComboOdds(odds: Row, type: string, selection: number[]): number | null {
+  const key = ticketKey(type, selection);
+  for (const quote of rows(odds.combo_odds ?? [])) {
+    if (String(quote.ticket_type) !== type) continue;
+    const nums = Array.isArray(quote.selections_json) ? quote.selections_json.map(Number) : [];
+    if (ticketKey(type, nums) === key && Number(quote.odds) >= 1) {
+      return Number(quote.odds);
+    }
+  }
+  return null;
+}
+
+function canonicalSelection(type: string, selection: number[]): number[] {
+  return UNORDERED_ALL.has(type) ? [...selection].sort((a, b) => a - b) : [...selection];
+}
+
+/**
+ * Selective bet plan (v1):
+ * - Prediction (ranking / 6-factor / 3-pace) is already fixed without odds.
+ * - Uses pre-race odds ONLY after prediction is fixed.
+ * - Selects 0..3 picks across any ticket type; actively skips when edge/clarity is lacking.
+ * - Never fabricates calibrated probabilities or EV when sample size is insufficient.
+ * - Enforces 1,000 yen per race and 5,000 yen per day max without obligation to spend.
+ */
+export function selectivePlan(
+  record: Row,
+  odds: Row | null,
+  weights: number[],
+  calibrated: boolean,
+  now: string,
+  options: { remainingDailyBudgetYen?: number } = {},
+): Row {
+  const remainingBudget = Math.max(
+    0,
+    Math.floor(Number(options.remainingDailyBudgetYen ?? SELECTIVE_DAILY_BUDGET_YEN) / UNIT) * UNIT,
+  );
+  const raceCap = Math.min(SELECTIVE_MAX_RACE_YEN, remainingBudget);
+  const confidence = typeof record.confidence === "number" && Number.isFinite(record.confidence)
+    ? Number(record.confidence)
+    : null;
+  const ranked = rankedHorses(record, weights);
+
+  const base = {
+    schema_version: "1",
+    plan_version: "selective-plan-v1",
+    plan_lane: "selective",
+    lane: "lab",
+    adopted: false,
+    real_money: false,
+    race_id: record.race_id!,
+    fixed_at: now,
+    odds_checked_at: odds?.checked_at ?? null,
+    record_saved_at: record.saved_at ?? null,
+    budget_yen: SELECTIVE_MAX_RACE_YEN,
+    daily_budget_yen: SELECTIVE_DAILY_BUDGET_YEN,
+    remaining_daily_budget_yen: remainingBudget,
+    max_picks: SELECTIVE_MAX_PICKS,
+    odds_used_for_prediction: false,
+    odds_used_for_selection: true,
+    calibrated,
+    probability_mode: calibrated ? "calibrated_model_ev" : "uncalibrated_rank_and_odds_rules",
+    confidence,
+  };
+
+  if (raceCap < UNIT) {
+    return {
+      ...base,
+      picks: [],
+      lines: [],
+      skip_reason: "日次予算5,000円の上限に達したため見送り",
+    };
+  }
+  if (!odds?.odds_complete) {
+    return {
+      ...base,
+      picks: [],
+      lines: [],
+      skip_reason: "発走前オッズが揃っていないため見送り",
+    };
+  }
+  if (ranked.length < 2) {
+    return {
+      ...base,
+      picks: [],
+      lines: [],
+      skip_reason: "出走馬評価が不足しているため見送り",
+    };
+  }
+
+  const winOdds = new Map<number, number>();
+  for (const q of rows(odds.win_odds ?? [])) {
+    const n = Number(q.horse_number);
+    const price = Number(q.odds);
+    if (Number.isInteger(n) && price >= 1) winOdds.set(n, price);
+  }
+
+  // Calibrated branch: only when walk-forward calibration is established.
+  if (calibrated) {
+    const { p, mc } = model(record, weights);
+    const lines: Row[] = [];
+    for (const [n, price] of winOdds) {
+      if (!p.has(n)) continue;
+      const prob = round(p.get(n)!);
+      lines.push({
+        ticket_type: "win",
+        selections_json: [n],
+        probability: prob,
+        odds: price,
+        ev: round(prob * price),
+      });
+    }
+    for (const quote of rows(odds.combo_odds ?? [])) {
+      const type = String(quote.ticket_type);
+      const price = Number(quote.odds);
+      const selection = (Array.isArray(quote.selections_json) ? quote.selections_json : []).map(Number);
+      if (!ALL_TICKET_TYPES.has(type) || !(price >= 1)) continue;
+      const needed = type === "trio" || type === "trifecta" ? 3 : type === "win" || type === "place" ? 1 : 2;
+      if (selection.length !== needed || selection.some((n) => !p.has(n))) continue;
+      const key = ticketKey(type, selection);
+      const probability = type === "win" ? (p.get(selection[0]) ?? 0) : (mc.tickets[key] ?? 0);
+      if (!(probability > 0)) continue;
+      lines.push({
+        ticket_type: type,
+        selections_json: canonicalSelection(type, selection),
+        probability: round(probability),
+        odds: price,
+        ev: round(probability * price),
+      });
+    }
+    const eligible = lines
+      .filter((l) => {
+        const type = String(l.ticket_type);
+        const minP = type === "win" ? 0.08 : minComboProbability(type);
+        return Number(l.ev) >= EV_MIN && Number(l.probability) >= minP;
+      })
+      .sort((a, b) => Number(b.ev) - Number(a.ev))
+      .slice(0, SELECTIVE_MAX_PICKS);
+
+    const picks: Row[] = [];
+    let spent = 0;
+    for (const l of eligible) {
+      if (spent + UNIT > raceCap) break;
+      spent += UNIT;
+      picks.push({
+        ticket_type: l.ticket_type!,
+        selections_json: l.selections_json!,
+        amount_yen: UNIT,
+        odds: l.odds!,
+        probability: l.probability!,
+        ev: l.ev!,
+      });
+    }
+    return {
+      ...base,
+      lines,
+      picks,
+      skip_reason: picks.length ? null : `校正済み期待値${EV_MIN}以上の買い目がなく見送り`,
+    };
+  }
+
+  // Uncalibrated branch: do NOT fabricate probability or EV.
+  // Decide solely from fixed ranking gaps, confidence, and post-prediction odds (anti-torigami).
+  const h1 = ranked[0];
+  const h2 = ranked[1];
+  const h3 = ranked[2] ?? null;
+  const h4 = ranked[3] ?? null;
+  const gap12 = h1.score - h2.score;
+  const gap13 = h3 ? h1.score - h3.score : gap12;
+  const gap24 = h4 ? h2.score - h4.score : 0;
+  const gap14 = h4 ? h1.score - h4.score : gap13;
+
+  if (confidence != null && confidence < 0.65 && gap12 < 2.5 && gap14 < 6) {
+    return {
+      ...base,
+      picks: [],
+      lines: [],
+      skip_reason: "混戦かつ確信度不足のため見送り",
+    };
+  }
+
+  const candidates: SelectiveCandidate[] = [];
+  const o1 = winOdds.get(h1.number) ?? null;
+  const o2 = winOdds.get(h2.number) ?? null;
+  const q12 = findComboOdds(odds, "quinella", [h1.number, h2.number]);
+  const w12 = findComboOdds(odds, "wide", [h1.number, h2.number]);
+  const e12 = findComboOdds(odds, "exacta", [h1.number, h2.number]);
+  const t123 = h3 ? findComboOdds(odds, "trio", [h1.number, h2.number, h3.number]) : null;
+
+  const strongTop1 = gap12 >= 3.5 || ((confidence ?? 0) >= 0.78 && gap13 >= 4.0);
+  const strongTop2 = gap24 >= 4.0 || (gap13 >= 4.0 && gap12 < 3.5);
+
+  // 1. Win ticket on clear top1 when odds avoid low-payout trap (>= 2.0)
+  if (o1 != null && o1 >= 2.0 && (strongTop1 || (confidence ?? 0) >= 0.7)) {
+    candidates.push({
+      ticket_type: "win",
+      selections_json: [h1.number],
+      odds: o1,
+      amount_yen: strongTop1 && o1 >= 2.5 && raceCap >= 200 ? 200 : 100,
+      probability: null,
+      ev: null,
+      rationale: "予想1位の優位性と単勝オッズ妙味",
+    });
+  }
+
+  // 2. Two-horse core: prefer quinella/exacta over low-paying wide to avoid torigami
+  if (strongTop1 || strongTop2) {
+    if (q12 != null && q12 >= 2.5) {
+      candidates.push({
+        ticket_type: "quinella",
+        selections_json: canonicalSelection("quinella", [h1.number, h2.number]),
+        odds: q12,
+        amount_yen: 100,
+        probability: null,
+        ev: null,
+        rationale: "予想上位1-2位の馬連（トリガミ回避）",
+      });
+    } else if (e12 != null && e12 >= 3.5 && strongTop1) {
+      candidates.push({
+        ticket_type: "exacta",
+        selections_json: [h1.number, h2.number],
+        odds: e12,
+        amount_yen: 100,
+        probability: null,
+        ev: null,
+        rationale: "予想1位1着想定の馬単",
+      });
+    } else if (w12 != null && w12 >= 2.2) {
+      candidates.push({
+        ticket_type: "wide",
+        selections_json: canonicalSelection("wide", [h1.number, h2.number]),
+        odds: w12,
+        amount_yen: 100,
+        probability: null,
+        ev: null,
+        rationale: "予想上位1-2位のワイド（2.2倍以上）",
+      });
+    }
+  }
+
+  // 3. Optional 3rd point: trio on top3 if odds >= 4.5, or top2 win if value >= 3.5 and gap12 is tight
+  if (candidates.length < SELECTIVE_MAX_PICKS) {
+    if (t123 != null && t123 >= 4.5 && gap13 <= 12) {
+      candidates.push({
+        ticket_type: "trio",
+        selections_json: canonicalSelection("trio", [h1.number, h2.number, h3!.number]),
+        odds: t123,
+        amount_yen: 100,
+        probability: null,
+        ev: null,
+        rationale: "予想上位3頭の3連複（4.5倍以上）",
+      });
+    } else if (gap12 < 2.5 && o2 != null && o2 >= 3.5 && candidates.length > 0) {
+      candidates.push({
+        ticket_type: "win",
+        selections_json: [h2.number],
+        odds: o2,
+        amount_yen: 100,
+        probability: null,
+        ev: null,
+        rationale: "1-2位僅差で2位の単勝妙味",
+      });
+    }
+  }
+
+  // Filter out picks that cannot clear total stake (anti-torigami) and enforce caps.
+  let chosen = candidates.slice(0, SELECTIVE_MAX_PICKS);
+  while (chosen.length > 0) {
+    const totalStake = chosen.reduce((s, c) => s + c.amount_yen, 0);
+    if (totalStake > raceCap) {
+      chosen = chosen.map((c) => ({ ...c, amount_yen: UNIT })).slice(0, Math.floor(raceCap / UNIT));
+      continue;
+    }
+    const torigamiIdx = chosen.findIndex((c) => c.odds * c.amount_yen < totalStake * 1.15);
+    if (torigamiIdx >= 0) {
+      // Remove lowest-odds torigami leg and re-check
+      const worstIdx = chosen.reduce((best, c, idx, arr) => (c.odds * c.amount_yen < arr[best].odds * arr[best].amount_yen ? idx : best), 0);
+      chosen.splice(worstIdx, 1);
+      continue;
+    }
+    break;
+  }
+
+  const picks: Row[] = chosen.map((c) => ({
+    ticket_type: c.ticket_type,
+    selections_json: c.selections_json,
+    amount_yen: c.amount_yen,
+    odds: c.odds,
+    rationale: c.rationale,
+  }));
+
+  return {
+    ...base,
+    lines: candidates,
+    picks,
+    skip_reason: picks.length ? null : "オッズ妙味不足・トリガミ回避のため見送り",
+  };
+}

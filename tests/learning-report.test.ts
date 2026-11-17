@@ -43,6 +43,10 @@ it("recomputes the report from saved files without writing anything", async () =
     ev_plans: { fixed: 2, settled: 1, stake_yen: 100, returned_yen: 300 },
     recorded_probabilities: { races: 1, versus_market: { races: 1 } },
     market_blend: { races_with_odds: 1, evidence: false },
+    error_summary: { races: 1, prediction_miss: 0, pace_miss: 0 },
   });
+  expect(report.breakdown).toBeDefined();
+  expect(report.strategy_comparison).toBeDefined();
+  expect(report.walk_forward_backtest).toBeDefined();
   expect((await readdir(exchange, { recursive: true })).sort()).toEqual(before);
 });

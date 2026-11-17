@@ -213,7 +213,7 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   expect(prerace).toMatchObject({ odds_complete: true, race_id: "r1" });
   const planDir = path.join(home, "exchange/plans/2026-11-10");
   const planFiles = await readdir(planDir);
-  const plan = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => !/-(hit|evm)\.json$/.test(f))!), "utf8"));
+  const plan = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => !/-(hit|evm|selective)\.json$/.test(f))!), "utf8"));
   expect(plan).toMatchObject({ real_money: false, adopted: false, race_id: "r1", plan_lane: "ev", budget_yen: 400 });
   expect(plan.lines.length).toBe(2);
   // The market-anchored lane is recorded from the same odds and buys nothing
@@ -229,12 +229,15 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   // The 600-yen hit lane is fixed alongside and never reads odds.
   const hit = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => f.includes("-hit"))!), "utf8"));
   expect(hit).toMatchObject({ plan_lane: "hit", budget_yen: 600, odds_used: false });
+  const selective = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => f.endsWith("-selective.json"))!), "utf8"));
+  expect(selective).toMatchObject({ plan_lane: "selective", budget_yen: 1000, odds_used_for_prediction: false });
   expect(report.race_bet_plans).toContainEqual(expect.objectContaining({
     race_id: "r1",
     plans: [
       expect.objectContaining({ lane: "hit", picks: hit.picks }),
       expect.objectContaining({ lane: "ev", picks: plan.picks }),
       expect.objectContaining({ lane: "evm", picks: [], skip_reason: anchored.skip_reason }),
+      expect.objectContaining({ lane: "selective", picks: selective.picks }),
     ],
   }));
   expect(issues).not.toContain("LOCAL_FILE_CONFLICT");
