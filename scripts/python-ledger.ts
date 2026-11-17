@@ -48,6 +48,7 @@ export async function runPythonLedger(
     const child = spawn(pythonBin, [scriptPath, "--input", "-"], {
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
+      env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
     });
 
     const timer = setTimeout(() => {

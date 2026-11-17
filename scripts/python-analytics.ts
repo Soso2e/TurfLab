@@ -63,6 +63,7 @@ export async function runPythonAnalytics(
       {
         stdio: ["pipe", "pipe", "pipe"],
         windowsHide: true,
+        env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" },
       },
     );
 
