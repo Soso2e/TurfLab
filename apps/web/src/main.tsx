@@ -392,7 +392,7 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
       activeItems.push({
         id: `auto-${lane}`,
         title: label,
-        subtitle: `自動保存済み ${picks.length}点 · ${settledText}`,
+        subtitle: `自動保存済み ${picks.length}点 · ${settledText}` + (plan?.selection_source ? ` · 選定元 ${plan.selection_source === "ai-independent-v2" ? "AI独立評価" : plan.selection_source === "ai" ? "AI" : "数値モデル"}` : ""),
         badge: short,
         badgeTone: tone,
         expandedHeader: `${label} · 合計 ${yen(stake)}`,
@@ -477,7 +477,7 @@ function RaceProvisionalPrediction({ api, race, entries }: {
   return (
     <div className="provisional-prediction">
       <p>
-        <span className="race-tag">#暫定</span>{" "}
+        <span className="race-tag">{record.prediction_status === "free" ? "#AI自由予想" : record.prediction_status === "formal" ? "#正式比較" : "#暫定"}</span>{" "}
         <strong>研究ラボ保存（Core未採用）</strong>
         {record.model ? ` · ${String(record.model)}` : ""}
         {typeof record.confidence === "number" ? ` · 確信度 ${pct(record.confidence)}` : ""}
