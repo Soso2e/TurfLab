@@ -140,7 +140,7 @@ export function hitPlan(record: Row, weights: number[], calibrated: boolean, now
   const fromAi = aiHitPicks(record, p, mc);
   // An explicit structured AI decision is authoritative for the AI lane:
   // never replace a skip or invalid/empty suggestion with six model tickets.
-  const aiDecision = obj(record.independent_assessment).ai_bet_decision;
+  const aiDecision = obj(record.independent_assessment ?? {}).ai_bet_decision;
   const aiControlled = aiDecision === "bet" || aiDecision === "skip";
   const picks = aiControlled
     ? (aiDecision === "skip" ? [] : fromAi)
