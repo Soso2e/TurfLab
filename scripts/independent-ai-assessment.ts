@@ -55,7 +55,7 @@ export function independentAssessment(answer: Row, pack: Row): Row | null {
   const jockey = normalizeMarks(answer.jockey_marks, valid, true);
   const partnership = normalizeMarks(answer.partnership_marks, valid);
   const final = normalizeMarks(answer.final_marks, valid);
-  const scenario = obj(answer.scenario_decision);
+  const scenario = obj(answer.scenario_decision ?? {});
   if (!horse || !jockey || !partnership || !final || !["slow", "middle", "high"].includes(String(scenario.main_pace))) return null;
   const order = Array.isArray(scenario.expected_order) ? scenario.expected_order.map(Number) : [];
   if (!order.length || order.some(n => !valid.has(n)) || new Set(order).size !== order.length) return null;
