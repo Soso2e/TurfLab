@@ -438,6 +438,7 @@ await page
   .locator("button.race-card")
   .filter({ hasText: new RegExp(`Core架空レース ${runId} 7`) })
   .click();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("button", { name: "見送る", exact: true }).click();
 await page.getByText("見送り記録：", { exact: false }).waitFor();
 await page.getByRole("tab", { name: /レース/ }).click();
