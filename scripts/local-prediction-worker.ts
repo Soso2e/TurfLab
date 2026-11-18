@@ -1379,6 +1379,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           const picks = rows(plan.picks ?? []);
           return [{
             lane, fixed_at: plan.fixed_at ?? null, picks,
+            selection_source: plan.selection_source ?? null,
             skip_reason: plan.skip_reason ?? null,
             returned_yen: picks.length && result.official_status === "official"
               ? planOutcome(plan, result).returned : null,
