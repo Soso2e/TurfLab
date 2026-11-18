@@ -392,7 +392,7 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
       activeItems.push({
         id: `auto-${lane}`,
         title: label,
-        subtitle: `自動保存済み ${picks.length}点 · ${settledText}`,
+        subtitle: `自動保存済み ${picks.length}点 · ${settledText}` + (plan?.selection_source ? ` · 選定元 ${plan.selection_source === "ai-independent-v2" ? "AI独立評価" : plan.selection_source === "ai" ? "AI" : "数値モデル"}` : ""),
         badge: short,
         badgeTone: tone,
         expandedHeader: `${label} · 合計 ${yen(stake)}`,
@@ -464,12 +464,20 @@ function RaceProvisionalPrediction({ api, race, entries }: {
   if (!record) return <p className="muted">予想が未取り込みです。</p>;
   const ranking = rows(record.ranking ?? []);
   const evaluations = rows(record.evaluations ?? []);
+  const independent = obj(record.independent_assessment ?? {});
+  const aiHorseMarks = rows(independent.horse_marks ?? []);
+  const aiJockeyMarks = rows(independent.jockey_marks ?? []);
+  const aiPartnershipMarks = rows(independent.partnership_marks ?? []);
+  const aiFinalMarks = rows(independent.final_marks ?? []);
+  const aiScenario = obj(independent.scenario_decision ?? {});
+  const markFor = (collection: Row[], num: unknown) =>
+    collection.find((item) => Number(item.horse_number) === Number(num));
   const horseName = (num: unknown) =>
     String(entries.find((e) => e.horse_number === num)?.horse_name ?? "");
   return (
     <div className="provisional-prediction">
       <p>
-        <span className="race-tag">#暫定</span>{" "}
+        <span className="race-tag">{record.prediction_status === "free" ? "#AI自由予想" : record.prediction_status === "formal" ? "#正式比較" : "#暫定"}</span>{" "}
         <strong>研究ラボ保存（Core未採用）</strong>
         {record.model ? ` · ${String(record.model)}` : ""}
         {typeof record.confidence === "number" ? ` · 確信度 ${pct(record.confidence)}` : ""}
@@ -478,6 +486,48 @@ function RaceProvisionalPrediction({ api, race, entries }: {
       </p>
       {(record.not_formal_reason || record.reason) && (
         <p className="muted">{String(record.reason ?? record.not_formal_reason)}</p>
+      )}
+      {aiHorseMarks.length > 0 && (
+        <details open>
+          <summary>AI独立評価：馬・騎手・相性・最終印（{aiHorseMarks.length}頭）</summary>
+          <p className="muted">数値ランキングとは別の判断です。印の根拠を各行から確認できます。</p>
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>馬番・馬名</th><th>馬</th><th>騎手</th><th>相性</th><th>最終</th></tr></thead>
+              <tbody>
+                {aiHorseMarks.map((h) => {
+                  const j = markFor(aiJockeyMarks, h.horse_number);
+                  const pair = markFor(aiPartnershipMarks, h.horse_number);
+                  const fin = markFor(aiFinalMarks, h.horse_number);
+                  const reasons: { label: string; item: Row | undefined }[] = [
+                    { label: "馬", item: h }, { label: "騎手", item: j },
+                    { label: "相性", item: pair }, { label: "最終", item: fin },
+                  ];
+                  return (
+                    <tr key={String(h.horse_number)}>
+                      <td>
+                        <strong>{String(h.horse_number)}番 {horseName(h.horse_number)}</strong>
+                        <details>
+                          <summary>判断理由</summary>
+                          {reasons.map(({ label, item }) =>
+                            <p key={label}>{label}：{String(item?.reason ?? "根拠不明")}</p>)}
+                        </details>
+                      </td>
+                      {[h, j, pair, fin].map((item, i) =>
+                        <td key={i} className={markToneClass(String(item?.mark ?? ""))}>
+                          {String(item?.mark ?? "不明")}
+                        </td>)}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p>主展開：{String(aiScenario.main_pace ?? "不明")} · {String(aiScenario.pace_reason ?? "")}</p>
+          <p>想定上位馬：{Array.isArray(aiScenario.expected_order) ? aiScenario.expected_order.join(" → ") : "不明"}</p>
+          <p>崩れる条件：{String(aiScenario.counter_scenario ?? "不明")}</p>
+          <p>AI判断：{independent.ai_bet_decision === "skip" ? "見送り" : "買い候補あり"} · {String(independent.ai_bet_reason ?? "")}</p>
+        </details>
       )}
       {ranking.length > 0 && (
         <details open>

@@ -138,21 +138,27 @@ function aiHitPicks(record: Row, p: Map<number, number>, mc: OrderProbabilities)
 export function hitPlan(record: Row, weights: number[], calibrated: boolean, now: string): Row {
   const { p, mc } = model(record, weights);
   const fromAi = aiHitPicks(record, p, mc);
-  const picks = fromAi.length
-    ? fromAi
-    : HIT_POINTS.flatMap(([type, count]) => best(mc, type, count))
-      .map((pick) => ({ ...pick, amount_yen: UNIT }));
+  // An explicit structured AI decision is authoritative for the AI lane:
+  // never replace a skip or invalid/empty suggestion with six model tickets.
+  const aiDecision = obj(record.independent_assessment ?? {}).ai_bet_decision;
+  const aiControlled = aiDecision === "bet" || aiDecision === "skip";
+  const picks = aiControlled
+    ? (aiDecision === "skip" ? [] : fromAi)
+    : fromAi.length
+      ? fromAi
+      : HIT_POINTS.flatMap(([type, count]) => best(mc, type, count))
+        .map((pick) => ({ ...pick, amount_yen: UNIT }));
   const stake = picks.reduce((s, x) => s + Number(x.amount_yen), 0);
   return {
     schema_version: "1", plan_version: "hit-plan-v2", plan_lane: "hit",
     lane: "lab", adopted: false, real_money: false,
     race_id: record.race_id!, fixed_at: now, record_saved_at: record.saved_at ?? null,
     budget_yen: HIT_BUDGET_YEN, odds_used: false, calibrated,
-    selection_source: fromAi.length ? "ai" : "model",
+    selection_source: aiControlled ? "ai-independent-v2" : fromAi.length ? "ai" : "model",
     confidence: record.confidence ?? null,
     simulation: { version: mc.version, discount: mc.discount, win: mc.win, top3: mc.top3 },
     picks: stake <= HIT_BUDGET_YEN ? picks : [],
-    skip_reason: picks.length ? null : "出走3頭未満などで組合せを作れない",
+    skip_reason: picks.length ? null : aiControlled ? (aiDecision === "skip" ? "AIが展開と根拠から見送りを判断" : "AIの買い目が空または不正のため見送り。数値モデルで補填しない") : "出走3頭未満などで組合せを作れない",
     probability_note: calibrated ? "学習済み重みの確率" : "未校正の確率（順位の目安）",
   };
 }
