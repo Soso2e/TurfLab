@@ -39,6 +39,8 @@ import type { NarRun } from "./nar-csv-stats";
 import { runPythonAnalytics } from "./python-analytics";
 import { runPythonLedger } from "./python-ledger";
 import { independentAssessment, INDEPENDENT_ASSESSMENT_PROMPT } from "./independent-ai-assessment";
+import { jockeyEvidenceSnapshot } from "./jockey-evidence-snapshot";
+import { aiDiscretionaryPlan, AI_DAY_CAP_YEN } from "./ai-discretionary-plan";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -671,7 +673,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           INDEPENDENT_ASSESSMENT_PROMPT +
           (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
         const answer = await this.generate(
-          day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v1" : pack.research ? "-context-v3" : "-context-v1"),
+          day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v2" : pack.research ? "-context-v3" : "-context-v1"),
           `分析開始UTC ${new Date().toISOString()}。情報締切はpack.information_cutoff_at。\n` + common +
             (this.freeMode
               ? freePrompt
@@ -739,6 +741,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
                 : (converted ? "正式予想の比較用コピー" : "AI自由予想"),
               lab_evaluations: answer.horse_evaluations ?? answer.lab_evaluations ?? [],
               hit_picks: answer.hit_picks,
+              ai_bet_picks: answer.ai_bet_picks,
               ...((independentAssessment(answer, pack)) ?? {}),
               free_analysis: answer.free_analysis,
               main_pace: answer.main_pace,
@@ -1208,7 +1211,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           ...(typeof answer.main_pace_reason === "string" ? { main_pace_reason: answer.main_pace_reason.slice(0, 600) } : {}),
           ...(Array.isArray(answer.scenarios) && answer.scenarios.length ? { scenarios: answer.scenarios } : {}),
           ...(hitPicks ? { hit_picks: hitPicks } : {}),
-          ...(independent ? { independent_assessment: independent, ai_bet_decision: independent.ai_bet_decision } : {}),
+          ...(independent ? { independent_assessment: independent, ai_bet_decision: independent.ai_bet_decision,
+            ai_bet_picks: Array.isArray(answer.ai_bet_picks) ? answer.ai_bet_picks : [],
+            jockey_evidence: jockeyEvidenceSnapshot(pack) } : {}),
         }));
       }
       return;
@@ -1285,6 +1290,23 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         if (!record) continue;
         const key = raceKey(str(race, "race_id"));
         const { weights, calibrated } = await this.planWeights(day);
+        // AI-picked comparison lane: up to 3 points, 1000 yen, with optional skip.
+        // This never places a real wager and never consumes the legacy lane's budget.
+        const aiName = `plans/${day}/${key}-ai.json`;
+        if (obj(record.independent_assessment ?? {}).version === "independent-ai-v2" &&
+            !(await exists(aiName))) {
+          const dayFiles = await readdir(path.join(this.exchange, "plans", day)).catch(() => []);
+          let spentAiToday = 0;
+          for (const file of dayFiles.filter(n => n.endsWith("-ai.json"))) {
+            const prior = await readFile(path.join(this.exchange, "plans", day, file), "utf8")
+              .then(raw => obj(JSON.parse(raw))).catch(() => null);
+            spentAiToday += rows(prior?.picks ?? []).reduce(
+              (sum, pick) => sum + Number(pick.amount_yen ?? 0), 0);
+          }
+          await immutableLocalFile(this.exchange, aiName, JSON.stringify(
+            aiDiscretionaryPlan(record, new Date().toISOString(),
+              Math.max(0, AI_DAY_CAP_YEN - spentAiToday))));
+        }
         // Stage 3 lane: 600 yen, fixed with the prediction, never reads odds.
         const hitName = `plans/${day}/${key}-hit.json`;
         if (!(await exists(hitName))) {
@@ -1356,15 +1378,16 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             if (error.code === "ENOENT") return null;
             throw error;
           });
-      const [hit, ev, market, selective, odds] = await Promise.all([
+      const [hit, ev, market, selective, ai, odds] = await Promise.all([
         read("plans", key + "-hit.json"),
         read("plans", key + ".json"),
         read("plans", key + "-evm.json"),
         read("plans", key + "-selective.json"),
+        read("plans", key + "-ai.json"),
         read("prerace", key + ".json"),
       ]);
       const result = obj(entry.official_result ?? {});
-      const plans = [["hit", hit], ["ev", ev], ["evm", market], ["selective", selective]] as const;
+      const plans = [["hit", hit], ["ev", ev], ["evm", market], ["selective", selective], ["ai", ai]] as const;
       const closed = Date.parse(String(race.scheduled_start_at)) <= Date.now() ||
         result.official_status === "official" || race.status === "cancelled";
       return {
@@ -1425,6 +1448,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         ranking: rows(record.ranking ?? []).slice(0, 18),
         evaluations: rows(record.evaluations ?? []).slice(0, 20),
         ...(record.independent_assessment ? { independent_assessment: record.independent_assessment } : {}),
+        ...(record.jockey_evidence ? { jockey_evidence: record.jockey_evidence } : {}),
       }];
     });
   }
