@@ -38,6 +38,7 @@ import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
 import type { NarRun } from "./nar-csv-stats";
 import { runPythonAnalytics } from "./python-analytics";
 import { runPythonLedger } from "./python-ledger";
+import { independentAssessment, INDEPENDENT_ASSESSMENT_PROMPT } from "./independent-ai-assessment";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -667,6 +668,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
             ? "発走前の未来レース。Web検索で最新の出馬表・馬場状態・天候・当日傾向を確認して全頭分析と3展開予想を行う。オッズ・人気は馬の能力・着順予想・3展開予想には一切使わない（予想固定後の購入期待値評価にのみ使用する）。"
             : "固定資料とpython_analyticsをもとに分析する。") +
           "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、3展開予想（scenarios: slow/middle/high と main_pace）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]。比較用に保持）を返してよい。\n" +
+          INDEPENDENT_ASSESSMENT_PROMPT +
           (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
         const answer = await this.generate(
           day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v1" : pack.research ? "-context-v3" : "-context-v1"),
@@ -737,6 +739,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
                 : (converted ? "正式予想の比較用コピー" : "AI自由予想"),
               lab_evaluations: answer.horse_evaluations ?? answer.lab_evaluations ?? [],
               hit_picks: answer.hit_picks,
+              ...((independentAssessment(answer, pack)) ?? {}),
               free_analysis: answer.free_analysis,
               main_pace: answer.main_pace,
               main_pace_reason: answer.main_pace_reason,
@@ -1180,6 +1183,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     const name = `lab/${day}/${raceKey(str(race, "race_id"))}-${str(pack, "pack_hash").slice(0, 16)}${coverage ? `-${status}` : status === "free" ? "-free" : ""}.json`;
     const ranked = coverage ? provisionalRanking(pack, coverage, given, status === "formal" || status === "free") : null;
     const hitPicks = Array.isArray(answer.hit_picks) && answer.hit_picks.length ? answer.hit_picks : null;
+    const independent = independentAssessment(answer, pack);
     if (status === "formal" || status === "free") {
       if (!(await readFile(path.join(this.exchange, name), "utf8").catch(() => null))) {
         const fallbackRanking = ranked?.ranking ?? given.map((e, idx) => ({
@@ -1204,6 +1208,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           ...(typeof answer.main_pace_reason === "string" ? { main_pace_reason: answer.main_pace_reason.slice(0, 600) } : {}),
           ...(Array.isArray(answer.scenarios) && answer.scenarios.length ? { scenarios: answer.scenarios } : {}),
           ...(hitPicks ? { hit_picks: hitPicks } : {}),
+          ...(independent ? { independent_assessment: independent, ai_bet_decision: independent.ai_bet_decision } : {}),
         }));
       }
       return;
