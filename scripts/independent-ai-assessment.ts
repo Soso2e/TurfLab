@@ -26,7 +26,7 @@ ai_bet_decision:"bet"|"skip",ai_bet_reason:文字列。
 `;
 
 function normalizeMarks(raw: unknown, valid: Set<number>, withSample = false): Row[] | null {
-  const data = rows(raw);
+  const data = Array.isArray(raw) ? rows(raw) : [];
   if (data.length !== valid.size) return null;
   const seen = new Set<number>();
   const out: Row[] = [];
