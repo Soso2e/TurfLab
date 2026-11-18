@@ -14,14 +14,14 @@ export const INDEPENDENT_ASSESSMENT_PROMPT = `
 3) partnership_marks: 馬の脚質と騎手の戦術、人馬の実績、乗り替わりを独立評価し、適合・不適合の理由を書く。過去に組んだことがない場合は不明、相性が悪いと断定しない。
 4) scenario_decision: スロー/平均/ハイの3仮説を比較し、主展開の隊列・ペース・仕掛け・想定上位馬と、覆る条件を文章で書く。
 5) final_marks: 1-4を統合して最終印。元の印から変えた馬と理由を示す。数字の順位だけで最終印を決めない。
-6) ai_bet_decision: "bet" または "skip"。買う場合の hit_picks は展開仮説に対応する必要最小限の組合せだけ（合計600円以下、100円単位、0点も可）。券種を埋めるための買い目は作らない。同じ2頭を軸に複数券種を購入する場合は重複リスクを説明する。見送りなら hit_picks=[]。オッズが無い段階では利益が見込めると断言しない。
+6) ai_bet_decision: "bet" または "skip"。比較用の従来 hit_picks（600円枠）とは別に、ai_bet_picks を最大3点・合計1000円以下・100円単位で自由提案する。券種は win/place/wide/quinella/exacta/trio/trifecta の7種類。ai_bet_picks:[{ticket_type,selections_json:[馬番],amount_yen,rationale}]。券種を無理に埋めず、同一買い目の重複なし。見送りなら ai_bet_picks=[]。払戻の情報がない段階で利益があると断言しない。券種・馬番・金額はコード側で再検証して不備があれば見送る。
 出力フィールド（従来フィールドは残す）:
 horse_marks:[{horse_number,mark,reason,evidence_ids:[]}],
 jockey_marks:[{horse_number,mark,reason,evidence_ids:[],sample_size:nullまたは整数}],
 partnership_marks:[{horse_number,mark,reason,evidence_ids:[]}],
 final_marks:[{horse_number,mark,reason}],
 scenario_decision:{main_pace,pace_reason,expected_order:[馬番],counter_scenario},
-ai_bet_decision:"bet"|"skip",ai_bet_reason:文字列。
+ai_bet_decision:"bet"|"skip",ai_bet_reason:文字列,ai_bet_picks:[{ticket_type,selections_json,amount_yen,rationale}]。
 各印は ◎ ○ ▲ △ ☆ 無印 不明 から選ぶ。馬番は出馬表と一致。根拠がない項目に数値や事実を創作しない。6項目の定量評価やPython統計は補助材料として利用し、最終判断は整合する根拠に基づきAIが説明する。
 `;
 

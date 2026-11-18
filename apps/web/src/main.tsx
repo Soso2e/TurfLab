@@ -366,6 +366,7 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
   }, []);
   const record = rows(status?.race_bet_plans ?? []).find((item) => item.race_id === race.race_id);
   const lanes = [
+    { lane: "ai", short: "AI", tone: "emerald" as const, label: "AI自由予想（最大1,000円・比較用）", missing: "AIの独立評価による買い目が未保存" },
     { lane: "hit", short: "的中", tone: "emerald" as const, label: "的中狙い（600円枠）", missing: record?.missing_hit_reason },
     { lane: "ev", short: "EV", tone: "amber" as const, label: "期待値（400円枠）", missing: record?.missing_ev_reason },
     { lane: "evm", short: "市場", tone: "blue" as const, label: "市場基準の期待値", missing: record?.missing_ev_reason },
@@ -470,6 +471,7 @@ function RaceProvisionalPrediction({ api, race, entries }: {
   const aiPartnershipMarks = rows(independent.partnership_marks ?? []);
   const aiFinalMarks = rows(independent.final_marks ?? []);
   const aiScenario = obj(independent.scenario_decision ?? {});
+  const jockeyEvidence = rows(obj(record.jockey_evidence ?? {}).jockeys ?? []);
   const markFor = (collection: Row[], num: unknown) =>
     collection.find((item) => Number(item.horse_number) === Number(num));
   const horseName = (num: unknown) =>
@@ -523,6 +525,27 @@ function RaceProvisionalPrediction({ api, race, entries }: {
               </tbody>
             </table>
           </div>
+          {jockeyEvidence.length > 0 && (
+            <details>
+              <summary>レース時点の騎手統計と標本数（{jockeyEvidence.length}騎乗）</summary>
+              {jockeyEvidence.map((ev) => {
+                const track = obj(ev.at_track ?? {});
+                const overall = obj(ev.overall ?? {});
+                const position = obj(ev.positions_at_track ?? {});
+                const combo = obj(ev.combo ?? {});
+                return (
+                  <p key={String(ev.horse_number)}>
+                    {String(ev.horse_number)}番 {String(ev.jockey_name ?? "不明")}：
+                    同場{String(track.starts ?? "未確認")}戦・通算{String(overall.starts ?? "未確認")}戦、
+                    先行率{typeof position.front_rate === "number" ? `${Math.round(position.front_rate * 100)}%` : "未確認"}、
+                    同コンビ{String(combo.rides_together ?? "未確認")}走
+                    {!ev.statistics_available && "（統計不足）"}
+                  </p>
+                );
+              })}
+              <p className="muted">標本が少ない場合や通過順が欠けている場合は判断を保留します。</p>
+            </details>
+          )}
           <p>主展開：{String(aiScenario.main_pace ?? "不明")} · {String(aiScenario.pace_reason ?? "")}</p>
           <p>想定上位馬：{Array.isArray(aiScenario.expected_order) ? aiScenario.expected_order.join(" → ") : "不明"}</p>
           <p>崩れる条件：{String(aiScenario.counter_scenario ?? "不明")}</p>
