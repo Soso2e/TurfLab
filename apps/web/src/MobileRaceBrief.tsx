@@ -118,7 +118,7 @@ export function MobileRaceBrief({ race, detail, prediction, evaluations, latestR
             const refund = settled && Number(settled.refund_yen ?? 0) > 0;
             return <div className={`race-brief-ticket ${paid ? "is-hit" : ""}`} key={String(bet.bet_id)}>
               <span>{ticketTypeName(bet.ticket_type)} {arr(bet, "selections_json").join("–")}</span>
-              <strong>{paid ? `的中 ${yen(settled.payout_yen)}` : refund ? "返還" : settled ? "不的中" : "結果・精算待ち"}</strong>
+              <strong>{paid ? `的中 ${yen(settled?.payout_yen)}` : refund ? "返還" : settled ? "不的中" : "結果・精算待ち"}</strong>
             </div>;
           })}
           {fullySettled && <p className="race-brief-muted">{hitBets.length} / {confirmedBets.length}点的中（本人の購入記録）</p>}
