@@ -383,6 +383,8 @@ await page
   .locator("button.race-card")
   .filter({ hasText: "架空レース · ローカル動作確認 " + runId })
   .click();
+await page.getByRole("heading", { name: "このレースの結論" }).waitFor();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("heading", { name: "推奨と本人の仮想購入" }).waitFor();
 await page.setViewportSize({ width: 390, height: 844 });
 await page
@@ -443,6 +445,7 @@ await page
   .locator("button.race-card")
   .filter({ hasText: new RegExp(`Core架空レース ${runId} 1`) })
   .click();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("heading", { name: "全馬評価と根拠" }).waitFor();
 await page.getByRole("heading", { name: /スロー ·/ }).waitFor();
 await page.getByRole("heading", { name: /平均 ·/ }).waitFor();
