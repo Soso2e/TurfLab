@@ -383,6 +383,8 @@ await page
   .locator("button.race-card")
   .filter({ hasText: "架空レース · ローカル動作確認 " + runId })
   .click();
+await page.getByRole("heading", { name: "このレースの結論" }).waitFor();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("heading", { name: "推奨と本人の仮想購入" }).waitFor();
 await page.setViewportSize({ width: 390, height: 844 });
 await page
@@ -436,6 +438,7 @@ await page
   .locator("button.race-card")
   .filter({ hasText: new RegExp(`Core架空レース ${runId} 7`) })
   .click();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("button", { name: "見送る", exact: true }).click();
 await page.getByText("見送り記録：", { exact: false }).waitFor();
 await page.getByRole("tab", { name: /レース/ }).click();
@@ -443,6 +446,7 @@ await page
   .locator("button.race-card")
   .filter({ hasText: new RegExp(`Core架空レース ${runId} 1`) })
   .click();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("heading", { name: "全馬評価と根拠" }).waitFor();
 await page.getByRole("heading", { name: /スロー ·/ }).waitFor();
 await page.getByRole("heading", { name: /平均 ·/ }).waitFor();
@@ -487,6 +491,8 @@ const active = rows(afterReload.data.bets).filter(
 );
 if (active.length !== 1 || active[0].amount_yen !== 400)
   throw new Error("再読込後の本人購入が一致しません");
+await page.getByRole("heading", { name: "このレースの結論" }).waitFor();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("heading", { name: "購入の変更履歴" }).waitFor();
 await browser.close();
 await writeFile(
