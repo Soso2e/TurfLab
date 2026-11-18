@@ -491,6 +491,8 @@ const active = rows(afterReload.data.bets).filter(
 );
 if (active.length !== 1 || active[0].amount_yen !== 400)
   throw new Error("再読込後の本人購入が一致しません");
+await page.getByRole("heading", { name: "このレースの結論" }).waitFor();
+await page.locator("details.race-deep-dive > summary").click();
 await page.getByRole("heading", { name: "購入の変更履歴" }).waitFor();
 await browser.close();
 await writeFile(
