@@ -10,6 +10,7 @@ import {
 import "./style.css";
 import { HorseNo, Mark, markOf, ProbBar, TicketChip, countdownInfo, ticketTypeName } from "./RaceUi";
 import { RaceImportWizard } from "./RaceImportWizard";
+import { MobileRaceBrief } from "./MobileRaceBrief";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
 import { DatabaseExplorer } from "./DatabaseExplorer";
@@ -1709,6 +1710,17 @@ function App() {
                     </div>
                   </div>
                 </div>
+                <MobileRaceBrief
+                  race={race}
+                  detail={detail}
+                  prediction={selected}
+                  evaluations={selectedEvaluations}
+                  latestResult={latestResult}
+                  fieldSize={fieldSize}
+                />
+                <details className="race-deep-dive">
+                  <summary>詳細データ・予想根拠・操作を開く</summary>
+                  <div className="race-deep-dive-content">
                 <section className="panel">
                   <h2>このレースの状況</h2>
                   <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
@@ -2686,6 +2698,8 @@ function App() {
                     <JsonView value={detail.reviews} />
                   </details>
                 </section>
+                  </div>
+                </details>
               </>
             )}
             {tab === "stats" && (
