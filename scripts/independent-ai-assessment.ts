@@ -40,7 +40,7 @@ function normalizeMarks(raw: unknown, valid: Set<number>, withSample = false): R
       reason: clean(entry.reason),
       evidence_ids: (Array.isArray(entry.evidence_ids) ? entry.evidence_ids : [])
         .filter((v): v is string => typeof v === "string").slice(0, 8).map(v => v.slice(0, 120)),
-      ...(withSample ? { sample_size: Number.isSafeInteger(sample) && Number(sample) >= 0 ? sample : null } : {}),
+      ...(withSample ? { sample_size: Number.isSafeInteger(Number(sample)) && sample != null && Number(sample) >= 0 ? sample : null } : {}),
     });
   }
   return out;
