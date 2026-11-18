@@ -196,7 +196,8 @@ export function evPlan(record: Row, odds: Row, weights: number[], calibrated: bo
       Number(l.probability) >= minComboProbability(String(l.ticket_type)))
     .sort((a, b) => Number(b.ev) - Number(a.ev))
     .slice(0, EV_BUDGET_YEN / UNIT)
-    .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT, ev: l.ev! }));
+    .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT,
+      odds: l.odds!, odds_checked_at: odds.checked_at ?? null, probability: l.probability!, ev: l.ev! }));
   return {
     schema_version: "1", plan_version: "ev-plan-v3", plan_lane: "ev",
     lane: "lab", adopted: false, real_money: false,
@@ -254,7 +255,8 @@ export function marketAnchoredPlan(record: Row, odds: Row, blend: Blend, evidenc
       Number(l.probability) >= (l.ticket_type === "win" ? 0.05 : minComboProbability(String(l.ticket_type))))
     .sort((a, b) => Number(b.ev) - Number(a.ev))
     .slice(0, EV_BUDGET_YEN / UNIT)
-    .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT, ev: l.ev! }));
+    .map((l) => ({ ticket_type: l.ticket_type!, selections_json: l.selections_json!, amount_yen: UNIT,
+      odds: l.odds!, odds_checked_at: odds.checked_at ?? null, probability: l.probability!, ev: l.ev! }));
   return {
     ...base,
     payout_rate: round(1 / overround),

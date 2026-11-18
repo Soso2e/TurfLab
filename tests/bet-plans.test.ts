@@ -52,6 +52,8 @@ it("buys only positive-EV lines within 400 yen before the start", () => {
   expect(picks.length).toBeLessThanOrEqual(4);
   expect(picks.reduce((s, p) => s + Number(p.amount_yen), 0)).toBeLessThanOrEqual(400);
   expect(picks.every((p) => Number(p.ev) >= 1.1)).toBe(true);
+  expect(picks.every((p) => Number(p.odds) === 100)).toBe(true);
+  expect(picks.every((p) => p.odds_checked_at === odds.checked_at)).toBe(true);
   const none = evPlan(record, { win_odds: odds.win_odds.map((q) => ({ ...q, odds: 1.1 })) }, PRIOR_WEIGHTS, false, "x");
   expect(none.picks).toEqual([]);
   expect(none.skip_reason).toContain("見送り");
