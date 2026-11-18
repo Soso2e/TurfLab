@@ -20,7 +20,7 @@ export function jockeyEvidenceSnapshot(pack: Row): Row {
     limitations: rawStats.limitations ?? [],
     jockeys: entries.map(e => {
       const number = Number(e.horse_number);
-      const stat = indexed.get(number) ?? {};
+      const stat = obj(indexed.get(number) ?? {});
       const observed = horses.find(h => Number(h.horse_number) === number);
       return {
         horse_number: number,
