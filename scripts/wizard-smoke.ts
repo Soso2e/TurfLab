@@ -251,6 +251,8 @@ try {
       exact: true,
     })
     .click();
+  await page.getByRole("heading", { name: "このレースの結論" }).waitFor();
+  await page.locator("details.race-deep-dive > summary").click();
   await page
     .getByRole("button", { name: "当日の採用版として固定", exact: true })
     .click();
