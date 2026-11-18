@@ -3282,3 +3282,56 @@ tr.entry-marked-row.mark-lane-note {
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
 }
+
+
+/* Mobile-first race brief: current animation components remain untouched. */
+.race-brief { display: grid; gap: 14px; padding: 16px; border: 1px solid var(--line, #d9e1e8); border-radius: 18px; background: var(--surface, #fff); }
+.race-brief-top { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; }
+.race-brief-kicker { font-size: 10px; font-weight: 750; letter-spacing: .12em; opacity: .6; }
+.race-brief h2 { margin: 2px 0 0; font-size: 1.26rem; }
+.race-brief h3 { margin: 0 0 9px; font-size: .96rem; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.race-brief h3 small { color:var(--muted,#64748b); font-weight:500; font-size:.73rem; }
+.race-brief-status { max-width:100%; font-size:.77rem; font-weight:750; border-radius:20px; padding:7px 10px; background:#e5e7eb; color:#334155; }
+.race-brief-status.is-alert { background:#fff0df; color:#9a3412; }
+.race-brief-status.is-done { background:#dcfce7; color:#166534; }
+.race-brief-stage { display:flex; flex-wrap:wrap; gap:6px; }
+.race-brief-stage span { font-size:.72rem; padding:5px 8px; border:1px solid #dbe3ea; border-radius:8px; }
+.race-brief-block { min-width:0; padding-top:12px; border-top:1px solid #e2e8f0; }
+.race-brief-alert { background:#fff4e5; border:2px solid #f59e0b; border-radius:12px; padding:14px; color:#92400e; }
+.race-brief-alert strong { font-size:1rem; }
+.race-brief-alert p { font-size:.84rem; line-height:1.5; margin:7px 0 0; }
+.race-brief-finish { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; }
+.race-brief-place { min-width:0; padding:9px 6px; background:rgba(148,163,184,.11); border-radius:10px; display:grid; justify-items:center; gap:5px; text-align:center; }
+.race-brief-place > small { color:var(--muted,#64748b); font-size:.73rem; }
+.race-brief-place-horse { display:grid; gap:5px; justify-items:center; min-width:0; }
+.race-brief-place-horse b { font-size:.76rem; overflow-wrap:anywhere; }
+.race-brief-ranks { display:grid; gap:6px; }
+.race-brief-rank { display:flex; gap:7px; align-items:center; min-width:0; padding:7px 2px; }
+.race-brief-rank + .race-brief-rank { border-top:1px solid #e2e8f0; }
+.race-brief-horse-name { flex:1; min-width:0; font-size:.84rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.race-brief-rank > strong { font-size:.77rem; white-space:nowrap; }
+.race-brief-numbers { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px; margin-bottom:8px; }
+.race-brief-numbers div { min-width:0; padding:9px 5px; border-radius:10px; background:rgba(148,163,184,.11); text-align:center; }
+.race-brief-numbers small,.race-brief-numbers b { display:block; }
+.race-brief-numbers small { font-size:.66rem; opacity:.75; }
+.race-brief-numbers b { font-size:.84rem; margin-top:4px; overflow-wrap:anywhere; }
+.race-brief-ticket { display:flex; justify-content:space-between; align-items:center; gap:8px; padding:8px 3px; font-size:.79rem; border-bottom:1px solid #e2e8f0; }
+.race-brief-ticket span { min-width:0; overflow-wrap:anywhere; }
+.race-brief-ticket strong { white-space:nowrap; font-size:.76rem; }
+.race-brief-ticket.is-hit strong { color:#15803d; }
+.race-brief-muted { color:var(--muted,#64748b); font-size:.81rem; line-height:1.5; margin:5px 0; }
+.race-brief-review p { line-height:1.55; font-size:.84rem; margin:0 0 5px; }
+.race-brief-review small { color:var(--muted,#64748b); }
+.race-deep-dive { margin-top:14px; }
+.race-deep-dive > summary { cursor:pointer; list-style:none; background:var(--surface,#fff); border:1px solid var(--line,#d9e1e8); border-radius:12px; padding:15px; font-size:.88rem; font-weight:700; }
+.race-deep-dive > summary::-webkit-details-marker { display:none; }
+.race-deep-dive > summary::after { content:" ＋"; float:right; }
+.race-deep-dive[open] > summary::after { content:" −"; }
+.race-deep-dive-content { display:grid; gap:12px; padding-top:12px; min-width:0; }
+@media (max-width:520px) {
+  .race-brief { padding:12px; gap:11px; border-radius:14px; }
+  .race-brief-top { align-items:flex-start; }
+  .race-brief-status { max-width:100%; }
+  .race-brief-rank { gap:5px; }
+  .race-brief-finish { gap:4px; }
+}
