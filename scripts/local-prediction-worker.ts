@@ -1423,6 +1423,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         missing_count: Array.isArray(record.missing) ? record.missing.length : 0,
         ranking: rows(record.ranking ?? []).slice(0, 18),
         evaluations: rows(record.evaluations ?? []).slice(0, 20),
+        ...(record.independent_assessment ? { independent_assessment: record.independent_assessment } : {}),
       }];
     });
   }
