@@ -38,7 +38,7 @@ export async function importOfficialResult(
     "登録済みレースの主催区分が未確認です。公式出馬表との照合が必要です");
   const hosts = race.jurisdiction === "JRA"
     ? ["jra.go.jp", "www.jra.go.jp", "app.jra.jp"]
-    : ["keiba.go.jp", "www.keiba.go.jp"];
+    : ["keiba.go.jp", "www.keiba.go.jp", "www2.keiba.go.jp"];
   requireCondition(hosts.includes(url.hostname),
     "公式結果URLと競馬管轄が一致しません");
   // The official page often shows no publication time. Then the source-check

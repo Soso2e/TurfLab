@@ -8,6 +8,8 @@ import {
   claimLocalWorker,
   LocalPredictionWorker,
   MAX_AUTO_RACES,
+  normalizeOfficialResultDocument,
+  reviewNotes,
 } from "../scripts/local-prediction-worker";
 import { localFiles } from "../scripts/github-bridge";
 import { MemoryRepository } from "../packages/shared/src/repository";
@@ -421,4 +423,65 @@ it("fills past runs from the owner's NAR CSV before any CLI call", async () => {
   expect(record).toMatchObject({ horse_id: "h1", before_date: "2026-11-13", run: { date_jst: "2026-10-20", finish: 2, horse_number: 3, jockey: "騎手一", field_size: 1 } });
   expect(String(record.file_sha256)).toMatch(/^[0-9a-f]{64}$/);
   expect((after.horses as Row[])[0].runs_missing).toBe(2);
+});
+
+it("normalizes reviewNotes from plain strings or structured objects with bounds", () => {
+  expect(reviewNotes(["  素直なメモ  ", "二行目"])).toEqual(["素直なメモ", "二行目"]);
+  expect(
+    reviewNotes([
+      { category: "race_and_data_integrity", fact: "全頭finishedで完了" },
+      { target: "confidence", proposal: "欠測時は上限を下げる" },
+      { step: 1, timing: "事後", action: "公式ラップを補完" },
+      { id: "H1", hypothesis: "内枠先行が残った" },
+      { field: "laps", detail: "ラップ未取得" },
+    ]),
+  ).toEqual([
+    "[race_and_data_integrity] 全頭finishedで完了",
+    "[confidence] 欠測時は上限を下げる",
+    "[事後/1] 公式ラップを補完",
+    "[H1] 内枠先行が残った",
+    "[laps] ラップ未取得",
+  ]);
+  const longText = "あ".repeat(520);
+  const bounded = reviewNotes(Array.from({ length: 15 }, (_, idx) => `${idx}:${longText}`));
+  expect(bounded).toHaveLength(12);
+  expect(bounded[0]).toHaveLength(500);
+  expect(bounded[0].endsWith("…")).toBe(true);
+  expect(() => reviewNotes("not-an-array")).toThrow("LOCAL_INVALID_REVIEW");
+  expect(() => reviewNotes([""])).toThrow("LOCAL_INVALID_REVIEW");
+  expect(() => reviewNotes([123])).toThrow("LOCAL_INVALID_REVIEW");
+});
+
+it("normalizes excluded entry status and bogus refund_rule_json on paid official results", () => {
+  const raw: Row = {
+    result: {
+      race_id: "r1",
+      entry_status_json: { "1": "finished", "2": "scratched", "8": "excluded" },
+    },
+    payouts: [
+      {
+        ticket_type: "win",
+        selections_json: [1],
+        payout_per_100_yen: 130,
+        refund_rule_json: { reason: "scratched", scratched_horse_numbers: [2], refund_per_100_yen: 100 },
+      },
+      {
+        ticket_type: "quinella",
+        selections_json: [1, 2],
+        payout_per_100_yen: 0,
+        refund_rule_json: { kind: "refund", scope: "selection", refund_per_100_yen: 100 },
+      },
+    ],
+  };
+  const normalized = normalizeOfficialResultDocument(raw);
+  expect(obj(normalized.result).entry_status_json).toEqual({ "1": "finished", "2": "scratched", "8": "scratched" });
+  expect(normalized.payouts).toEqual([
+    { ticket_type: "win", selections_json: [1], payout_per_100_yen: 130, refund_rule_json: null },
+    {
+      ticket_type: "quinella",
+      selections_json: [1, 2],
+      payout_per_100_yen: 0,
+      refund_rule_json: { kind: "refund", scope: "selection", refund_per_100_yen: 100 },
+    },
+  ]);
 });

@@ -122,4 +122,14 @@ describe("verified full official results -> Core",()=>{
     await importOfficialResult(repo,revised,now);
     expect(await repo.list("race_results")).toHaveLength(2);
   });
+  it("accepts www2.keiba.go.jp as an official NAR result host",async()=>{
+    const {repo}=await fixture();
+    const race=await repo.get("races","example-race-01");
+    await repo.put("races",{...race!,jurisdiction:"NAR"});
+    const packet=input();
+    obj(obj(packet.document).result).source_url=
+      "https://www2.keiba.go.jp/KeibaWeb/TodayRaceInfo/RaceMarkTable?k_raceDate=2026%2f10%2f12&k_raceNo=1&k_babaCode=22";
+    const saved=await importOfficialResult(repo,packet,now);
+    expect(saved.status).toBe("complete");
+  });
 });

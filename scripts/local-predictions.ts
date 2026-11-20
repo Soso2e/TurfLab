@@ -27,7 +27,7 @@ const { values } = parseArgs({
 if (values["race-url"]) {
   const url = new URL(values["race-url"]);
   if (!values.once || url.protocol !== "https:" || url.username || url.password ||
-      url.port || !["www.keiba.go.jp", "www.jra.go.jp", "app.jra.jp"].includes(url.hostname))
+      url.port || !["www.keiba.go.jp", "www2.keiba.go.jp", "www.jra.go.jp", "app.jra.jp"].includes(url.hostname))
     throw new Error("OFFICIAL_RACE_URL_AND_ONCE_REQUIRED");
 }
 const dataHome = path.resolve(

@@ -11,6 +11,7 @@ export function officialResearchUrl(value: unknown): URL | null {
       !url.port &&
       [
         "www.keiba.go.jp",
+        "www2.keiba.go.jp",
         "keiba.go.jp",
         "www.jra.go.jp",
         "jra.go.jp",

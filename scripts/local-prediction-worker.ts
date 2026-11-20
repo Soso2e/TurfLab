@@ -100,11 +100,92 @@ export class CoreRequestError extends Error {
   }
 }
 
-function reviewNotes(value: unknown) {
-  if (!Array.isArray(value) || value.length > 12 ||
-      !value.every((note) => typeof note === "string" && note.length <= 500))
+const REVIEW_PREFIX_KEYS = ["category", "field", "target", "timing", "id", "step", "topic"] as const;
+const REVIEW_BODY_KEYS = [
+  "fact", "hypothesis", "detail", "action", "proposal",
+  "summary", "text", "note", "description", "rule", "item", "reason", "lesson",
+] as const;
+
+function truncateReviewNote(text: string): string {
+  return text.length <= 500 ? text : `${text.slice(0, 499)}…`;
+}
+
+/** Normalizes review note arrays (accepting plain strings or structured objects) into <=12 bounded strings. */
+export function reviewNotes(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error("LOCAL_INVALID_REVIEW");
+  const out: string[] = [];
+  for (const raw of value) {
+    if (typeof raw === "string") {
+      const trimmed = raw.trim();
+      if (!trimmed) throw new Error("LOCAL_INVALID_REVIEW");
+      out.push(truncateReviewNote(trimmed));
+      continue;
+    }
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const rec = raw as Record<string, unknown>;
+      const prefixes = REVIEW_PREFIX_KEYS
+        .map((k) => rec[k])
+        .filter((v): v is string | number =>
+          (typeof v === "string" && v.trim().length > 0) ||
+          (typeof v === "number" && Number.isFinite(v)))
+        .map((v) => String(v).trim());
+      let body = "";
+      for (const key of REVIEW_BODY_KEYS) {
+        const v = rec[key];
+        if (typeof v === "string" && v.trim().length > 0) {
+          body = v.trim();
+          break;
+        }
+      }
+      if (!body) body = JSON.stringify(rec);
+      const formatted = prefixes.length ? `[${prefixes.join("/")}] ${body}` : body;
+      out.push(truncateReviewNote(formatted));
+      continue;
+    }
     throw new Error("LOCAL_INVALID_REVIEW");
-  return value as string[];
+  }
+  return out.slice(0, 12);
+}
+
+/** Sanitizes helper-returned official result documents without weakening Core betting validation. */
+export function normalizeOfficialResultDocument(document: Row): Row {
+  const resultRaw = document.result;
+  let nextResult = resultRaw;
+  if (resultRaw && typeof resultRaw === "object" && !Array.isArray(resultRaw)) {
+    const r = resultRaw as Row;
+    const statusesRaw = r.entry_status_json;
+    if (statusesRaw && typeof statusesRaw === "object" && !Array.isArray(statusesRaw)) {
+      const nextStatuses: Row = {};
+      for (const [k, v] of Object.entries(statusesRaw as Row)) {
+        nextStatuses[k] = v === "excluded" ? "scratched" : v;
+      }
+      nextResult = { ...r, entry_status_json: nextStatuses };
+    }
+  }
+  const payoutsRaw = document.payouts;
+  const nextPayouts = Array.isArray(payoutsRaw)
+    ? payoutsRaw.map((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+        const p = item as Row;
+        const payout = Number(p.payout_per_100_yen ?? 0);
+        const rule = p.refund_rule_json;
+        if (
+          payout > 0 &&
+          rule != null &&
+          typeof rule === "object" &&
+          !Array.isArray(rule) &&
+          (rule as Row).kind !== "refund"
+        ) {
+          return { ...p, refund_rule_json: null };
+        }
+        return p;
+      })
+    : payoutsRaw;
+  return {
+    ...document,
+    result: nextResult,
+    ...(payoutsRaw !== undefined ? { payouts: nextPayouts } : {}),
+  };
 }
 
 export async function immutableLocalFile(
@@ -1695,20 +1776,21 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
                   },
                 ],
               }) +
-              "\n例の馬番/金額は使わず実際の全出走馬・同着・全払戻を埋める。\n" +
+              "\n例の馬番/金額は使わず実際の全出走馬・同着・全払戻を埋める。entry_status_json の値は \"finished\" | \"scratched\" | \"cancelled\" | \"dnf\" | \"disqualified\" のみ（競走除外は \"scratched\"）。通常払戻行は refund_rule_json: null にする。\n" +
               JSON.stringify({ race, entries: entry.entries }),
           );
           if (document && !document.blocked) {
             // Validate atomically through the existing Core before archiving a receipt.
+            const normalized = normalizeOfficialResultDocument(document);
             const file = `results/${raceDay}/${key}-official-v1.json`;
             await this.api("/github-bridge/official-result", {
               path: file,
-              document,
+              document: normalized,
             });
             await immutableLocalFile(
               this.exchange,
               file,
-              JSON.stringify(document),
+              JSON.stringify(normalized),
             );
             await this.refreshLedger(day).catch(() => {});
           }
@@ -1726,7 +1808,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           const review = await this.generate(
             `${day}-review-${key}-${result.revision}`,
             rules +
-              "保存済みの予想（および仮想Betプラン）と公式結果を比較。観測・仮説・未知・時系列検証計画・戦略改善提案を observations_json, hypotheses_json, unknowns_json, validation_plan_json, strategy_adjustment の配列で返す。着順から実ペースを断定しない。\n" +
+              "保存済みの予想（および仮想Betプラン）と公式結果を比較。観測・仮説・未知・時系列検証計画・戦略改善提案を observations_json, hypotheses_json, unknowns_json, validation_plan_json, strategy_adjustment の配列で返す（各配列の要素はオブジェクトではなくプレーンな文字列とし、1件500文字以内・最大12件にする）。着順から実ペースを断定しない。\n" +
               JSON.stringify({
                 ...evidence,
                 predictions: adoption

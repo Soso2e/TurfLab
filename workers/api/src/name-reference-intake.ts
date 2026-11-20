@@ -63,7 +63,7 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
   const source = new URL(str(research, "source_url"));
   const hosts = reference.jurisdiction === "JRA"
     ? ["www.jra.go.jp", "jra.go.jp", "app.jra.jp"]
-    : reference.jurisdiction === "NAR" ? ["www.keiba.go.jp", "keiba.go.jp"] : [];
+    : reference.jurisdiction === "NAR" ? ["www.keiba.go.jp", "www2.keiba.go.jp", "keiba.go.jp"] : [];
   requireCondition(
     source.protocol === "https:" && !source.username && !source.password &&
       !source.port && hosts.includes(source.hostname),

@@ -8,3 +8,4 @@ dist/
 playwright-report/
 test-results/
 backups/
+__pycache__/

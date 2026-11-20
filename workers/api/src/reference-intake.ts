@@ -9,7 +9,7 @@ const knownOfficialHost = (url: string) => {
   try {
     const u = new URL(url);
     return u.protocol === "https:" && !u.username && !u.password &&
-      ["www.keiba.go.jp", "keiba.go.jp", "www.jra.go.jp", "jra.go.jp"].includes(u.hostname);
+      ["www.keiba.go.jp", "www2.keiba.go.jp", "keiba.go.jp", "www.jra.go.jp", "jra.go.jp"].includes(u.hostname);
   } catch { return false; }
 };
 type Status = "needs_registration" | "needs_entry_review" | "needs_snapshot" | "pack_ready" | "past_start";
