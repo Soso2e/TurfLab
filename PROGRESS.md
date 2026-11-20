@@ -1,5 +1,16 @@
 # PROGRESS.md
 
+## 2026-11-21 リポジトリ最新化・戦略ルール整理・結果/レビュー詰まり解消
+
+- リポジトリ・データ同期と作業ツリー整理: `origin/main` の `#86`〜`#89`（`68e3232`）を取り込み、`TurfLab-data` を `Sync-TurfLabData.ps1` で `main`（`7af752ee`）へ同期。`.gitignore` に `__pycache__/` を追加し、空だった `dummy-dir` を削除。
+- AI戦略ルール整理: `prompts/ai-strategy-rules.md` に自動蓄積されていた 11/16〜11/20 の教訓 28 件を重複排除し、実戦 6 原則（トリガミ回避・欠測分離・`confidence` 校正・定性整合・展開/枠順の過大割引防止・直前照合/取消再計算）として統合し、自動蓄積欄をリフレッシュ。
+- `blocked_jobs` 4件の修正と回帰テスト:
+  - NAR 公式ドメイン `www2.keiba.go.jp` を API・共有検証・ローカルCLIのホスト許可リスト 5 箇所に追加（`911d3c2b` 対策）。
+  - `scripts/local-prediction-worker.ts` に構造化オブジェクト形式のレビューを整形する `reviewNotes()`（`LOCAL_INVALID_REVIEW` / `93116285` 対策）と、`"excluded"` → `"scratched"` 変換および通常払戻行の不正 `refund_rule_json` を除去する `normalizeOfficialResultDocument()`（`0a035e68`・`c93ec25f` 対策）を追加し、プロンプトにも出力形式を明記。
+  - `tests/official-result-intake.test.ts` と `tests/local-predictions.test.ts` に回帰テストを追加し、`npm run check`（`tsc --noEmit` / `eslint` / `vitest` 40ファイル 339テスト / `vite build`）成功を確認。
+- ローカル本番再起動・動作確認: `Stop.ps1` 後、`TurfLab-Watchdog` 経由で Web/API（`127.0.0.1:8787`）・GitHub同期Worker・ローカル予想Worker・Tailscale HTTPS（`:8443`）を再起動して稼働確認。初回サイクル後に `status: "healthy"`、`blocked_jobs` が 5 件 → 1 件へ減少し、未精算 3R（11/17・11/18）が精算完了（精算済み 26R / 未精算 0R、総資産 86,060円、回収率 26.63%、Top1単勝 30R 1着率 43.33%・回収率 111.67%）。2026-11-20 のレビューも通り `prompts/ai-strategy-rules.md` へ新規教訓 4 件が自動追記された。
+- 残存するデータ起因の保留 2 件: `name-only:race:1aad9e9ef9c1180328c1c1ea63254def47fa5cc830ff91db94b7907c436d56fb`（登録済みレースの主催区分未確認）および `2026-11-17 大井10R`（`needs_snapshot` / 固定pack出力待ち）。
+
 ## 2026-11-16 NAR月次データ（6〜11月）
 
 - 本人保存のZIP 12本をローカルの `local-predictions/nar-archive/` に保管。実稼働Workerがレース情報ZIP 6本から出馬表とレース一覧の12 CSVを取り込み、マニフェストとハッシュを確認。払戻CSV 6件はWorkerの未対応表として計上された。
