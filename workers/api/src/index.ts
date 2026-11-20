@@ -495,12 +495,14 @@ export class TurfCoordinator {
             const plans = await this.state.storage.get<Row>("local-prediction-bet-plans");
             const provisional = await this.state.storage.get<Row>("local-prediction-provisional");
             const external = await this.state.storage.get<Row>("local-prediction-external-forecasts");
+            const reviews = await this.state.storage.get<Row>("local-prediction-reviews");
             const ledger = await this.state.storage.get<Row>("local-prediction-ledger");
             return response({
               ...status,
               ...plans,
               ...provisional,
               ...external,
+              ...reviews,
               ...(ledger ? { ledger } : {}),
             });
           }
@@ -514,6 +516,8 @@ export class TurfCoordinator {
             race_provisional_predictions_date,
             race_external_forecasts,
             race_external_forecasts_date,
+            race_reviews,
+            race_reviews_date,
             ledger,
             ...status
           } = input;
@@ -535,6 +539,13 @@ export class TurfCoordinator {
               "local-prediction-external-forecasts": {
                 race_external_forecasts,
                 race_external_forecasts_date,
+              },
+            }),
+            ...(input.status === "healthy" && Array.isArray(race_reviews) &&
+              typeof race_reviews_date === "string" && {
+              "local-prediction-reviews": {
+                race_reviews,
+                race_reviews_date,
               },
             }),
             ...(ledger && typeof ledger === "object" && {

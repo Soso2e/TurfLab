@@ -485,3 +485,73 @@ it("normalizes excluded entry status and bogus refund_rule_json on paid official
     },
   ]);
 });
+
+it("builds simulation-vs-actual comparison and publishes local race_reviews", async () => {
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-review-"));
+  const exchange = path.join(home, "exchange");
+  const raceId = "race-sim-1";
+
+  await immutableLocalFile(exchange, `plans/2026-11-15/${raceId}-hit.json`, JSON.stringify({
+    race_id: raceId,
+    plan_lane: "hit",
+    selection_source: "ai-independent-v2",
+    simulation: { version: "pl-exact-v1", win: { "1": 0.42, "2": 0.25 }, top3: { "1": 0.81, "2": 0.64 } },
+    picks: [{ ticket_type: "trio", selections_json: [1, 2, 3], amount_yen: 200 }],
+  }));
+  await immutableLocalFile(exchange, `results/2026-11-15/${raceId}-official-v1.json`, JSON.stringify({
+    result: { race_id: raceId, revision: 1, official_status: "official" },
+    pace_observation: { laps_s: [12.4, 11.1, 11.8], corners: ["1-2-3", "1-3-2"] },
+  }));
+  await immutableLocalFile(exchange, `lab/2026-11-15/${raceId}.json`, JSON.stringify({
+    race_id: raceId,
+    saved_at: "2026-11-15T01:00:00Z",
+    ranking: [{ horse_number: 1, score: 82 }],
+    independent_assessment: {
+      scenario_decision: { main_pace: "middle", pace_reason: "先行2頭で平均", expected_order: [1, 2, 3] },
+    },
+  }));
+  await immutableLocalFile(exchange, `reviews/2026-11-15/${raceId}-v1.json`, JSON.stringify({
+    review_id: "local-review:1",
+    result_id: "res-1",
+    simulation_vs_actual: { expected_pace: "middle", pace_match: "match", divergence_reason: "想定通り" },
+    observations_json: ["1番が好位から抜け出した"],
+    hypotheses_json: ["平均ペースで先行有利"],
+    unknowns_json: [],
+    validation_plan_json: [],
+    strategy_adjustment: ["三連複軸流しを継続"],
+  }));
+
+  const worker = new LocalPredictionWorker(home, async () => ({}), "", "fixture", async () => ({}));
+  const reviews = await (worker as unknown as {
+    raceReviews(races: Row[], day: string): Promise<Row[]>;
+  }).raceReviews([{
+    race: { race_id: raceId, race_date_jst: "2026-11-15" },
+    official_result: {
+      result_id: "res-1",
+      revision: 1,
+      official_status: "official",
+      finish_order_json: [[1], [3], [2]],
+      entry_status_json: { "1": "finished", "2": "finished", "3": "finished" },
+      payouts: [{ ticket_type: "trio", selections_json: [1, 2, 3], payout_per_100_yen: 1250 }],
+    },
+  }], "2026-11-15");
+
+  expect(reviews).toHaveLength(1);
+  const comp = obj(reviews[0].simulation_comparison);
+  expect(comp.sim_top_horses).toEqual([
+    { horse_number: 1, win_prob: 0.42, top3_prob: 0.81, actual_finish: 1 },
+    { horse_number: 2, win_prob: 0.25, top3_prob: 0.64, actual_finish: 3 },
+  ]);
+  expect(obj(comp.actual_pace).corners).toEqual(["1-2-3", "1-3-2"]);
+  expect(obj((comp.plans_summary as Row[])[0])).toMatchObject({
+    lane: "hit",
+    stake_yen: 200,
+    returned_yen: 2500,
+    net_yen: 2300,
+  });
+  expect(obj(reviews[0].review)).toMatchObject({
+    simulation_vs_actual: { expected_pace: "middle", pace_match: "match", divergence_reason: "想定通り" },
+    observations: ["1番が好位から抜け出した"],
+    strategy_adjustment: ["三連複軸流しを継続"],
+  });
+});

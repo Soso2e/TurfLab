@@ -606,6 +606,175 @@ function RaceProvisionalPrediction({ api, race, entries }: {
   );
 }
 
+function RaceSimulationReview({ api, race, entries }: {
+  api: (path: string) => Promise<Row>;
+  race: Row;
+  entries: Row[];
+}) {
+  const latest = useRef(api);
+  latest.current = api;
+  const [status, setStatus] = useState<Row>();
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const value = await latest.current("/local-predictions/status");
+        if (active) setStatus(value);
+      } catch {
+        if (active) setStatus({});
+      }
+    };
+    void load();
+    const timer = setInterval(() => void load(), 30_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, []);
+  const record = rows(status?.race_reviews ?? []).find(
+    (item) => item.race_id === race.race_id,
+  );
+  if (!status || !record) return null;
+
+  const comp = obj(record.simulation_comparison ?? {});
+  const expectedPace = obj(comp.expected_pace ?? {});
+  const actualPace = obj(comp.actual_pace ?? {});
+  const simTopHorses = rows(comp.sim_top_horses ?? []);
+  const plansSummary = rows(comp.plans_summary ?? []);
+  const review = record.review ? obj(record.review) : null;
+  const simVsActual = review?.simulation_vs_actual ? obj(review.simulation_vs_actual) : null;
+  const horseName = (num: unknown) =>
+    String(entries.find((e) => Number(e.horse_number) === Number(num))?.horse_name ?? "");
+  const laneLabel: Record<string, string> = {
+    hit: "的中狙い(600円)",
+    ev: "期待値(400円)",
+    evm: "市場基準EV",
+    selective: "新方式(厳選)",
+    ai: "AI自由(1,000円)",
+  };
+  const matchLabel: Record<string, string> = {
+    match: "展開一致",
+    partial: "部分一致",
+    mismatch: "展開ズレ",
+    unknown: "判定保留",
+  };
+
+  return (
+    <div className="simulation" style={{ marginTop: 12 }}>
+      <h3>シミュレーション vs 実走・振り返り</h3>
+      {simVsActual && (
+        <div style={{ marginBottom: 8 }}>
+          <p>
+            <strong>乖離判定:</strong>{" "}
+            {matchLabel[String(simVsActual.pace_match ?? "unknown")] ?? String(simVsActual.pace_match ?? "未判定")}
+            {simVsActual.actual_pace_summary ? ` · ${String(simVsActual.actual_pace_summary)}` : ""}
+          </p>
+          {simVsActual.divergence_reason && (
+            <p className="muted">乖離要因: {String(simVsActual.divergence_reason)}</p>
+          )}
+        </div>
+      )}
+      <div style={{ marginBottom: 8 }}>
+        <p>
+          <strong>事前展開想定:</strong> {String(expectedPace.main_pace ?? "未設定")}
+          {expectedPace.pace_reason ? ` · ${String(expectedPace.pace_reason)}` : ""}
+        </p>
+        {Array.isArray(expectedPace.expected_order) && expectedPace.expected_order.length > 0 && (
+          <p className="muted">想定上位: {expectedPace.expected_order.join(" → ")}</p>
+        )}
+        <p>
+          <strong>実際の動き:</strong>{" "}
+          {Array.isArray(actualPace.corners) && actualPace.corners.length > 0
+            ? `通過順 ${actualPace.corners.join(" / ")}`
+            : "通過順データなし"}
+          {Array.isArray(actualPace.laps_s) && actualPace.laps_s.length > 0
+            ? ` · ラップ ${actualPace.laps_s.join("-")}`
+            : ""}
+        </p>
+      </div>
+      {simTopHorses.length > 0 && (
+        <details open>
+          <summary>シミュレーション確率上位 vs 実着順（{simTopHorses.length}頭）</summary>
+          <table>
+            <thead>
+              <tr>
+                <th>馬番</th>
+                <th>馬名</th>
+                <th>想定勝率</th>
+                <th>想定3着内率</th>
+                <th>実着順</th>
+              </tr>
+            </thead>
+            <tbody>
+              {simTopHorses.map((h, idx) => (
+                <tr key={String(h.horse_number ?? idx)}>
+                  <td>{String(h.horse_number ?? "-")}</td>
+                  <td>{horseName(h.horse_number) || "-"}</td>
+                  <td>{typeof h.win_prob === "number" ? pct(h.win_prob) : "-"}</td>
+                  <td>{typeof h.top3_prob === "number" ? pct(h.top3_prob) : "-"}</td>
+                  <td>{typeof h.actual_finish === "number" ? `${h.actual_finish}着` : "結果待ち"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      )}
+      {plansSummary.length > 0 && (
+        <details>
+          <summary>仮想プラン別の結果比較（{plansSummary.length}枠）</summary>
+          {plansSummary.map((p) => {
+            const net = typeof p.net_yen === "number" ? p.net_yen : null;
+            return (
+              <p key={String(p.lane)}>
+                <strong>{laneLabel[String(p.lane)] ?? String(p.lane)}:</strong>{" "}
+                {rows(p.picks ?? []).length > 0
+                  ? `${rows(p.picks ?? []).length}点 投資${yen(p.stake_yen)}`
+                  : `見送り（${String(p.skip_reason ?? "理由なし")}）`}
+                {typeof p.returned_yen === "number" && ` → 払戻${yen(p.returned_yen)}（${net != null && net >= 0 ? "+" : ""}${yen(net)}）`}
+              </p>
+            );
+          })}
+        </details>
+      )}
+      {review && (
+        <details open>
+          <summary>AIの振り返り・戦略改善メモ</summary>
+          {arr(review, "observations").length > 0 && (
+            <div>
+              <strong>観測:</strong>
+              <ul>
+                {arr(review, "observations").map((item, i) => (
+                  <li key={i}>{String(item)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {arr(review, "hypotheses").length > 0 && (
+            <div>
+              <strong>仮説:</strong>
+              <ul>
+                {arr(review, "hypotheses").map((item, i) => (
+                  <li key={i}>{String(item)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {arr(review, "strategy_adjustment").length > 0 && (
+            <div>
+              <strong>次回への改善方針:</strong>
+              <ul>
+                {arr(review, "strategy_adjustment").map((item, i) => (
+                  <li key={i}>{String(item)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </details>
+      )}
+    </div>
+  );
+}
+
 const today = () =>
   new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 const uid = () => crypto.randomUUID();
@@ -2693,6 +2862,13 @@ function App() {
                       </button>
                     </div>
                   ))}
+                  {storage === "local" && (
+                    <RaceSimulationReview
+                      api={api}
+                      race={race}
+                      entries={rows(detail.entries)}
+                    />
+                  )}
                   <details>
                     <summary>観測・原因仮説・未確認・次回検証</summary>
                     <JsonView value={detail.reviews} />

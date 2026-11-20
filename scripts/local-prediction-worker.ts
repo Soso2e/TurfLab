@@ -750,7 +750,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           (beforeStart
             ? "発走前の未来レース。Web検索で最新の出馬表・馬場状態・天候・当日傾向を確認して全頭分析と3展開予想を行う。オッズ・人気は馬の能力・着順予想・3展開予想には一切使わない（予想固定後の購入期待値評価にのみ使用する）。"
             : "固定資料とpython_analyticsをもとに分析する。") +
-          "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、3展開予想（scenarios: slow/middle/high と main_pace）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]。比較用に保持）を返してよい。\n" +
+          "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、3展開予想（scenarios: slow/middle/high と main_pace）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]。比較用に保持。基本は三連複（1頭軸流し・2頭軸流し・BOX等）・馬連・馬単・自信があれば三連単で当てに行き、ワイドは自信がない・混戦で絞りきれない場合のみAI判断で選ぶ）を返してよい。\n" +
           INDEPENDENT_ASSESSMENT_PROMPT +
           (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
         const answer = await this.generate(
@@ -760,7 +760,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
               ? freePrompt
               : pack.research
                 ? (beforeStart
-                    ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。\n"
+                    ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。基本は三連複（1頭軸・2頭軸・BOX等）や馬連・馬単、自信があれば三連単を選び、ワイドは自信がない・混戦で絞りきれない場合のみAI判断で選ぶ。\n"
                     : "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n") + scoringRules
                 : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
             "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
@@ -858,6 +858,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       this.failedJob("race-external-forecasts", error);
       return null;
     });
+    const raceReviews = await this.raceReviews(currentRaces, day).catch((error) => {
+      this.failedJob("race-reviews", error);
+      return null;
+    });
     const learning = await this.learn(now).catch((error) => {
       this.failedJob("learning-report", error);
       return null;
@@ -887,6 +891,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       ...(raceExternalForecasts && {
         race_external_forecasts: raceExternalForecasts,
         race_external_forecasts_date: day,
+      }),
+      ...(raceReviews && {
+        race_reviews: raceReviews,
+        race_reviews_date: day,
       }),
       ...(ledger ? { ledger } : {}),
       nar_csv_import: this.csvImport,
@@ -1558,6 +1566,152 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     return out;
   }
 
+  private async readRacePlans(raceId: string, raceDay: string): Promise<[string, Row | null][]> {
+    const key = raceKey(raceId);
+    const read = async (filename: string) =>
+      readFile(path.join(this.exchange, "plans", raceDay, filename), "utf8")
+        .then((raw) => obj(JSON.parse(raw)), (error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return null;
+          throw error;
+        });
+    const [hit, ev, evm, selective, ai] = await Promise.all([
+      read(key + "-hit.json"),
+      read(key + ".json"),
+      read(key + "-evm.json"),
+      read(key + "-selective.json"),
+      read(key + "-ai.json"),
+    ]);
+    return [["hit", hit], ["ev", ev], ["evm", evm], ["selective", selective], ["ai", ai]];
+  }
+
+  private summarizeSimulationVsActual(
+    plans: [string, Row | null][],
+    labRecord: Row | null,
+    result: Row | null,
+    paceObservation: Row | null,
+  ): Row {
+    const finishOrder = Array.isArray(result?.finish_order_json) ? result.finish_order_json : [];
+    const finishByHorse = new Map<number, number>();
+    finishOrder.forEach((group, idx) => {
+      const nums = Array.isArray(group) ? group : [group];
+      for (const n of nums) {
+        const horseNo = Number(n);
+        if (Number.isInteger(horseNo) && !finishByHorse.has(horseNo)) {
+          finishByHorse.set(horseNo, idx + 1);
+        }
+      }
+    });
+
+    const simSource = plans
+      .map(([, plan]) => plan ? obj(plan.simulation ?? {}) : null)
+      .find((sim) => sim && Object.keys(obj(sim.win ?? {})).length > 0) ?? {};
+    const winMap = obj(simSource.win ?? {});
+    const top3Map = obj(simSource.top3 ?? {});
+    const simTopHorses = Object.entries(winMap)
+      .map(([horseStr, winProb]) => {
+        const horseNumber = Number(horseStr);
+        return {
+          horse_number: horseNumber,
+          win_prob: Number(winProb),
+          top3_prob: typeof top3Map[horseStr] === "number" ? Number(top3Map[horseStr]) : null,
+          actual_finish: finishByHorse.get(horseNumber) ?? null,
+        };
+      })
+      .sort((a, b) => b.win_prob - a.win_prob)
+      .slice(0, 6);
+
+    const isOfficial = result?.official_status === "official";
+    const plansSummary = plans.flatMap(([lane, plan]) => {
+      if (!plan) return [];
+      const picks = rows(plan.picks ?? []);
+      const stakeYen = picks.reduce((s, p) => s + Number(p.amount_yen ?? 0), 0);
+      const outcome = picks.length && isOfficial && result ? planOutcome(plan, result) : null;
+      return [{
+        lane,
+        selection_source: plan.selection_source ?? null,
+        picks: picks.map((p) => ({
+          ticket_type: p.ticket_type,
+          selections_json: p.selections_json,
+          amount_yen: p.amount_yen,
+          odds: p.odds ?? null,
+          ev: p.ev ?? null,
+        })),
+        skip_reason: plan.skip_reason ?? null,
+        stake_yen: stakeYen,
+        returned_yen: outcome ? outcome.returned : null,
+        net_yen: outcome ? outcome.returned - stakeYen : null,
+      }];
+    });
+
+    const independent = obj(labRecord?.independent_assessment ?? {});
+    const scenarioDecision = obj(independent.scenario_decision ?? {});
+    return {
+      simulation_version: simSource.version ?? null,
+      sim_top_horses: simTopHorses,
+      expected_pace: {
+        main_pace: scenarioDecision.main_pace ?? null,
+        pace_reason: scenarioDecision.pace_reason ?? null,
+        expected_order: Array.isArray(scenarioDecision.expected_order) ? scenarioDecision.expected_order : [],
+        counter_scenario: scenarioDecision.counter_scenario ?? null,
+      },
+      actual_pace: {
+        laps_s: Array.isArray(paceObservation?.laps_s) ? paceObservation.laps_s : [],
+        corners: Array.isArray(paceObservation?.corners) ? paceObservation.corners : [],
+        top3_finish: finishOrder.slice(0, 3),
+      },
+      plans_summary: plansSummary,
+    };
+  }
+
+  /** Publish local post-race reviews and simulation-vs-actual comparisons for the Web. */
+  private async raceReviews(races: Row[], day: string): Promise<Row[]> {
+    const out: Row[] = [];
+    for (const entry of races) {
+      const race = obj(entry.race);
+      const raceId = str(race, "race_id");
+      const raceDay = typeof race.race_date_jst === "string" ? race.race_date_jst : day;
+      const key = raceKey(raceId);
+      const result = entry.official_result ? obj(entry.official_result) : null;
+      const revision = Number(result?.revision ?? 1);
+      const reviewPath = path.join(this.exchange, "reviews", raceDay, `${key}-v${revision}.json`);
+      const review = await readFile(reviewPath, "utf8")
+        .then((raw) => obj(JSON.parse(raw)), () => null);
+      const [plans, labRecord, savedResultDoc, exchangeResultDoc] = await Promise.all([
+        this.readRacePlans(raceId, raceDay),
+        this.latestLab(raceId),
+        this.savedResult(key),
+        readFile(path.join(this.exchange, "results", raceDay, `${key}-official-v${revision}.json`), "utf8")
+          .then((raw) => obj(JSON.parse(raw)), () => null),
+      ]);
+      const paceObs = obj(
+        exchangeResultDoc?.pace_observation ?? savedResultDoc?.pace_observation ?? result?.pace_observation ?? {},
+      );
+      const hasPlans = plans.some(([, p]) => p !== null);
+      if (!review && !hasPlans && !result) continue;
+      const comparison = this.summarizeSimulationVsActual(
+        plans,
+        labRecord,
+        result,
+        Object.keys(paceObs).length ? paceObs : null,
+      );
+      out.push({
+        race_id: raceId,
+        review_id: review?.review_id ?? null,
+        result_id: result?.result_id ?? review?.result_id ?? null,
+        simulation_comparison: comparison,
+        review: review ? {
+          simulation_vs_actual: review.simulation_vs_actual ?? null,
+          observations: Array.isArray(review.observations_json) ? review.observations_json : [],
+          hypotheses: Array.isArray(review.hypotheses_json) ? review.hypotheses_json : [],
+          unknowns: Array.isArray(review.unknowns_json) ? review.unknowns_json : [],
+          validation_plan: Array.isArray(review.validation_plan_json) ? review.validation_plan_json : [],
+          strategy_adjustment: Array.isArray(review.strategy_adjustment) ? review.strategy_adjustment : [],
+        } : null,
+      });
+    }
+    return out;
+  }
+
   /** Weights fitted only on days before `day`; the prior until 30 races exist. */
   private async planWeights(day: string) {
     const samples = (await this.outcomeSamples()).filter((s) => s.date < day);
@@ -1805,21 +1959,39 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           const localReviewPath = `reviews/${raceDay}/${key}-v${result.revision}.json`;
           if (!adoption && await readFile(path.join(this.exchange, localReviewPath), "utf8").catch(() => null))
             continue;
+          const [plans, savedResultDoc, exchangeResultDoc] = await Promise.all([
+            this.readRacePlans(raceId, raceDay),
+            this.savedResult(key),
+            readFile(path.join(this.exchange, "results", raceDay, `${key}-official-v${result.revision}.json`), "utf8")
+              .then((raw) => obj(JSON.parse(raw)), () => null),
+          ]);
+          const paceObs = obj(
+            exchangeResultDoc?.pace_observation ?? savedResultDoc?.pace_observation ?? result.pace_observation ?? {},
+          );
+          const simulationComparison = this.summarizeSimulationVsActual(
+            plans,
+            labRecord,
+            result,
+            Object.keys(paceObs).length ? paceObs : null,
+          );
           const review = await this.generate(
             `${day}-review-${key}-${result.revision}`,
             rules +
-              "保存済みの予想（および仮想Betプラン）と公式結果を比較。観測・仮説・未知・時系列検証計画・戦略改善提案を observations_json, hypotheses_json, unknowns_json, validation_plan_json, strategy_adjustment の配列で返す（各配列の要素はオブジェクトではなくプレーンな文字列とし、1件500文字以内・最大12件にする）。着順から実ペースを断定しない。\n" +
+              "保存済みの予想・事前シミュレーション（3展開・Plackett-Luce勝率/3着内率・各仮想Betプラン）と公式結果（実ラップ・コーナー通過順・着順・仮想損益）を比較する。\n" +
+              "1) simulation_vs_actual: {expected_pace: 事前主展開, actual_pace_summary: 実ラップ・コーナー通過順から分かる実際の流れ, pace_match: \"match\"|\"partial\"|\"mismatch\"|\"unknown\", top_sim_horses_outcome: シミュレーション上位馬の実走比較, bet_outcome_summary: 各プラン(hit/ev/evm/selective/ai)の券種・買い目・損益の振り返り, divergence_reason: 事前シミュレーションと実走の乖離要因}\n" +
+              "2) observations_json, hypotheses_json, unknowns_json, validation_plan_json, strategy_adjustment の各配列（各配列の要素はオブジェクトではなくプレーンな文字列とし、1件500文字以内・最大12件にする）。着順から実ペースを断定しない。\n" +
               JSON.stringify({
                 ...evidence,
                 predictions: adoption
                   ? rows(entry.predictions).filter((p) => p.prediction_id === adoption.prediction_id)
                   : [],
                 ...(labRecord ? { lab_prediction: labRecord } : {}),
+                simulation_comparison: simulationComparison,
               }),
             false,
           );
           if (review && !review.blocked) {
-            const record: Row = {
+            const coreRecord: Row = {
               review_id: `local-review:${key}:${result.revision}`,
               prediction_id: adoption?.prediction_id ?? `lab:${key}`,
               result_id: result.result_id!,
@@ -1827,12 +1999,18 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
               hypotheses_json: reviewNotes(review.hypotheses_json),
               unknowns_json: reviewNotes(review.unknowns_json),
               validation_plan_json: reviewNotes(review.validation_plan_json),
+            };
+            const localRecord: Row = {
+              ...coreRecord,
               ...(review.strategy_adjustment ? { strategy_adjustment: reviewNotes(review.strategy_adjustment) } : {}),
+              ...(review.simulation_vs_actual && typeof review.simulation_vs_actual === "object"
+                ? { simulation_vs_actual: obj(review.simulation_vs_actual) }
+                : {}),
             };
             await immutableLocalFile(
               this.exchange,
               localReviewPath,
-              JSON.stringify(record),
+              JSON.stringify(localRecord),
             );
             if (this.freeMode && this.strategyRulesPath && review.strategy_adjustment) {
               await this.appendStrategyLessons(
@@ -1841,7 +2019,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
                 reviewNotes(review.strategy_adjustment),
               ).catch(() => {});
             }
-            if (adoption) await this.api("/reviews", record);
+            if (adoption) await this.api("/reviews", coreRecord);
           }
         }
       } catch (error) {
