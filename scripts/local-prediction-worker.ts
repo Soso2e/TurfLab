@@ -40,7 +40,8 @@ import { jockeyStats, type StatRun } from "../packages/shared/src/jockey-stats";
 import type { NarRun } from "./nar-csv-stats";
 import { runPythonAnalytics } from "./python-analytics";
 import { runPythonLedger } from "./python-ledger";
-import { independentAssessment, INDEPENDENT_ASSESSMENT_PROMPT } from "./independent-ai-assessment";
+import { aiForecastFromAnswer, independentAssessment, INDEPENDENT_ASSESSMENT_PROMPT } from "./independent-ai-assessment";
+import { lockForecast } from "./forecast-eval";
 import { jockeyEvidenceSnapshot } from "./jockey-evidence-snapshot";
 import { aiDiscretionaryPlan, AI_DAY_CAP_YEN } from "./ai-discretionary-plan";
 
@@ -1378,6 +1379,20 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
     const ranked = coverage ? provisionalRanking(pack, coverage, given, status === "formal" || status === "free") : null;
     const hitPicks = Array.isArray(answer.hit_picks) && answer.hit_picks.length ? answer.hit_picks : null;
     const independent = independentAssessment(answer, pack);
+    let forecastStatus: Row | null = null;
+    if (independent && (status === "formal" || status === "free")) {
+      // Odds-free numeric forecast, frozen write-once beside the lab record. A bad or missing block
+      // never blocks the marks; it is recorded as ineligible for accuracy scoring instead.
+      const built = aiForecastFromAnswer(answer, pack, {
+        forecasterId: "ai-independent-v2", modelVersion: this.model, modelKnowledgeCutoff: process.env.TURFLAB_AI_KNOWLEDGE_CUTOFF ?? null,
+        generatedAt: savedAt, cutoffAt: String(pack.information_cutoff_at ?? savedAt), inputHash: String(pack.pack_hash ?? ""),
+      });
+      forecastStatus = { status: built.status, ...(built.status === "invalid" ? { errors: built.errors } : {}) };
+      if (built.status === "valid") {
+        const locked = await lockForecast(this.exchange, built.forecast).catch((error) => ({ status: "error", path: String(error) }));
+        forecastStatus.lock = locked.status;
+      }
+    }
     if (status === "formal" || status === "free") {
       if (!(await readFile(path.join(this.exchange, name), "utf8").catch(() => null))) {
         const fallbackRanking = ranked?.ranking ?? given.map((e, idx) => ({
@@ -1405,6 +1420,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           ...(independent ? { independent_assessment: independent, ai_bet_decision: independent.ai_bet_decision,
             ai_bet_picks: Array.isArray(answer.ai_bet_picks) ? answer.ai_bet_picks : [],
             jockey_evidence: jockeyEvidenceSnapshot(pack) } : {}),
+          ...(forecastStatus ? { forecast_status: forecastStatus } : {}),
         }));
       }
       return;

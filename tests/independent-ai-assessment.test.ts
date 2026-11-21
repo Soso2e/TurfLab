@@ -40,3 +40,43 @@ describe("independent horse/jockey/partnership flow", () => {
     expect(plan.skip_reason).toContain("見送り");
   });
 });
+
+import { aiForecastFromAnswer, INDEPENDENT_ASSESSMENT_PROMPT } from "../scripts/independent-ai-assessment";
+
+describe("AI numeric forecast block (forecast-v1)", () => {
+  const fpack = {
+    entries: [1, 2, 3].map((horse_number) => ({ horse_number, status: "active" })),
+    race: { race_date_jst: "2026-11-22", race_number: 11, scheduled_start_at: "2026-11-22T15:40:00+09:00" },
+    track: { name: "東京" }, course: { distance_m: 1600, surface: "芝" },
+  };
+  const meta = { forecasterId: "ai-independent-v2", modelVersion: "m", modelKnowledgeCutoff: null,
+    generatedAt: "2026-11-22T09:00:00+09:00", cutoffAt: "2026-11-22T08:30:00+09:00", inputHash: "h".repeat(32) };
+  const block = {
+    win_probabilities: [{ horse_number: 1, p: 0.5 }, { horse_number: 2, p: 0.3 }, { horse_number: 3, p: 0.2 }],
+    top3_probabilities: [{ horse_number: 1, p: 1 }, { horse_number: 2, p: 1 }, { horse_number: 3, p: 1 }],
+    corner_ranks: [{ horse_number: 1, first: 1, last: 2 }, { horse_number: 2, first: 2, last: 1 }, { horse_number: 3, first: 3, last: 3 }],
+    pace_class: "middle", pace_z: 0, reason_categories: ["form", "pace_style"],
+  };
+  it("builds a validated, odds-free record from the AI block", () => {
+    const out = aiForecastFromAnswer({ forecast: block }, fpack, meta);
+    expect(out.status).toBe("valid");
+    if (out.status === "valid") {
+      expect(out.forecast.race.race_key_human).toBe("2026-11-22|東京|11R");
+      expect(out.forecast.inputs_attestation).toEqual({ odds_used: false, popularity_used: false, external_forecasts_used: false });
+    }
+  });
+  it("reports missing and invalid blocks without touching the marks", () => {
+    expect(aiForecastFromAnswer({}, fpack, meta).status).toBe("missing");
+    const bad = aiForecastFromAnswer({ forecast: { ...block, win_probabilities: block.win_probabilities.slice(0, 2) } }, fpack, meta);
+    expect(bad.status).toBe("invalid");
+    const odds = aiForecastFromAnswer({ forecast: { ...block, reason_categories: ["人気"] } }, fpack, meta);
+    expect(odds.status).toBe("invalid");
+    const late = aiForecastFromAnswer({ forecast: block }, fpack, { ...meta, generatedAt: "2026-11-22T16:00:00+09:00" });
+    expect(late.status).toBe("invalid");
+    expect(independentAssessment({ ...answer, forecast: { win_probabilities: "garbage" } }, pack)?.horse_marks).toHaveLength(2);
+  });
+  it("prompt demands the numeric block and forbids market inputs", () => {
+    expect(INDEPENDENT_ASSESSMENT_PROMPT).toContain("win_probabilities");
+    expect(INDEPENDENT_ASSESSMENT_PROMPT).toContain("オッズ・人気・外部予想・新聞印は一切参照しない");
+  });
+});

@@ -1,5 +1,13 @@
 # PROGRESS.md
 
+## 2026-11-21 予測精度の検証基盤（forecast-v1・数式M・AI数値予測・独立比較）
+
+- 設計: [docs/forecast-validation.md](docs/forecast-validation.md)。数式MとAIが独立に、同じ契約（全頭勝率・3着内・角順位・ペース区分）で発走前に凍結し、未使用の時系列データで同一レース対比較する。オッズ・人気・外部予想は契約で機械的に拒否。
+- 追加: `packages/shared/src/forecast-contract.ts`（検証・採点。`comparePaceReview` を初めて採点に配線）、`scripts/forecast-eval.ts`（日ブロック・ブートストラップの対比較、AI温度補正、対数線形プール、不一致層別、理由カテゴリ別のBH補正、特徴量レジストリ、write-once台帳）、`scripts/python/forecast_lab/`（as-of特徴量、条件付きロジット、展開モデルP v0、ウォークフォワード、ablation、一度きりの最終ホールドアウト）、CLI `forecast:*`。
+- AI出力: 独立評価プロンプトに数値 `forecast` ブロックを必須化。欠測・不正は印と買い目を壊さず「採点対象外」としてlabレコードの `forecast_status` に記録し、有効なものは `exchange/forecasts/` に凍結。
+- 検証: 型・lint・378テスト・ビルド成功。リーク検出（結果列の改変・未来行の除去・意図的な未来参照の検出）、純ノイズで優位と出ないこと、最終ホールドアウトの再使用拒否、ablationの採否をテストで固定。
+- **未確認**: 実NARデータでの精度（合成データでの動作確認のみ）、ワーカー実機でのAI `forecast` ブロック出力、JRAへの適用。次の作業は実CSVでの `forecast:backtest`（データ監査から）。精度向上は主張しない。
+
 ## 2026-11-22 登録済みレースの正式予想取り込み
 
 - 名前一致で登録済みのレースも、公式出馬表の照合が通れば固定入力を更新し、近走調査・馬場確認・再予想へ進む。照合不一致は保留し、自由予想から正式取り込みできない場合はWorkerに理由を残す。
