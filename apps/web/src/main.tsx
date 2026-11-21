@@ -1019,6 +1019,7 @@ function App() {
   const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
   const [tokenInput, setTokenInput] = useState("");
   const [tab, setTab] = useState("today");
+  const [raceTab, setRaceTab] = useState("overview");
   const [date, setDate] = useState(today());
   const [data, setData] = useState<Row>();
   const [detail, setDetail] = useState<Row>();
@@ -1112,6 +1113,7 @@ function App() {
       const d = await api("/races/" + encodeURIComponent(id));
       setDetail(d);
       setCustomMarks(readCustomMarks(id));
+      setRaceTab("overview");
       setTab("detail");
       const ps = rows(d.predictions);
       setActivePrediction(
@@ -1877,6 +1879,14 @@ function App() {
                     </div>
                   </div>
                 </div>
+                <div className="race-tabs" role="tablist" aria-label="レース詳細">
+                  <button type="button" role="tab" id="rt-overview" aria-selected={raceTab === "overview"} aria-controls="rp-overview" className={"race-tab" + (raceTab === "overview" ? " active" : "")} onClick={() => setRaceTab("overview")}>概要</button>
+                  <button type="button" role="tab" id="rt-horses" aria-selected={raceTab === "horses"} aria-controls="rp-horses" className={"race-tab" + (raceTab === "horses" ? " active" : "")} onClick={() => setRaceTab("horses")}>出走馬</button>
+                  <button type="button" role="tab" id="rt-forecast" aria-selected={raceTab === "forecast"} aria-controls="rp-forecast" className={"race-tab" + (raceTab === "forecast" ? " active" : "")} onClick={() => setRaceTab("forecast")}>予想・展開</button>
+                  <button type="button" role="tab" id="rt-bets" aria-selected={raceTab === "bets"} aria-controls="rp-bets" className={"race-tab" + (raceTab === "bets" ? " active" : "")} onClick={() => setRaceTab("bets")}>購入</button>
+                  <button type="button" role="tab" id="rt-result" aria-selected={raceTab === "result"} aria-controls="rp-result" className={"race-tab" + (raceTab === "result" ? " active" : "")} onClick={() => setRaceTab("result")}>結果</button>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-overview" aria-labelledby="rt-overview" hidden={raceTab !== "overview"}>
                 <MobileRaceBrief
                   race={race}
                   detail={detail}
@@ -1885,9 +1895,6 @@ function App() {
                   latestResult={latestResult}
                   fieldSize={fieldSize}
                 />
-                <details className="race-deep-dive">
-                  <summary>詳細データ・予想根拠・操作を開く</summary>
-                  <div className="race-deep-dive-content">
                 <section className="panel">
                   <h2>このレースの状況</h2>
                   <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
@@ -2030,6 +2037,8 @@ function App() {
                     />
                   </details>
                 </section>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-horses" aria-labelledby="rt-horses" hidden={raceTab !== "horses"}>
                 <RacePastRuns api={api} raceId={String(obj(detail.race).race_id)} />
                 {horseRuns && (
                   <HorseRunsModal api={api} horseId={horseRuns}
@@ -2172,6 +2181,8 @@ function App() {
                     </table>
                   </div>
                 </section>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-forecast" aria-labelledby="rt-forecast" hidden={raceTab !== "forecast"}>
                 <section className="panel">
                   <div className="section-heading">
                     <h2>予想と展開</h2>
@@ -2480,6 +2491,8 @@ function App() {
                     )}
                   </details>
                 </section>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-bets" aria-labelledby="rt-bets" hidden={raceTab !== "bets"}>
                 <section className="panel">
                   <h2>推奨と本人の仮想購入</h2>
                   <h3>AI参考推奨買い目</h3>
@@ -2825,6 +2838,8 @@ function App() {
                     );
                   })}
                 </section>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-result" aria-labelledby="rt-result" hidden={raceTab !== "result"}>
                 <section className="panel">
                   <h2>公式結果と翌朝レビュー</h2>
                   {rows(detail.results).map((r) => (
@@ -2873,8 +2888,7 @@ function App() {
                     <JsonView value={detail.reviews} />
                   </details>
                 </section>
-                  </div>
-                </details>
+                </div>
               </>
             )}
             {tab === "stats" && (
