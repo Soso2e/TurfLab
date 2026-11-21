@@ -89,3 +89,24 @@ class HistoryIndex:
             return 0, 0.0
         k = bisect.bisect_left(self.jockey_dates[name], date)
         return k, self.jockey_cum[name][k]
+
+
+def clean_runs(runs: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Drop exact duplicate rows (overlapping monthly/cumulative CSVs) and quarantine races whose
+    duplicate rows disagree. The raw loader does not dedupe, which would silently inflate histories."""
+    seen: dict[tuple, dict[str, Any]] = {}
+    conflicted: set[tuple] = set()
+    exact = 0
+    for r in runs:
+        hn = r.get("horse_number")
+        key = (r["track"], r["date"], r["race_no"], hn if hn is not None else ("name", r.get("horse_name")))
+        prev = seen.get(key)
+        if prev is None:
+            seen[key] = r
+        elif (prev.get("finish"), prev.get("finish_time_s"), prev.get("horse_name")) == (r.get("finish"), r.get("finish_time_s"), r.get("horse_name")):
+            exact += 1
+        else:
+            conflicted.add((r["track"], r["date"], r["race_no"]))
+    kept = [r for r in seen.values() if (r["track"], r["date"], r["race_no"]) not in conflicted]
+    return kept, {"rows_in": len(runs), "exact_duplicates_removed": exact, "conflicting_races_quarantined": len(conflicted),
+                  "rows_out": len(kept)}

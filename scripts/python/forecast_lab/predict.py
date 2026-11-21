@@ -11,12 +11,12 @@ from typing import Any
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from analyze_history import load_nar_csv_dir  # noqa: E402
 
 from . import pace as P  # noqa: E402
 from .data import HistoryIndex, group_races  # noqa: E402
 from .evaluate import ALL_COLS, VERSION  # noqa: E402
 from .features import FEATURES, build_race_features  # noqa: E402
+from .source import load_runs  # noqa: E402
 from .models import ConditionalLogit, top3_probabilities  # noqa: E402
 
 MIN_TRAIN = 150
@@ -94,8 +94,8 @@ def predict_race(runs: list[dict], pack: dict, cutoff_at: str, generated_at: str
 
 def run(csv_dir: Path, pack_path: Path, out_path: Path, cutoff_at: str, generated_at: str | None) -> dict:
     pack = json.loads(pack_path.read_text(encoding="utf-8"))
-    loaded = load_nar_csv_dir(csv_dir, before_date=pack["race_date_jst"])
-    rec = predict_race(loaded["runs"], pack, cutoff_at, generated_at)
+    runs, _ = load_runs(csv_dir)  # read-only; ZIPs included, duplicates removed
+    rec = predict_race([r for r in runs if r["date"] < pack["race_date_jst"]], pack, cutoff_at, generated_at)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(rec, ensure_ascii=False, indent=1), encoding="utf-8")
     return rec

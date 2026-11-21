@@ -113,6 +113,39 @@ class Evaluation(unittest.TestCase):
         self.assertEqual(verdict(d), "insufficient_sample")
 
 
+class Source(unittest.TestCase):
+    def test_zip_and_duplicates_are_handled_without_touching_the_source(self):
+        import hashlib
+        import zipfile
+        from forecast_lab.audit import audit
+        from forecast_lab.source import load_runs
+        runs = synthetic.generate(days=20, races_per_day=6, seed=9)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            synthetic.write_nar_csv(runs, root / "a")
+            with zipfile.ZipFile(root / "a" / "again.zip", "w") as z:  # same data again, as a ZIP
+                z.write(root / "a" / "races.csv", "month/races.csv")
+                z.write(root / "a" / "horses.csv", "month/horses.csv")
+            before = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (root / "a").iterdir()}
+            loaded, prov = load_runs(root / "a")
+            after = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (root / "a").iterdir()}
+            self.assertEqual(before, after)  # read-only
+            self.assertEqual(prov["zip_files"], 1)
+            self.assertEqual(prov["dedupe"]["exact_duplicates_removed"], len(runs))
+            self.assertEqual(len(loaded), len(runs))
+            rep = audit(loaded, provenance=prov)
+            self.assertEqual(rep["status"], "ok")
+            self.assertGreater(rep["name_identity"]["same_name_in_two_races_same_day"], 0)  # synthetic horses re-run daily
+
+    def test_conflicting_duplicate_races_are_quarantined(self):
+        from forecast_lab.data import clean_runs
+        runs = synthetic.generate(days=3, races_per_day=2, seed=1)
+        bad = dict(runs[0]); bad["finish"] = 99
+        kept, rep = clean_runs(runs + [bad])
+        self.assertEqual(rep["conflicting_races_quarantined"], 1)
+        self.assertTrue(all((r["date"], r["race_no"]) != (runs[0]["date"], runs[0]["race_no"]) for r in kept))
+
+
 class Math(unittest.TestCase):
     def test_top3_sums_to_three(self):
         p = np.array([0.3, 0.2, 0.15, 0.1, 0.1, 0.08, 0.07])

@@ -8,11 +8,13 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from analyze_history import load_nar_csv_dir  # noqa: E402
+from analyze_history import load_nar_csv_dir  # noqa: E402  (demo only)
 
 from forecast_lab import predict as predict_mod  # noqa: E402
 from forecast_lab import synthetic  # noqa: E402
+from forecast_lab.audit import audit  # noqa: E402
 from forecast_lab.evaluate import run_backtest  # noqa: E402
+from forecast_lab.source import load_runs  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -25,6 +27,9 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--mode", choices=["dev", "final"], default="dev")
     b.add_argument("--ablate", action="store_true")
     b.add_argument("--allow-repeat-holdout", action="store_true")
+    au = sub.add_parser("audit", help="read-only data audit of a NAR CSV/ZIP archive")
+    au.add_argument("--csv-dir", required=True)
+    au.add_argument("--out", required=True)
     p = sub.add_parser("predict")
     p.add_argument("--csv-dir", required=True)
     p.add_argument("--pack", required=True)
@@ -35,10 +40,17 @@ def main(argv: list[str] | None = None) -> int:
     d.add_argument("--out-dir", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "backtest":
-        runs = load_nar_csv_dir(Path(a.csv_dir))["runs"]
+        runs, prov = load_runs(Path(a.csv_dir))
         rep = run_backtest(runs, {"ablate": a.ablate}, a.mode, Path(a.state_dir), a.allow_repeat_holdout)
+        rep["provenance"] = prov
         Path(a.out).write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
         print(json.dumps({k: rep.get(k) for k in ("status", "mode", "window", "paired_log_loss")}, ensure_ascii=False, indent=1))
+        return 0
+    if a.cmd == "audit":
+        runs, prov = load_runs(Path(a.csv_dir))
+        rep = audit(runs, provenance=prov)
+        Path(a.out).write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
+        print(json.dumps({k: rep.get(k) for k in ("status", "runs", "races_usable", "date_range", "missing_rate", "name_identity")}, ensure_ascii=False, indent=1)[:3000])
         return 0
     if a.cmd == "predict":
         rec = predict_mod.run(Path(a.csv_dir), Path(a.pack), Path(a.out), a.cutoff_at, a.generated_at)
@@ -48,7 +60,8 @@ def main(argv: list[str] | None = None) -> int:
     runs = synthetic.generate()
     synthetic.write_nar_csv(runs, out / "csv")
     last = runs[-1]["date"]
-    rep = run_backtest(load_nar_csv_dir(out / "csv")["runs"], {}, "dev", out / "state")
+    demo_runs, _ = load_runs(out / "csv")
+    rep = run_backtest(demo_runs, {}, "dev", out / "state")
     (out / "report.json").write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
     from datetime import date, timedelta
     y, m, dd = map(int, last.split("-"))

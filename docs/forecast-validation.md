@@ -51,6 +51,16 @@ npm run forecast:report -- --root <exchange> --out forecast-report.json
 - 欠測は補完せず指示子（`has_hist`/`has_l3f`/`has_corner`）を持たせ、欠測率別に採点。履歴の少ない馬・騎手は経験ベイズで縮小。
 - 純粋ノイズのデータで「優位」と出さないこと、ablationが冗長な群に「根拠なし」と返すことをテスト。
 
+## 実データ検証の手順（Windows本番・隔離実行）
+
+```
+pwsh scripts\windows\Run-ForecastBacktest.ps1          # 監査 + devバックテスト(+ablation)。最終20%は触らない
+pwsh scripts\windows\Run-ForecastBacktest.ps1 -Final  # 最終ホールドアウト。一度だけ・最後に
+```
+- 入力は `%LOCALAPPDATA%\TurfLab\local-predictions\nar-csv`（CSV/ZIP）を**読み取り専用**で扱う。出力は `%LOCALAPPDATA%\TurfLab\forecast-lab-dev\<日時>` のみ。Worker・exchange・DB・正式予想には触れず再起動もしない（出力先がデータ領域内なら拒否）。
+- 監査（`audit.json`）: 件数、月別、欠測率、重複（完全一致は除去・矛盾はレースごと隔離）、馬名誤結合シグナル（同名が同日に別レースへ出走）、as-of履歴の被覆率（直前に履歴が1走/3走以上ある出走の割合）。
+- 従来方式との比較は未実装（残課題）: 現行6評価softmaxの発走前記録は `exchange\outcomes` にあり、同一レース集合でMと対比較する橋渡しが必要。
+
 ## 現時点の限界（正直な記載）
 
 1. **実データ未検証**: 合成データ（人工的な信号を埋めたもの）で仕組みの正しさを確認しただけで、実NARデータでの精度・展開予測の当たり具合は未測定。NAR月次CSVは本番Windows側にあり、このコンテナにはない。最初の実作業は `forecast:backtest` の実行（段階0の監査: レース数・列・通過順/上りの充足率）。
