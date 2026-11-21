@@ -74,7 +74,7 @@ export function enrichedReference(
       : (research[key] ?? null);
   return {
     track,
-    jurisdiction: race.jurisdiction!,
+    jurisdiction: research.jurisdiction ?? race.jurisdiction!,
     race_name: race.name!,
     race_no: race.race_number!,
     race_key_human: `${day}|${track}|${race.race_number}`,

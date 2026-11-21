@@ -123,6 +123,7 @@ function validateResearch(reference: Row, horses: Row[], day: string, number: nu
         requireCondition(sourcedCsvRun(run, day), "CSV由来の近走の出典（ファイルハッシュ）が不正です");
   return {
     ...research,
+    jurisdiction: reference.jurisdiction!,
     horses: horses.map((horse) => ({
       horse_number: horse.horse_number!,
       recent_runs: horse.recent_runs!,
