@@ -35,7 +35,9 @@ export function validateReferenceMirror(input: Row, now: string): Row {
     Number.isFinite(Date.parse(generatedAt))
       ? new Date(generatedAt).toISOString()
       : "";
-  requireCondition(generated && jstDate(generated) === date &&
+  // A reference may be prepared before the race date (e.g. the evening before).
+  // Keep its actual creation time and reject post-race-date/future-dated reports.
+  requireCondition(generated && jstDate(generated) <= date &&
     instant(generated) <= instant(now),
     "生成日時が不正です");
   requireCondition(JSON.stringify(document).length <= 200000,
