@@ -252,7 +252,9 @@ try {
     })
     .click();
   await page.getByRole("heading", { name: "このレースの結論" }).waitFor();
-  // The race detail uses tabs since the mobile UI redesign; the old\n  // details.race-deep-dive accordion no longer exists.\n  await page.getByRole("tab", { name: "予想・展開" }).click();
+  // The race detail uses tabs since the mobile UI redesign.
+  // The old details.race-deep-dive accordion no longer exists.
+  await page.getByRole("tab", { name: "予想・展開" }).click();
   await page
     .getByRole("button", { name: "当日の採用版として固定", exact: true })
     .click();
