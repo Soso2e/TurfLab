@@ -10,6 +10,7 @@ import {
 import "./style.css";
 import { HorseNo, Mark, markOf, ProbBar, TicketChip, countdownInfo, ticketTypeName } from "./RaceUi";
 import { RaceImportWizard } from "./RaceImportWizard";
+import { CourseSchematic } from "./CourseSchematic";
 import { MobileRaceBrief } from "./MobileRaceBrief";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
@@ -2011,6 +2012,7 @@ function App() {
                 )}
                 <section className="panel">
                   <h2>コースと固定入力</h2>
+                  <CourseSchematic course={obj(detail.course)} />
                   <p>
                     直線{" "}
                     {String(obj(detail.course).straight_length_m ?? "未取得")}m
