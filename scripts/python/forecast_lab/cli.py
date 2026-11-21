@@ -13,6 +13,7 @@ from analyze_history import load_nar_csv_dir  # noqa: E402  (demo only)
 from forecast_lab import predict as predict_mod  # noqa: E402
 from forecast_lab import synthetic  # noqa: E402
 from forecast_lab.audit import audit  # noqa: E402
+from forecast_lab.bridge import bridge_compare  # noqa: E402
 from forecast_lab.evaluate import run_backtest  # noqa: E402
 from forecast_lab.source import load_runs  # noqa: E402
 
@@ -38,6 +39,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--generated-at")
     d = sub.add_parser("demo", help="synthetic end-to-end run (not real data)")
     d.add_argument("--out-dir", required=True)
+    br = sub.add_parser("bridge", help="read-only: compare 6-eval softmax (exchange/outcomes) vs M forecast")
+    br.add_argument("--exchange-dir", required=True, help="path to exchange root (read-only)")
+    br.add_argument("--out", required=True)
     a = ap.parse_args(argv)
     if a.cmd == "backtest":
         runs, prov = load_runs(Path(a.csv_dir))
@@ -55,6 +59,13 @@ def main(argv: list[str] | None = None) -> int:
     if a.cmd == "predict":
         rec = predict_mod.run(Path(a.csv_dir), Path(a.pack), Path(a.out), a.cutoff_at, a.generated_at)
         print(json.dumps({"race": rec["race"]["race_key_human"], "horses": len(rec["horses"])}, ensure_ascii=False))
+        return 0
+    if a.cmd == "bridge":
+        rep = bridge_compare(Path(a.exchange_dir))
+        Path(a.out).write_text(json.dumps(rep, ensure_ascii=False, indent=1), encoding="utf-8")
+        summary = {k: rep.get(k) for k in ("status", "outcomes_loaded", "matched_races",
+                                             "softmax_log_loss_mean", "m_log_loss_mean", "comparison_note")}
+        print(json.dumps(summary, ensure_ascii=False, indent=1))
         return 0
     out = Path(a.out_dir)
     runs = synthetic.generate()
