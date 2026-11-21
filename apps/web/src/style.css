@@ -3343,3 +3343,96 @@ tr.entry-marked-row.mark-lane-note {
 .course-schematic-caption span { color:var(--muted,#64748b); }
 .course-schematic-caption small { color:var(--muted,#64748b); font-size:.69rem; line-height:1.4; }
 @media (max-width:520px) { .course-schematic { padding:8px; } }
+
+
+/* ===== Race detail tabs ===== */
+.race-tabs {
+  position: sticky;
+  top: 54px;
+  z-index: 40;
+  display: flex;
+  gap: 6px;
+  margin: 0 -2px 14px;
+  padding: 8px 2px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  background: rgba(244, 245, 240, 0.94);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid #dce1d7;
+}
+.race-tabs::-webkit-scrollbar { display: none; }
+.race-tab {
+  flex: 1 0 auto;
+  min-width: 78px;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 1px solid #d3dccf;
+  border-radius: 999px;
+  background: #fff;
+  color: #3f5a4c;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.race-tab.active {
+  background: #153d32;
+  border-color: #153d32;
+  color: #fff;
+}
+.race-tab-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.race-tab-panel[hidden] { display: none; }
+.race-tab-panel > * { min-width: 0; }
+
+/* ===== Phone / iPad polish ===== */
+.panel { max-width: 100%; }
+.panel table, .race-tab-panel table { max-width: 100%; }
+.panel:has(> table), .panel > .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+img, svg, video { max-width: 100%; }
+@supports (padding: max(0px)) {
+  .app-dock-layout main {
+    padding-left: max(32px, env(safe-area-inset-left));
+    padding-right: max(32px, env(safe-area-inset-right));
+    padding-bottom: max(116px, calc(100px + env(safe-area-inset-bottom)));
+  }
+}
+@media (min-width: 641px) and (max-width: 1100px) {
+  /* iPad portrait / landscape split */
+  .app-dock-layout main { padding-left: 24px; padding-right: 24px; }
+  .day-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .day-summary > div { border-top: 1px solid var(--line); }
+  .day-summary > div:nth-child(3n + 1) { border-left: 0; }
+  .race-tabs { top: 52px; }
+  .race-tab { flex: 1 1 0; }
+  button, summary, select, input:not([type="checkbox"]):not([type="radio"]) { min-height: 40px; }
+  .race-tab-panel { grid-template-columns: minmax(0, 1fr); }
+}
+@media (min-width: 900px) and (max-width: 1100px) and (orientation: landscape) {
+  .race-tab-panel { gap: 14px; }
+}
+@media (max-width: 640px) {
+  .race-tabs {
+    top: 50px;
+    margin: 0 -16px 12px;
+    padding: 8px 16px;
+    gap: 6px;
+    scroll-snap-type: x proximity;
+  }
+  .race-tab { scroll-snap-align: start; min-width: 72px; padding: 0 14px; font-size: 13.5px; }
+  .day-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .panel { padding-left: 14px; padding-right: 14px; }
+  .panel table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .toolbar { flex-wrap: wrap; }
+  .page-heading h1 { font-size: 22px; line-height: 1.25; overflow-wrap: anywhere; }
+}
+@media (hover: none) {
+  .race-tab:active { transform: scale(0.97); }
+}
