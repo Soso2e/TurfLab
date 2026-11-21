@@ -256,7 +256,8 @@ try {
   await page
     .getByRole("button", { name: "当日の採用版として固定", exact: true })
     .click();
-  await page.getByText("採用版を固定しました", { exact: true }).waitFor();\n  await page.getByRole("tab", { name: "購入" }).click();
+  await page.getByText("採用版を固定しました", { exact: true }).waitFor();
+  await page.getByRole("tab", { name: "購入" }).click();
   await page.getByLabel("馬番（ハイフン区切り）", { exact: true }).fill("1");
   await page.getByLabel("本人購入額", { exact: true }).fill("100");
   await page
