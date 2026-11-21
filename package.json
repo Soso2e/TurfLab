@@ -24,7 +24,13 @@
     "python:analyze": "python scripts/python/analyze_history.py",
     "results:import": "tsx scripts/import-all-missing-results.ts",
     "learning:report": "node scripts/run-tool.mjs tsx scripts/learning-report.ts",
-    "generate:d1": "tsx scripts/generate-d1.ts"
+    "generate:d1": "tsx scripts/generate-d1.ts",
+    "forecast:lock": "node scripts/run-tool.mjs tsx scripts/forecast-eval-cli.ts lock",
+    "forecast:result": "node scripts/run-tool.mjs tsx scripts/forecast-eval-cli.ts result",
+    "forecast:report": "node scripts/run-tool.mjs tsx scripts/forecast-eval-cli.ts report",
+    "forecast:backtest": "python scripts/python/forecast_lab/cli.py backtest",
+    "forecast:predict": "python scripts/python/forecast_lab/cli.py predict",
+    "forecast:pytest": "python -m unittest discover -s scripts/python -t scripts/python -p \"test_*.py\""
   },
   "dependencies": {
     "ajv": "^8.17.1",
