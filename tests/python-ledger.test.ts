@@ -144,7 +144,7 @@ describe("python-ledger", () => {
     expect(ledger!.total_assets_yen).toBe(50000);
   });
 
-  it("tracks selective lane separately without polluting hit+ev capital balance", async () => {
+  it("charges selective and AI bets to virtual capital and keeps their lane totals", async () => {
     const exchange = await makeTempExchange();
     const raceId = "name-only:race:test-race-3";
     const key = "name-only_race_test-race-3";
@@ -174,6 +174,15 @@ describe("python-ledger", () => {
         picks: [],
       }),
     );
+    for (const lane of ["ai", "evm"]) {
+      await writeFile(path.join(exchange, "plans", "2026-11-17", `${key}-pending-${lane}.json`),
+        JSON.stringify({
+          race_id: `${raceId}-pending`,
+          plan_lane: lane,
+          picks: [{ ticket_type: "win", selections_json: [1], amount_yen: 300 }],
+        }),
+      );
+    }
     await mkdir(path.join(exchange, "results", "2026-11-17"), { recursive: true });
     await writeFile(
       path.join(exchange, "results", "2026-11-17", `${key}-official-v1.json`),
@@ -194,11 +203,13 @@ describe("python-ledger", () => {
       initialCapitalYen: 100000,
     });
     expect(ledger).not.toBeNull();
-    // Main balance reflects only hit+ev (600 stake, 0 return)
-    expect(ledger!.settled_stake_yen).toBe(600);
-    expect(ledger!.settled_return_yen).toBe(0);
-    expect(ledger!.total_assets_yen).toBe(99400);
-    // Selective lane tracked separately
+    expect(ledger!.settled_stake_yen).toBe(800);
+    expect(ledger!.settled_return_yen).toBe(700);
+    expect(ledger!.pending_stake_yen).toBe(300);
+    expect(ledger!.cash_balance_yen).toBe(99600);
+    expect(ledger!.total_assets_yen).toBe(99900);
+    expect(obj(ledger!.today).ai_stake_yen).toBe(300);
+    expect(obj(obj(ledger!.by_lane).ev).stake_yen).toBe(0);
     const sel = obj(obj(ledger!.by_lane).selective);
     expect(sel.stake_yen).toBe(200);
     expect(sel.return_yen).toBe(700);

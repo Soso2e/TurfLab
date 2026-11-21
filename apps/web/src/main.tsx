@@ -337,6 +337,8 @@ function NarCsvUploadPanel({
   );
 }
 
+const fundedAutoBetLanes = new Set<Json | undefined>(["hit", "ev", "selective", "ai"]);
+
 function AutomaticBetPlans({ api, race, fieldSize }: {
   api: (path: string) => Promise<Row>;
   race: Row;
@@ -368,9 +370,10 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
   }, []);
   const record = rows(status?.race_bet_plans ?? []).find((item) => item.race_id === race.race_id);
   const lanes = [
-    { lane: "ai", short: "AI", tone: "emerald" as const, label: "AI自由予想（最大1,000円・比較用）", missing: "AIの独立評価による買い目が未保存" },
+    { lane: "ai", short: "AI", tone: "emerald" as const, label: "AI自由予想（最大1,000円）", missing: "AIの独立評価による買い目が未保存" },
     { lane: "hit", short: "的中", tone: "emerald" as const, label: "的中狙い（600円枠）", missing: record?.missing_hit_reason },
     { lane: "ev", short: "EV", tone: "amber" as const, label: "期待値（400円枠）", missing: record?.missing_ev_reason },
+    { lane: "selective", short: "厳選", tone: "amber" as const, label: "期待値（厳選）", missing: record?.missing_ev_reason },
     { lane: "evm", short: "市場", tone: "blue" as const, label: "市場基準の期待値", missing: record?.missing_ev_reason },
   ];
   const activeItems: ExpandCardItem[] = [];
@@ -390,7 +393,7 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
       }
       const settledText =
         typeof plan?.returned_yen === "number"
-          ? `仮想払戻 ${yen(plan.returned_yen)}`
+          ? `仮想払戻・返還 ${yen(plan.returned_yen)}`
           : "公式結果との照合待ち";
       activeItems.push({
         id: `auto-${lane}`,
@@ -1231,45 +1234,38 @@ function App() {
   const ledgerDay = ledger
     ? rows(ledger.by_date ?? []).find((d) => d.date === date) ?? null
     : null;
-  const hitSummary = (() => {
+  const autoBetSummary = (() => {
     if (ledgerDay) {
       return {
         stake: Number(ledgerDay.stake_yen ?? 0),
         returned: Number(ledgerDay.return_yen ?? 0),
-        pending: Number(ledgerDay.pending_stake_yen ?? 0),
-        fixedCount: Number(ledgerDay.stake_yen ?? 0) > 0 ? 1 : 0,
       };
     }
-    if (!localStatus || localStatus.race_bet_plans_date !== date) {
-      return { stake: 0, returned: 0, pending: 0, fixedCount: 0 };
+    if (!localStatus) {
+      return { stake: 0, returned: 0 };
     }
     const dayRaceIds = new Set(races.map((r) => String(r.race_id)));
     let stake = 0;
     let returned = 0;
-    let pending = 0;
-    let fixedCount = 0;
     for (const rec of rows(localStatus.race_bet_plans ?? [])) {
       if (!dayRaceIds.has(String(rec.race_id))) continue;
       for (const plan of rows(rec.plans ?? [])) {
-        if (plan.lane !== "hit" && plan.lane !== "ev") continue;
+        if (!fundedAutoBetLanes.has(plan.lane)) continue;
         const picks = rows(plan.picks ?? []);
         if (picks.length > 0) {
-          fixedCount++;
           const planStake = picks.reduce((s, p) => s + Number(p.amount_yen ?? 0), 0);
           stake += planStake;
           if (typeof plan.returned_yen === "number") {
             returned += plan.returned_yen;
-          } else {
-            pending += planStake;
           }
         }
       }
     }
-    return { stake, returned, pending, fixedCount };
+    return { stake, returned };
   })();
   const remainingCapital =
     typeof data?.remaining_yen === "number"
-      ? data.remaining_yen - hitSummary.stake + hitSummary.returned
+      ? data.remaining_yen - autoBetSummary.stake + autoBetSummary.returned
       : undefined;
   const canEditBet =
     race?.status === "scheduled" &&
@@ -1474,16 +1470,16 @@ function App() {
                         yen(remainingCapital)
                       )}
                     </strong>
-                    {hitSummary.stake > 0 && (
+                    {autoBetSummary.stake > 0 && (
                       <small>
-                        自動Bet -{yen(hitSummary.stake)}
-                        {hitSummary.returned > 0 ? ` / 払戻 +${yen(hitSummary.returned)}` : ""}
+                        自動Bet -{yen(autoBetSummary.stake)}
+                        {autoBetSummary.returned > 0 ? ` / 払戻・返還 +${yen(autoBetSummary.returned)}` : ""}
                       </small>
                     )}
                   </div>
                   {ledger && (
                     <div>
-                      <span>総資産 <small>Python集計</small></span>
+                      <span>自動ベットの仮想総資産</span>
                       <strong className={Number(ledger.settled_net_yen) > 0 ? "pos" : Number(ledger.settled_net_yen) < 0 ? "neg" : ""}>
                         <NumberRoll value={Number(ledger.total_assets_yen ?? 0)} format={(n) => yen(n)} />
                       </strong>
@@ -1597,7 +1593,7 @@ function App() {
                                 (item) => item.race_id === r.race_id,
                               );
                               const autoPlans = rows(betPlanRecord?.plans ?? []).filter(
-                                (p) => (p.lane === "hit" || p.lane === "ev") && rows(p.picks ?? []).length > 0,
+                                (p) => fundedAutoBetLanes.has(p.lane) && rows(p.picks ?? []).length > 0,
                               );
                               const autoStake = autoPlans.reduce(
                                 (sum, p) => sum + rows(p.picks ?? []).reduce((s, pk) => s + Number(pk.amount_yen ?? 0), 0),
@@ -1700,7 +1696,8 @@ function App() {
                                           </b>
                                         )}
                                       </span>
-                                    ) : autoStake > 0 ? (
+                                    ) : null}
+                                    {autoStake > 0 ? (
                                       <span className="bet-info">
                                         自動Bet {yen(autoStake)}
                                         {!autoAllSettled ? (
@@ -1711,9 +1708,9 @@ function App() {
                                           </b>
                                         )}
                                       </span>
-                                    ) : (
+                                    ) : Number(r.bet_count) === 0 ? (
                                       <span className="bet-info none">購入なし</span>
-                                    )}
+                                    ) : null}
                                   </div>
                                 </button>
                               );

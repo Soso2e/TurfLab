@@ -106,6 +106,15 @@ describe("production outage recovery contracts (fixtures)", () => {
       ),
     ).rejects.toThrow("16MiB");
   });
+  it("予想Workerの状態通知は256KiBを超えても受理し、1MiBで打ち切る", async () => {
+    const request = (length: number) => new Request("http://local/api/local-predictions/status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "healthy", evidence: "x".repeat(length) }),
+    });
+    await expect(readBody(request(300 * 1024))).resolves.toMatchObject({ status: "healthy" });
+    await expect(readBody(request(1024 * 1024))).rejects.toThrow("1MiB");
+  });
   it("API障害をDOとは別に記録し、復旧と検証済みcheckpointを読み返せる", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "turflab-health-"));
     await writeWorkerHealth(home, {

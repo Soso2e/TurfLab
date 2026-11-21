@@ -15,6 +15,8 @@ import {
   obj,
   rows,
   str,
+  ticketSizes,
+  type Json,
   type Row,
 } from "../packages/shared/src/domain";
 import { coreStats, loadCoreRuns } from "./core-result-stats";
@@ -163,22 +165,40 @@ export function normalizeOfficialResultDocument(document: Row): Row {
     }
   }
   const payoutsRaw = document.payouts;
+  const statuses = obj(obj(nextResult ?? {}).entry_status_json ?? {});
   const nextPayouts = Array.isArray(payoutsRaw)
-    ? payoutsRaw.map((item) => {
-        if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+    ? payoutsRaw.flatMap<Json>((item) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) return [item];
         const p = item as Row;
-        const payout = Number(p.payout_per_100_yen ?? 0);
         const rule = p.refund_rule_json;
-        if (
-          payout > 0 &&
-          rule != null &&
-          typeof rule === "object" &&
-          !Array.isArray(rule) &&
-          (rule as Row).kind !== "refund"
-        ) {
-          return { ...p, refund_rule_json: null };
+        if (!rule || typeof rule !== "object" || Array.isArray(rule) || rule.kind === "refund") {
+          return [p];
         }
-        return p;
+        const selection = p.selections_json;
+        const reason = rule.reason ?? rule.kind;
+        const horse = rule.refund_horse_number ?? rule.horse_number ?? rule.contains_horse_number;
+        const scratched = typeof horse === "number" &&
+          ["scratched", "cancelled"].includes(String(statuses[String(horse)]));
+        if (reason === "scratched_same_bracket" || reason === "scratched_same_bracket_refund") {
+          const bracket = rule.refund_bracket_number ?? rule.bracket_number;
+          if (p.payout_per_100_yen === 100 && scratched && p.ticket_type === "bracket_quinella" &&
+            typeof bracket === "number" && Array.isArray(selection) && selection.length === 2 &&
+            selection.every((n) => n === bracket)) {
+            return [{ ...p, payout_per_100_yen: 0, refund_rule_json: {
+              kind: "refund", scope: "selection", refund_per_100_yen: 100,
+            } }];
+          }
+          return [p];
+        }
+        if (["scratched", "scratched_contains_horse", "scratched_refund"].includes(String(reason)) &&
+          horse !== undefined) {
+          // Core and the simulation ledger already refund every ticket containing this horse.
+          const size = ticketSizes[p.ticket_type === "quinella_place" ? "wide" : String(p.ticket_type)];
+          if (p.payout_per_100_yen === 100 && scratched && size &&
+            Array.isArray(selection) && selection.length === 1 && selection[0] === horse) return [];
+          return [p];
+        }
+        return [Number(p.payout_per_100_yen) > 0 ? { ...p, refund_rule_json: null } : p];
       })
     : payoutsRaw;
   return {
@@ -1477,8 +1497,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       ]);
       const result = obj(entry.official_result ?? {});
       const plans = [["hit", hit], ["ev", ev], ["evm", market], ["selective", selective], ["ai", ai]] as const;
+      const isFinal = result.official_status === "official" || result.official_status === "cancelled";
       const closed = Date.parse(String(race.scheduled_start_at)) <= Date.now() ||
-        result.official_status === "official" || race.status === "cancelled";
+        isFinal || race.status === "cancelled";
       return {
         race_id: raceId,
         missing_ev_reason: odds && odds.odds_complete === false
@@ -1493,7 +1514,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             lane, fixed_at: plan.fixed_at ?? null, picks,
             selection_source: plan.selection_source ?? null,
             skip_reason: plan.skip_reason ?? null,
-            returned_yen: picks.length && result.official_status === "official"
+            returned_yen: picks.length && isFinal
               ? planOutcome(plan, result).returned : null,
           }];
         }),
@@ -1930,7 +1951,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
                   },
                 ],
               }) +
-              "\n例の馬番/金額は使わず実際の全出走馬・同着・全払戻を埋める。entry_status_json の値は \"finished\" | \"scratched\" | \"cancelled\" | \"dnf\" | \"disqualified\" のみ（競走除外は \"scratched\"）。通常払戻行は refund_rule_json: null にする。\n" +
+              "\n例の馬番/金額は使わず実際の全出走馬・同着・全払戻を埋める。entry_status_json の値は \"finished\" | \"scratched\" | \"cancelled\" | \"dnf\" | \"disqualified\" のみ（競走除外は \"scratched\"）。通常払戻行は refund_rule_json: null。返還馬番は entry_status_json に記録し、payouts に券種ごとの返還行を作らない。公式の返還同枠は bracket_quinella の selections_json: [枠番, 枠番]、payout_per_100_yen: 0、refund_rule_json: {kind:\"refund\",scope:\"selection\",refund_per_100_yen:100} で記録する。\n" +
               JSON.stringify({ race, entries: entry.entries }),
           );
           if (document && !document.blocked) {
