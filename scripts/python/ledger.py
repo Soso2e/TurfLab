@@ -115,8 +115,11 @@ def _load_results(exchange_dir: Path) -> dict[str, dict[str, Any]]:
     return by_race
 
 
+FUNDED_LANES = ("hit", "ev", "selective", "ai")
+
+
 def _load_plans(exchange_dir: Path) -> list[dict[str, Any]]:
-    """Load bet plan files (hit, ev, and selective lanes; excludes evm record-only plans)."""
+    """Load funded bet plans from the exchange."""
     plans_dir = exchange_dir / "plans"
     items: list[dict[str, Any]] = []
     if not plans_dir.is_dir():
@@ -130,6 +133,8 @@ def _load_plans(exchange_dir: Path) -> list[dict[str, Any]]:
             lane = "hit"
         elif name.endswith("-selective.json"):
             lane = "selective"
+        elif name.endswith("-ai.json"):
+            lane = "ai"
         else:
             lane = "ev"
         try:
@@ -145,7 +150,7 @@ def _load_plans(exchange_dir: Path) -> list[dict[str, Any]]:
             continue
         items.append({
             "date": date_str,
-            "lane": doc_lane if doc_lane in ("hit", "ev", "selective") else lane,
+            "lane": doc_lane if doc_lane in FUNDED_LANES else lane,
             "doc": doc,
         })
     return items
@@ -171,10 +176,14 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
     settled_races: set[str] = set()
     pending_races: set[str] = set()
 
-    by_lane: dict[str, dict[str, int]] = {
-        "hit": {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0},
-        "ev": {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0},
-        "selective": {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0, "skipped_races": 0},
+    by_lane = {
+        lane: {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0}
+        for lane in FUNDED_LANES
+    }
+    by_lane["selective"]["skipped_races"] = 0
+    empty_day = {
+        "stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0,
+        **{f"{lane}_{metric}_yen": 0 for lane in FUNDED_LANES for metric in ("stake", "return")},
     }
     by_date_map: dict[str, dict[str, int]] = {}
 
@@ -204,10 +213,7 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
                     refund, payout = _financial_outcome(p, res_doc)
                     returned += refund + payout
 
-        lane_bucket = by_lane.setdefault(
-            lane,
-            {"stake_yen": 0, "return_yen": 0, "settled_stake_yen": 0, "pending_stake_yen": 0, "races": 0},
-        )
+        lane_bucket = by_lane[lane]
         lane_bucket["stake_yen"] += stake
         lane_bucket["return_yen"] += returned
         lane_bucket["races"] += 1
@@ -216,26 +222,10 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
         else:
             lane_bucket["pending_stake_yen"] += stake
 
-        # Keep selective lane isolated from hit+ev capital balance so comparison stays clean.
-        if lane == "selective":
-            continue
-
         total_stake += stake
         total_return += returned
 
-        day_bucket = by_date_map.setdefault(
-            date_str,
-            {
-                "stake_yen": 0,
-                "return_yen": 0,
-                "settled_stake_yen": 0,
-                "pending_stake_yen": 0,
-                "hit_stake_yen": 0,
-                "hit_return_yen": 0,
-                "ev_stake_yen": 0,
-                "ev_return_yen": 0,
-            },
-        )
+        day_bucket = by_date_map.setdefault(date_str, empty_day.copy())
         day_bucket["stake_yen"] += stake
         day_bucket["return_yen"] += returned
         day_bucket[f"{lane}_stake_yen"] += stake
@@ -258,19 +248,7 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
     total_assets = initial_capital + settled_net  # == cash_balance + pending_stake
     return_rate = round(settled_return / settled_stake, 4) if settled_stake > 0 else None
 
-    today_raw = by_date_map.get(
-        target_date,
-        {
-            "stake_yen": 0,
-            "return_yen": 0,
-            "settled_stake_yen": 0,
-            "pending_stake_yen": 0,
-            "hit_stake_yen": 0,
-            "hit_return_yen": 0,
-            "ev_stake_yen": 0,
-            "ev_return_yen": 0,
-        },
-    )
+    today_raw = by_date_map.get(target_date, empty_day)
     today = {
         "date": target_date,
         **today_raw,

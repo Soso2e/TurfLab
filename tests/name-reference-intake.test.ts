@@ -1,9 +1,9 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import exampleJson from "../docs/examples/ai-daily-reference-v1.json";
 const example = exampleJson as unknown as Row;
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { obj, rows, str, type Row } from "../packages/shared/src/domain";
 import { backup, MemoryRepository } from "../packages/shared/src/repository";
 import { importNameReference } from "../workers/api/src/name-reference-intake";
@@ -21,6 +21,7 @@ import { wizardAnswer, wizardDraft } from "./wizard-fixture";
 import { referenceAnswer } from "../packages/shared/src/reference-answer";
 import { saveResearchBaseline } from "../workers/api/src/local-research-baseline";
 import { enrichedReference } from "../scripts/local-history-research";
+import { LocalPredictionWorker } from "../scripts/local-prediction-worker";
 
 const NOW = "2026-11-04T01:00:00.000Z";
 export function nameReference(): Row {
@@ -56,6 +57,71 @@ export function nameReference(): Row {
 }
 
 describe("name-only reference intake (isolated fixtures)", () => {
+  it("researches an existing name-only race and imports a complete free-mode forecast", async () => {
+    const repo = new MemoryRepository();
+    const initial = await importNameReference(repo, nameReference(), NOW);
+    const original = await inputPack(repo, str(rows(initial.races)[0], "snapshot_id"), NOW);
+    const race = obj(original.race);
+    const home = await mkdtemp(path.join(tmpdir(), "turflab-register-research-"));
+    let rosterChecks = 0;
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      const api = async (url: string, body?: unknown) => obj(await route(repo,
+        new Request("http://local/api" + url, {
+          method: body ? "POST" : "GET",
+          headers: { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }), new Date().toISOString()));
+      const worker = new LocalPredictionWorker(home, api, "", "fixture", async (dir, prompt): Promise<Row> => {
+        const now = new Date().toISOString();
+        await writeFile(path.join(dir, "receipt.json"), JSON.stringify({ finished_at: now }));
+        if (prompt.includes("登録済みのこの1レース")) {
+          rosterChecks++;
+          return {
+            source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_babaCode=32&k_raceDate=2026%2F11%2F04&k_raceNo=1",
+            date_jst: "2026-11-04", track: "架空競馬場", race_no: 1,
+            scheduled_start_at: race.scheduled_start_at, distance_m: 1600, surface: "ダート", going: "良",
+            horses: rows(original.entries).map((e, index) => ({
+              ...e, jockey: rosterChecks === 1 && index === 0 ? "変更騎手" : e.jockey_name,
+            })),
+          };
+        }
+        if (prompt.includes("まず直近1走を全頭調べ")) return { going: "良", horses: [] };
+        if (prompt.includes("AI自由予想モード") && rosterChecks > 1) {
+          const snapshots = await repo.list("race_snapshots");
+          const latest = snapshots.sort((a, b) => String(b.captured_at).localeCompare(String(a.captured_at)))[0];
+          const pack = await inputPack(repo, str(latest, "snapshot_id"), now);
+          return { ...wizardAnswer(pack, now), free_analysis: "自由予想の追加項目" };
+        }
+        return { blocked: true, reason: "fixture" };
+      }, 24, undefined, 10, undefined, undefined, 6, true);
+      vi.setSystemTime("2026-11-04T02:55:00Z");
+      await worker.init();
+      const held = await worker.tick(new Date());
+      expect(held.job_issues).toContainEqual(expect.objectContaining({
+        reason: "公式出馬表と登録済みの出走馬・騎手・出走状態を照合できませんでした",
+      }));
+      expect(await repo.list("race_snapshots")).toHaveLength(1);
+      for (let minute = 0; minute <= 25; minute += 5) {
+        vi.setSystemTime(Date.parse("2026-11-04T03:00:00Z") + minute * 60_000);
+        await worker.tick(new Date());
+      }
+      const snapshots = await repo.list("race_snapshots");
+      expect(snapshots).toContainEqual(expect.objectContaining({ snapshot_id: original.snapshot_id }));
+      expect(snapshots).toContainEqual(expect.objectContaining({
+        evidence_json: expect.objectContaining({
+          research: expect.objectContaining({ jurisdiction: "NAR", history_version: "official-history-v1" }),
+        }),
+      }));
+      expect(await repo.list("predictions")).toEqual([expect.objectContaining({
+        race_id: race.race_id, status: "locked", information_cutoff_at: "2026-11-04T03:05:00.000Z",
+      })]);
+      expect(rosterChecks).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("adds sourced past-run evidence to a new snapshot and keeps the original input intact", async () => {
     const repo = new MemoryRepository();
     const source: Row = { ...nameReference(), repository: "local/codex" };

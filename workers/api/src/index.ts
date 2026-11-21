@@ -121,10 +121,10 @@ export async function readBody(request: Request): Promise<Row> {
   );
   // Catalog receipts include complete source documents; even one normal
   // production backup exceeds the ordinary mutation limit.
-  const largeBody = ["/api/restore", "/api/local-predictions/nar-csv/upload"].includes(
-    new URL(request.url).pathname,
-  );
-  const limit = largeBody ? 16 * 1024 * 1024 : 262144;
+  const pathname = new URL(request.url).pathname;
+  const largeBody = ["/api/restore", "/api/local-predictions/nar-csv/upload"].includes(pathname);
+  // The worker publishes two days of race plans, evidence and reviews together.
+  const limitKiB = largeBody ? 16 * 1024 : pathname === "/api/local-predictions/status" ? 1024 : 256;
   const reader = request.body?.getReader();
   requireCondition(reader, "本文が必要です", 400);
   let length = 0;
@@ -133,10 +133,11 @@ export async function readBody(request: Request): Promise<Row> {
     const { done, value } = await reader.read();
     if (done) break;
     length += value.length;
-    if (length > limit) {
+    if (length > limitKiB * 1024) {
       await reader.cancel();
       throw new DomainError(
-        largeBody ? "アップロードまたは復元入力は16MiB以内です" : "入力は256KiB以内です",
+        largeBody ? "アップロードまたは復元入力は16MiB以内です" :
+          limitKiB === 1024 ? "状態通知は1MiB以内です" : "入力は256KiB以内です",
         413,
       );
     }

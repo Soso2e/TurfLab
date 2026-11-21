@@ -133,7 +133,14 @@ try {
       path.join(home, "status.json.tmp"),
       path.join(home, "status.json"),
     );
-    await api("/local-predictions/status", status).catch(() => {});
+    await api("/local-predictions/status", status).catch((error: unknown) => {
+      emitOperationalEvent({
+        event: "worker.status_publish.failed",
+        component: "local-prediction-worker",
+        checked_at: status.checked_at,
+        error_code: error instanceof CoreRequestError ? error.message : "STATUS_PUBLISH_FAILED",
+      });
+    });
     // status.json is overwritten by the next cycle, so this is the durable
     // per-cycle history in the process stdout log.
     emitOperationalEvent({

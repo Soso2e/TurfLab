@@ -486,6 +486,36 @@ it("normalizes excluded entry status and bogus refund_rule_json on paid official
   ]);
 });
 
+it.each<Row>([
+  { kind: "scratched_refund", contains_horse_number: 5 },
+  { reason: "scratched_contains_horse", refund_horse_number: 5 },
+])("keeps scratched-horse refunds in entry status and preserves the same-bracket refund", (rule: Row) => {
+  const win = { ticket_type: "win", selections_json: [1], payout_per_100_yen: 130, refund_rule_json: null };
+  const inconsistent = { ticket_type: "trio", selections_json: [2], payout_per_100_yen: 100, refund_rule_json: rule };
+  const raw: Row = {
+    result: { entry_status_json: { "1": "finished", "5": "excluded" } },
+    payouts: [
+      win,
+      { ticket_type: "trio", selections_json: [5], payout_per_100_yen: 100, refund_rule_json: rule },
+      {
+        ticket_type: "bracket_quinella", selections_json: [3, 3], payout_per_100_yen: 100,
+        refund_rule_json: { kind: "scratched_same_bracket_refund", bracket_number: 3, horse_number: 5 },
+      },
+      inconsistent,
+    ],
+  };
+  const normalized = normalizeOfficialResultDocument(raw);
+  expect(obj(normalized.result).entry_status_json).toEqual({ "1": "finished", "5": "scratched" });
+  expect(normalized.payouts).toEqual([
+    win,
+    {
+      ticket_type: "bracket_quinella", selections_json: [3, 3], payout_per_100_yen: 0,
+      refund_rule_json: { kind: "refund", scope: "selection", refund_per_100_yen: 100 },
+    },
+    inconsistent,
+  ]);
+});
+
 it("builds simulation-vs-actual comparison and publishes local race_reviews", async () => {
   const home = await mkdtemp(path.join(tmpdir(), "turflab-review-"));
   const exchange = path.join(home, "exchange");
