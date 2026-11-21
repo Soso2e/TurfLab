@@ -30,7 +30,7 @@ describe("reference mirror is only a bounded immutable display artifact",()=>{
       ...input,
       path: "daily/2026-11-22/chatgpt/morning-reference-v1.json",
       document: nextDay,
-    }, "2026-11-21T16:00:00+09:00");
+    }, "2026-11-21T07:00:00.000Z");
     expect(mirror.date_jst).toBe("2026-11-22");
     expect(mirror.producer).toBe("chatgpt");
     expect(mirror.core_importable).toBe(false);
@@ -41,11 +41,11 @@ describe("reference mirror is only a bounded immutable display artifact",()=>{
     expect(() => validateReferenceMirror({
       ...input, path,
       document: {...nextDay, generated_at: "2026-11-23T00:00:00+09:00"},
-    }, "2026-11-24T00:00:00+09:00")).toThrow(/生成日時/);
+    }, "2026-11-23T15:00:00.000Z")).toThrow(/生成日時/);
     expect(() => validateReferenceMirror({
       ...input, path,
       document: {...nextDay, generated_at: "2026-11-21T23:00:00+09:00"},
-    }, "2026-11-21T22:00:00+09:00")).toThrow(/生成日時/);
+    }, "2026-11-21T13:00:00.000Z")).toThrow(/生成日時/);
   });
   it("rejects wrong paths, sha and forged Core status",()=>{
     expect(()=>validateReferenceMirror({...input,path:"daily/2026-11-02/morning-reference-v1.json"},now)).toThrow();
