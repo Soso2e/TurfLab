@@ -3335,3 +3335,11 @@ tr.entry-marked-row.mark-lane-note {
   .race-brief-rank { gap:5px; }
   .race-brief-finish { gap:4px; }
 }
+
+/* Track geometry is intentionally schematic until surveyed paths are available. */
+.course-schematic { display:grid; gap:8px; margin:12px 0 16px; padding:12px; border:1px solid var(--line, #d9e1e8); border-radius:14px; background:var(--surface,#fff); min-width:0; }
+.course-schematic svg { display:block; width:100%; height:auto; max-height:230px; color:var(--text,#1f2937); }
+.course-schematic-caption { display:grid; gap:4px; font-size:.82rem; }
+.course-schematic-caption span { color:var(--muted,#64748b); }
+.course-schematic-caption small { color:var(--muted,#64748b); font-size:.69rem; line-height:1.4; }
+@media (max-width:520px) { .course-schematic { padding:8px; } }
