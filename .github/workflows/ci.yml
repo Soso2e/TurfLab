@@ -13,6 +13,10 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -r scripts/python/requirements-forecast.txt
       - run: npm ci
       - run: npm run generate:schema
       - run: git diff --exit-code -- workers/api/src/import-validator.js database/sheets/chatgpt-import.schema.json
@@ -28,6 +32,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: python -m pip install -r scripts/python/requirements-forecast.txt
       - name: Initialize and check on Windows
         shell: powershell
         run: ./scripts/windows/Initialize.ps1

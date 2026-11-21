@@ -53,6 +53,8 @@ npm run forecast:report -- --root <exchange> --out forecast-report.json
 
 ## 実データ検証の手順（Windows本番・隔離実行）
 
+前提: `python -m pip install -r scripts\python\requirements-forecast.txt`（numpyのみ。既存のPython処理は標準ライブラリだけで動き続ける。本番Workerのpython環境には入れなくてよい。隔離実行用の環境にだけ入れる）。
+
 ```
 pwsh scripts\windows\Run-ForecastBacktest.ps1          # 監査 + devバックテスト(+ablation)。最終20%は触らない
 pwsh scripts\windows\Run-ForecastBacktest.ps1 -Final  # 最終ホールドアウト。一度だけ・最後に
