@@ -78,14 +78,18 @@ export async function raceTrends(repo: Repository, input: Row, now: string): Pro
         (p.horse_id === entry.horse_id && p.run_date_jst === r.race_date_jst)) &&
         p.horse_id === entry.horse_id);
       if (!run) continue;
-      const source = fieldSources(run).corner_positions_json;
+      const sources = fieldSources(run);
+      const source = sources.corner_positions_json;
       if (!source || !Number.isFinite(Date.parse(source.retrieved_at)) ||
         Date.parse(source.retrieved_at) > Date.parse(now)) continue;
+      const late3f = sources.last_3f_s;
+      const last3fKnown = late3f && Number.isFinite(Date.parse(late3f.retrieved_at)) &&
+        Date.parse(late3f.retrieved_at) <= Date.parse(now);
       biasRunners.push({
         horse_number: entry.horse_number!,
         finish_position: finishByNumber.get(Number(entry.horse_number)) ?? null,
         corner_positions_json: run.corner_positions_json ?? [],
-        last_3f_s: run.last_3f_s ?? null,
+        last_3f_s: last3fKnown ? run.last_3f_s ?? null : null,
       });
     }
     const layout = layouts.find((c) => c.course_id === r.course_id);
