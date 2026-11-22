@@ -783,7 +783,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
         const rawAnswer = await this.generate(
           day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v2" : pack.research ? "-context-v3" : "-context-v1"),
-          `分析開始UTC ${new Date().toISOString()}。情報締切はpack.information_cutoff_at。\n` + common +
+          `分析開始UTC ${new Date().toISOString()}。pack固定資料の情報締切はpack.information_cutoff_at。trends.track_biasのみcomputed_at時点に得た別添の当日観測（予想対象レースの発走前限定）。\n` + common +
             (this.freeMode
               ? freePrompt + "正式予想の共通項目（全馬評価・3展開・参考提案）はanswer_schemaの項目名と構造を使う。追加の自由予想項目は回答のトップレベルに置く。\n"
               : pack.research
@@ -791,7 +791,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
                     ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。基本は三連複（1頭軸・2頭軸・BOX等）や馬連・馬単、自信があれば三連単を選び、ワイドは自信がない・混戦で絞りきれない場合のみAI判断で選ぶ。\n"
                     : "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n") + scoringRules
                 : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
-            "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
+            "固定packのanswer_schemaどおりのJSON。pack本体にはcutoff後の情報を混ぜない。trends.track_biasは取得時点を別に表示して、発走後の観測を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
             (this.freeMode
               ? "free_analysis（文字列）を追加してよい。\n"
               : coverage
@@ -1427,7 +1427,8 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             ai_bet_picks: Array.isArray(answer.ai_bet_picks) ? answer.ai_bet_picks : [],
             jockey_evidence: jockeyEvidenceSnapshot(pack) } : {}),
           ...(forecastStatus ? { forecast_status: forecastStatus } : {}),
-          ...(trackBiasAudit ? { track_bias_audit: trackBiasAudit } : {}),
+          ...(trackBiasAudit ? { track_bias_audit: { ...trackBiasAudit, pack_cutoff_at: pack.information_cutoff_at!,
+            supplement_cutoff_at: trackBiasAudit.computed_at ?? null, supplement_version: "as-of-addendum-v1" } } : {}),
         }));
       }
       return;
@@ -1466,7 +1467,8 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         reason: String(answer.reason ?? "").slice(0, 600),
         missing: missing.slice(0, 120),
         evaluations: (ranked?.evaluations ?? given).slice(0, 20),
-        ...(trackBiasAudit ? { track_bias_audit: trackBiasAudit } : {}),
+        ...(trackBiasAudit ? { track_bias_audit: { ...trackBiasAudit, pack_cutoff_at: pack.information_cutoff_at!,
+          supplement_cutoff_at: trackBiasAudit.computed_at ?? null, supplement_version: "as-of-addendum-v1" } } : {}),
         ...(hitPicks ? { hit_picks: hitPicks } : {}),
       }),
     );
