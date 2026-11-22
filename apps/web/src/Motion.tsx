@@ -16,6 +16,33 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
+ * 印を画面中央に飛ばして拡大表示→フェードアウト。
+ * タップ位置（オリジン）から中央へ移動しつつ拡大。CSS側は `.mark-fly-center` を参照。
+ */
+function flyMarkToCenter(opt: { mark: string; tone: string; label: string }, origin: DOMRect | null) {
+  const el = document.createElement("div");
+  el.className = `mark-fly-center tone-${opt.tone}`;
+  el.textContent = opt.mark;
+  el.setAttribute("aria-hidden", "true");
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const sx = origin ? origin.left + origin.width / 2 : vw / 2;
+  const sy = origin ? origin.top + origin.height / 2 : vh / 2;
+  el.style.left = `${sx}px`;
+  el.style.top = `${sy}px`;
+  el.style.setProperty("--tx", `${vw / 2 - sx}px`);
+  el.style.setProperty("--ty", `${vh / 2 - sy}px`);
+  document.body.appendChild(el);
+  // トリガー
+  requestAnimationFrame(() => {
+    el.classList.add("is-flying");
+  });
+  window.setTimeout(() => {
+    el.remove();
+  }, 900);
+}
+
+/**
  * 1. ParallaxCard (Parallax Ticket インスパイア)
  * マウス位置に応じて 3D チルトし、表面に光沢（Specular Highlight）を追従させる。
  */
@@ -1101,6 +1128,11 @@ export function GooMarkMenu({
       const opt = GOO_MARK_OPTIONS[idx];
       const sim = simRef.current!;
       onChangeRef.current(opt.mark);
+      // 中央へ飛ぶ印エフェクト（解除以外・reduced-motion 以外）
+      if (opt.mark && !prefersReducedMotion() && typeof document !== "undefined") {
+        const origin = rootRef.current?.getBoundingClientRect();
+        flyMarkToCenter(opt, origin ?? null);
+      }
       const t1 = window.setTimeout(() => setMenuOpen(false), 70);
       const t2 = window.setTimeout(() => triggerToast(opt), 260);
       sim.timers.push(t1, t2);
