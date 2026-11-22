@@ -45,6 +45,7 @@ import { lockForecast } from "./forecast-eval";
 import { jockeyEvidenceSnapshot } from "./jockey-evidence-snapshot";
 import { applySameDayPaceAdjustment } from "../packages/shared/src/track-bias";
 import { aiDiscretionaryPlan, AI_DAY_CAP_YEN } from "./ai-discretionary-plan";
+import { evaluateTrackBias } from "./track-bias-evaluation";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -1906,7 +1907,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       const result = results.get(value.race_id!);
       return result ? { ...value, settled: planOutcomeDetailed(value, result) } : value;
     });
-    const report = learningReport([...newest.values()], plans, odds, now.toISOString());
+    const biasEvaluation = evaluateTrackBias(labs.map(({ value }) => value), [...results.values()]);
+    const report = { ...learningReport([...newest.values()], plans, odds, now.toISOString()),
+      track_bias_evaluation: biasEvaluation };
     await writeFile(path.join(this.home, "learning-report.json.tmp"), JSON.stringify(report));
     await rename(path.join(this.home, "learning-report.json.tmp"), path.join(this.home, "learning-report.json"));
     return {
@@ -1922,6 +1925,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         versus_market: obj(report.recorded_probabilities).versus_market!,
       },
       holdout_races: obj(report.learning).holdout_races!, candidate_ready: obj(report.learning).candidate_ready!,
+      track_bias_evaluation: biasEvaluation,
     };
   }
 
