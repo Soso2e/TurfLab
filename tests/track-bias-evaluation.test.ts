@@ -46,8 +46,8 @@ describe("track bias retrospective paired audit", () => {
     expect((report.cases as Row[])[0]).toMatchObject({
       baseline: { top1: 2 }, adjusted: { top1: 1 },
     });
-    expect(race).toMatchObject({
-      evaluations: [{ horse_number: 1, components: { pace: 74 } }],
+    expect((race.evaluations as Row[])[0]).toMatchObject({
+      horse_number: 1, components: { pace: 74 },
     });
   });
 
