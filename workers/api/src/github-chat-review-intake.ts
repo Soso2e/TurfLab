@@ -1,5 +1,5 @@
 import {
-  hash, obj, requireCondition, rows, str, isNameReference, type Row,
+  hash, obj, requireCondition, str, isNameReference, type Row,
 } from "../../../packages/shared/src/domain";
 import { parseReviewPath } from "../../../packages/shared/src/github-bridge";
 import { immutablePut, type Repository } from "../../../packages/shared/src/repository";
@@ -9,7 +9,7 @@ import { immutablePut, type Repository } from "../../../packages/shared/src/repo
 // and result references; these are NEVER manufactured from chat claims.
 const normalize = (value: unknown) =>
   typeof value === "string"
-    ? value.normalize("NFKC").replace(/\\s+/gu, "").replace(/競馬場$/u, "")
+    ? value.normalize("NFKC").replace(/\s+/gu, "").replace(/競馬場$/u, "")
     : "";
 const safeArray = (value: unknown): string[] =>
   Array.isArray(value)
@@ -36,7 +36,7 @@ export async function importGitHubChatReview(
 
   const sourceRace = obj(document.race);
   const raceKey = String(sourceRace.race_key_human ?? sourceRace.key ?? "");
-  const key = /^(\\d{4}-\\d{2}-\\d{2})\\|([^|]+)\\|(\\d{1,2})R$/.exec(raceKey);
+  const key = /^(\d{4}-\d{2}-\d{2})\|([^|]+)\|(\d{1,2})R$/.exec(raceKey);
   const sourceTrack = key?.[2] ?? sourceRace.track;
   const date = key?.[1] ?? parsed.date;
   const raceNo = key ? Number(key[3]) :
