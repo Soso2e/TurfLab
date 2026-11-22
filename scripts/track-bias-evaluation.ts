@@ -25,7 +25,7 @@ function topRanks(result: Row): { winners: number[]; top3: number[] } | null {
   for (const group of order) {
     if (top3.length >= 3) break;
     if (!Array.isArray(group)) return null;
-    for (const n of group) if (Number.isInteger(n) && n > 0 && !top3.includes(n)) top3.push(n);
+    for (const n of group) if (typeof n === "number" && Number.isInteger(n) && n > 0 && !top3.includes(n)) top3.push(n);
   }
   return winners.length && top3.length ? { winners, top3 } : null;
 }
