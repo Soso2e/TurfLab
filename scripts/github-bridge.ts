@@ -108,6 +108,7 @@ interface State {
   last_export?: Row;
   research_pack_blobs?: Record<string, string>;
   research_pack_sync?: Row;
+  odds_summary_sync?: Row;
   reference_files?: Record<string, ReferenceReceipt>;
   last_reference_sync?: string;
   last_reference?: Row;
@@ -221,6 +222,7 @@ export class PredictionBridge {
       transport: this.local ? "local" : "github",
       last_export: this.state.last_export ?? null,
       research_pack_sync: this.state.research_pack_sync ?? null,
+      odds_summary_sync: this.state.odds_summary_sync ?? null,
       last_daily_export: this.state.last_daily_export ?? null,
       last_reference: this.state.last_reference ?? null,
       last_result: this.state.last_result ?? null,
@@ -723,6 +725,36 @@ export class PredictionBridge {
       failed,
       error,
     };
+    await this.save();
+  }
+
+  /** Odds aggregates (never raw rows) go to the data repo write-once: a path that exists is not overwritten. */
+  async syncOddsSummaries(files: FileRef[], readLocal: BridgeIO["read"]) {
+    let uploaded = 0, existing = 0, failed = 0;
+    let error: string | null = null;
+    try {
+      const remote = new Set((await this.io.list()).map((f) => f.path));
+      for (const file of files) {
+        if (!/^odds-summary\/\d{4}-\d{2}-\d{2}\/[a-z]+-[0-9a-f]{12}\.json$/.test(file.path)) continue;
+        if (remote.has(file.path)) {
+          existing++;
+          continue;
+        }
+        try {
+          const content = await readLocal(file);
+          if (Buffer.byteLength(content) > 262144) throw new BridgeError("オッズ集約が256KiBを超えています");
+          await this.io.put(file.path, content);
+          uploaded++;
+        } catch (e) {
+          failed++;
+          error = e instanceof BridgeError ? e.message : "オッズ集約の転送に失敗しました";
+        }
+      }
+    } catch (e) {
+      failed++;
+      error = e instanceof BridgeError ? e.message : "GitHub上のオッズ集約を確認できません";
+    }
+    this.state.odds_summary_sync = { checked_at: this.io.now().toISOString(), status: error ? "failed" : "success", uploaded, existing, failed, error };
     await this.save();
   }
 

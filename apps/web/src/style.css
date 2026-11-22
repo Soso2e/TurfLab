@@ -3581,3 +3581,7 @@ img, svg, video { max-width: 100%; }
   }
 }
 
+
+.odds-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.odds-table th, .odds-table td { padding: 0.2rem 0.35rem; text-align: right; border-bottom: 1px solid rgba(128, 128, 128, 0.25); white-space: nowrap; }
+.odds-table th:first-child, .odds-table td:first-child { text-align: left; }

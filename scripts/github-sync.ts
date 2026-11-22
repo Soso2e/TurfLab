@@ -134,6 +134,14 @@ try {
       }
       await bridge.sync();
       try {
+        await bridge.syncOddsSummaries(
+          await localFiles(exchange, ["odds-summary"]),
+          (file) => readFile(path.join(exchange, file.path), "utf8"),
+        );
+      } catch {
+        // Odds aggregates are optional; their failure is recorded in odds_summary_sync.
+      }
+      try {
         await bridge.syncReferences();
       } catch {
         // Reference-only ingestion cannot block formal predictions or daily state.

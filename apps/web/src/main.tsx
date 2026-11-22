@@ -339,6 +339,65 @@ function NarCsvUploadPanel({
 
 const fundedAutoBetLanes = new Set<Json | undefined>(["hit", "ev", "selective", "ai"]);
 
+/** Win odds drift (first → latest pre-race → final) and the EV of the already-fixed probabilities. */
+function OddsPanel({ view, lastFetch }: { view: Row; lastFetch: Row }) {
+  const win = rows(view.win ?? []);
+  const ev = obj(view.ev);
+  const fixed = (v: Json | undefined) => (typeof v === "number" ? v.toFixed(1) : "–");
+  const arrow = (a: Json | undefined, b: Json | undefined) =>
+    typeof a === "number" && typeof b === "number" ? (b < a ? "↓" : b > a ? "↑" : "→") : "";
+  return (
+    <div>
+      <h3>オッズ・期待値</h3>
+      {!win.length && <p className="muted">このレースのオッズは未保存です。</p>}
+      {win.length > 0 && (
+        <table className="odds-table">
+          <thead><tr><th>馬番</th><th>発走前</th><th>変動</th><th>確定</th></tr></thead>
+          <tbody>
+            {win.map((w) => (
+              <tr key={String(w.horse_number)}>
+                <td>{String(w.horse_number)}</td>
+                <td>{fixed(w.latest)}</td>
+                <td>{arrow(w.first, w.latest)} {fixed(w.first)}→{fixed(w.latest)}</td>
+                <td>{fixed(w.final)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {win.length > 0 && (
+        <p className="muted">
+          発走前 {view.prerace_last_as_of ? time(view.prerace_last_as_of) : "未取得"}（{String(view.prerace_snapshots ?? 0)}回）
+          {view.final_available ? " · 確定オッズは発走後のため購入判断には使いません" : " · 確定オッズ未取込"}
+        </p>
+      )}
+      {rows(ev.lines ?? []).length > 0 && (
+        <>
+          <p className="muted">期待値（確率は発走前に固定済み × オッズ）</p>
+          <table className="odds-table">
+            <thead><tr><th>買い目</th><th>確率</th><th>発走前EV</th><th>確定EV</th></tr></thead>
+            <tbody>
+              {rows(ev.lines ?? []).map((l, i) => (
+                <tr key={i}>
+                  <td>{String(l.ticket_type)} {arr(l, "selections_json").join("-")}</td>
+                  <td>{typeof l.probability === "number" ? (l.probability * 100).toFixed(1) + "%" : "–"}</td>
+                  <td>{typeof l.prerace_ev === "number" ? l.prerace_ev.toFixed(2) : "–"}</td>
+                  <td>{typeof l.final_ev === "number" ? l.final_ev.toFixed(2) : "–"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+      <p className="muted">
+        オッズ最終取得 {lastFetch.last_success_at ? time(lastFetch.last_success_at) : "なし"}
+        {typeof lastFetch.consecutive_failures === "number" && lastFetch.consecutive_failures > 0
+          ? ` · 取得失敗が${lastFetch.consecutive_failures}回続いています` : ""}
+      </p>
+    </div>
+  );
+}
+
 function AutomaticBetPlans({ api, race, fieldSize }: {
   api: (path: string) => Promise<Row>;
   race: Row;
@@ -421,8 +480,11 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
       });
     }
   }
+  const odds = record ? obj(record.odds_view) : {};
+  const oddsStatus = obj(status?.odds);
   return (
     <div>
+      <OddsPanel view={odds} lastFetch={oddsStatus} />
       <h3>自動ベット（シミュレーション）</h3>
       {unavailable && <p role="status">自動ベットの最新状況を取得できません。</p>}
       {!status && !unavailable && <p>自動ベットの状況を確認中です。</p>}
