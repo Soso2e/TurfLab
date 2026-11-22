@@ -112,7 +112,7 @@ export function summarizeSameDayBias(observed: Row[], target: BiasTarget): Row {
       stretch_gains_2plus: totals[b].stretch_gains,
     }])),
     sweeps_observed: sweeps, runners_with_last3f: last3f,
-    adjustment_points: { front: -rearDelta, middle: 0, rear: rearDelta },
+    adjustment_points: { front: rearDelta === 0 ? 0 : -rearDelta, middle: 0, rear: rearDelta },
     limits: [
       "芝・ダートを混合せず、発走前に確認できた同場・同日公式結果のみ使用",
       "まくり=コーナー間の位置取り上昇、追込=4角後方からの直線浮上として区別",
@@ -149,11 +149,12 @@ export function applySameDayPaceAdjustment(
     if (oldPace === null || !delta || !Number.isInteger(delta) || Math.abs(delta) > 4)
       return horse;
     const adjusted = Math.max(0, Math.min(100, oldPace + delta));
+    if (adjusted === oldPace) return horse;
     applied.push({ horse_number: horse.horse_number!, position: horse.expected_position ?? null,
       bucket, previous_pace: oldPace, adjusted_pace: adjusted, delta: adjusted - oldPace });
     return { ...horse, components: { ...components, pace: adjusted },
       rationale: String(horse.rationale ?? "") +
-        ` [当日バイアス観測補正: pace ${oldPace}→${adjusted}、${data.version}]` };
+        ` [当日バイアス観測補正: pace ${oldPace}→${adjusted}、${data.version} / as-of ${data.computed_at}]` };
   });
   return {
     answer: applied.length ? { ...answer, horse_evaluations: evaluations } : answer,
