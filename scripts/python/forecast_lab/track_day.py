@@ -205,7 +205,7 @@ def winning_time(race):
     return values[0] if len(values) == 1 else None
 
 
-def snapshot(races, target, config, *, mode, computed_at=None, history=(), predictions=None, expected_ids=()):
+def snapshot(races, target, config, *, mode, computed_at=None, history=(), predictions=None, expected_ids=(), scheduled_ids=()):
     if mode not in ("historical_replay", "live_observed"):
         raise ValueError("invalid data mode")
     day, track, surface = (target[key] for key in ("date", "track_code", "surface"))
@@ -245,6 +245,7 @@ def snapshot(races, target, config, *, mode, computed_at=None, history=(), predi
     win_time = winning_time(anchor)
     predictions = {key: predictions[key] for key in ids if predictions and key in predictions}
     missing_ids = sorted(set(expected_ids) - set(ids))
+    scheduled = sorted(set(scheduled_ids))
     def latest(key):
         if mode != "live_observed" or not admitted or any(not r.get(key) for r in admitted):
             return None
@@ -269,11 +270,12 @@ def snapshot(races, target, config, *, mode, computed_at=None, history=(), predi
         "comparable_races": [r["race_id"] for r in comparable_races],
         "usual_pos_excess": usual.get("pos_excess_raw"), "usual_draw_excess": usual.get("draw_excess"),
         **metrics, "missing_race_ids": missing_ids, "coverage_verified": bool(expected_ids),
+        **({"scheduled_race_ids": scheduled} if scheduled else {}),
         "published_at_max": published, "observed_at_max": observed,
         "race_finished_at": latest("race_finished_at"), "computed_at": computed_at,
         "availability_verified": bool(published and observed),
         "source_hash": source_hash, **source_result_hashes, "config_hash": config_hash,
-        "input_hash": digest([source_hash, config_hash, predictions, missing_ids, usual, sorted(ref)]),
+        "input_hash": digest([source_hash, config_hash, predictions, missing_ids, usual, sorted(ref)] + ([scheduled] if scheduled else [])),
         "going": anchor.get("going"), "weather": anchor.get("weather"),
         "cushion": anchor.get("cushion") if anchor.get("authority") == "JRA" else None,
         "moisture": anchor.get("moisture") if anchor.get("authority") == "JRA" else None,

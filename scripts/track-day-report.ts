@@ -17,6 +17,8 @@ export async function trackDayReport(exchange: string) {
   const dates = new Set<string>();
   const covered = new Set<string>();
   const missing = new Set<string>();
+  const liveCovered = new Set<string>();
+  let coverageKnown = false;
   let live = 0;
   let replay = 0;
   for (const day of await entries(base)) {
@@ -33,12 +35,18 @@ export async function trackDayReport(exchange: string) {
             !Array.isArray(row.source_race_ids) || !Array.isArray(row.missing_race_ids)) {
           throw new Error(`Invalid Track Day record in ${day.name}/${file.name}`);
         }
-        if (row.data_mode === "live_observed") live++;
-        else if (row.data_mode === "historical_replay") replay++;
+        if (row.data_mode === "live_observed") {
+          live++;
+          for (const id of row.source_race_ids) liveCovered.add(id);
+          if (row.coverage_verified && Array.isArray(row.scheduled_race_ids)) {
+            coverageKnown = true;
+            for (const id of row.scheduled_race_ids) missing.add(id);
+          }
+        } else if (row.data_mode === "historical_replay") replay++;
         else throw new Error("Invalid Track Day data mode");
         dates.add(day.name);
         for (const id of row.source_race_ids) covered.add(id);
-        for (const id of row.missing_race_ids) missing.add(id);
+
       }
     }
   }
@@ -47,7 +55,7 @@ export async function trackDayReport(exchange: string) {
     track_day_snapshots: live + replay,
     track_day_latest_date: [...dates].sort().at(-1) ?? null,
     track_day_covered_races: covered.size,
-    track_day_missing_races: [...missing].filter((id) => !covered.has(id)).length,
+    track_day_missing_races: coverageKnown ? [...missing].filter((id) => !liveCovered.has(id)).length : null,
     track_day_live_observed_count: live,
     track_day_historical_replay_count: replay,
   };

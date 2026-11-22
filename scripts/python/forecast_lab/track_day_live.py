@@ -28,12 +28,13 @@ def ingest_card(root, card, now):
               "races": []}
     for race in sorted(received.values(), key=lambda r: (r["race_no"], r["race_id"])):
         start = perf_counter()
-        expected = [rid for rid, item in schedule.items() if item["surface"] == race["surface"]
-                    and item["race_no"] <= race["race_no"]]
+        card_ids = [rid for rid, item in schedule.items() if item["surface"] == race["surface"]]
+        expected = [rid for rid in card_ids if schedule[rid]["race_no"] <= race["race_no"]]
         record = {"race_id": race["race_id"], "written": 0, "failed": 0}
         try:
             value = snapshot(received.values(), race, {"lambda": None}, mode="live_observed",
-                             computed_at=now, expected_ids=expected, predictions=card.get("m1_predictions"))
+                             computed_at=now, expected_ids=expected, scheduled_ids=card_ids,
+                             predictions=card.get("m1_predictions"))
             correction = card.get("revisions", {}).get(race["race_id"], {})
             _, written = append(root, value, correction_of=correction.get("previous_input_hash"),
                                 correction_evidence=correction.get("official_evidence"))

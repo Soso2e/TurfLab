@@ -61,6 +61,7 @@ def append(root, snapshot, *, correction_of=None, correction_evidence=None):
             if late_delivery and prior_results == new_results and (
                 latest["missing_race_ids"] == snapshot["missing_race_ids"]
                 and latest["coverage_verified"] == snapshot["coverage_verified"]
+                and latest.get("scheduled_race_ids") == snapshot.get("scheduled_race_ids")
             ) and "revision" not in snapshot:
                 # Repeated collection of unchanged official results keeps the first observation.
                 db.commit()
