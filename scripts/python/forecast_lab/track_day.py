@@ -237,6 +237,9 @@ def snapshot(races, target, config, *, mode, computed_at=None, history=(), predi
             return None
         return max((r[key] for r in admitted), key=instant)
     published, observed = latest("published_at"), latest("observed_at")
+    source_result_hashes = {"source_result_hashes": {
+        r["race_id"]: digest({k: v for k, v in r.items() if k != "observed_at"}) for r in admitted
+    }} if mode == "live_observed" else {}
     source_hash = digest(admitted)
     config_hash = digest(config)
     metrics = measure(comparable_races, config.get("lambda"), predictions)
@@ -256,7 +259,7 @@ def snapshot(races, target, config, *, mode, computed_at=None, history=(), predi
         "published_at_max": published, "observed_at_max": observed,
         "race_finished_at": latest("race_finished_at"), "computed_at": computed_at,
         "availability_verified": bool(published and observed),
-        "source_hash": source_hash, "config_hash": config_hash,
+        "source_hash": source_hash, **source_result_hashes, "config_hash": config_hash,
         "input_hash": digest([source_hash, config_hash, predictions, missing_ids, usual, sorted(ref)]),
         "going": anchor.get("going"), "weather": anchor.get("weather"),
         "cushion": anchor.get("cushion") if anchor.get("authority") == "JRA" else None,

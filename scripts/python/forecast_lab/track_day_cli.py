@@ -51,7 +51,7 @@ def track_audit(rows, provenance):
             distances = previous[key]
             comparable[str(sum(abs(d - race["distance_m"]) <= 400 for d in distances))] += 1
             distances.append(race["distance_m"])
-    compact_provenance = {k: v for k, v in provenance.items() if k != "race_list_ids"}
+    compact_provenance = {k: v for k, v in provenance.items() if k not in ("race_list_ids", "race_list")}
     result = audit([e for r in races for e in starters(r)], provenance=compact_provenance)
     days = sorted({r["date"] for r in races})
     cutoff = int(len(days) * 0.8)
@@ -74,15 +74,26 @@ def track_audit(rows, provenance):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("audit", "backfill", "evaluate", "ingest", "sync"))
+    parser.add_argument("command", choices=("audit", "backfill", "evaluate", "ingest", "sync", "stage-nar"))
     parser.add_argument("--csv-dir", type=Path)
     parser.add_argument("--receipt", type=Path)
     parser.add_argument("--calibration", type=Path)
     parser.add_argument("--snapshot", type=Path)
+    parser.add_argument("--zip", type=Path)
+    parser.add_argument("--date")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     now = datetime.now(timezone.utc).isoformat()
     out = args.out.resolve()
+    if args.command == "stage-nar":
+        if not args.zip or not args.date:
+            parser.error("--zip and --date are required")
+        from .track_day_nar_receipt import stage_receipts
+        cards = stage_receipts(args.zip, out, args.date, now)
+        print(json.dumps([{"track_code": c["track_code"], "scheduled": len(c["schedule"]),
+                           "received": len(c["results"]), "unknown_surface": len(c["unknown_surface_race_ids"])}
+                          for c in cards]))
+        return 0
     if args.command == "sync":
         if not args.snapshot:
             parser.error("--snapshot is required")

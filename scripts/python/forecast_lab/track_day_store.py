@@ -50,15 +50,33 @@ def append(root, snapshot, *, correction_of=None, correction_evidence=None):
                     raise Conflict("REVISION_CONFLICT")
                 db.commit()
                 return same, False
+            latest = revisions[-1] if revisions else None
+            live = snapshot["data_mode"] == "live_observed"
+            prior_results = latest.get("source_result_hashes") if latest and live else None
+            new_results = snapshot.get("source_result_hashes")
+            same_config = latest and latest["config_hash"] == snapshot["config_hash"]
+            late_delivery = prior_results and new_results and same_config and all(
+                new_results.get(key) == value for key, value in prior_results.items()
+            )
+            if late_delivery and prior_results == new_results and (
+                latest["missing_race_ids"] == snapshot["missing_race_ids"]
+                and latest["coverage_verified"] == snapshot["coverage_verified"]
+            ) and "revision" not in snapshot:
+                # Repeated collection of unchanged official results keeps the first observation.
+                db.commit()
+                return latest, False
             revision = len(revisions) + 1
             if snapshot.get("revision", revision) != revision:
                 raise Conflict("REVISION_CONFLICT")
-            if revisions and (correction_of != revisions[-1]["input_hash"] or not correction_evidence):
+            extension = late_delivery and prior_results.keys() < new_results.keys()
+            if latest and not extension and (correction_of != latest["input_hash"] or not correction_evidence):
                 raise Conflict("OFFICIAL_CORRECTION_EVIDENCE_REQUIRED")
             saved = {**snapshot, "snapshot_id": snapshot_id, "revision": revision}
-            if revisions:
-                saved["correction_of"] = correction_of
-                saved["correction_evidence"] = correction_evidence
+            if latest:
+                saved["previous_input_hash"] = latest["input_hash"]
+                saved["revision_reason"] = "late_delivery" if extension else "official_correction"
+                if not extension:
+                    saved["correction_evidence"] = correction_evidence
             tail = (canonical(saved) + "\n").encode()
             # Reserve the exact bytes durably before touching the JSONL. The next
             # lock owner can finish the append if this process exits here.

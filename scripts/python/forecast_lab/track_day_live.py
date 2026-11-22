@@ -24,6 +24,7 @@ def ingest_card(root, card, now):
         received[race_id] = {**race, **expected, "date": card["date"], "track_code": card["track_code"],
                              "source_url": card["source_url"]}
     report = {"covered_race_ids": sorted(received), "missing_race_ids": sorted(set(schedule) - set(received)),
+              "unknown_surface_race_ids": sorted(card.get("unknown_surface_race_ids", [])),
               "races": []}
     for race in sorted(received.values(), key=lambda r: (r["race_no"], r["race_id"])):
         start = perf_counter()

@@ -33,6 +33,7 @@
     "trackday:audit": "python scripts/python/forecast_lab/track_day_cli.py audit",
     "trackday:backfill": "python scripts/python/forecast_lab/track_day_cli.py backfill",
     "trackday:evaluate": "python scripts/python/forecast_lab/track_day_cli.py evaluate",
+    "trackday:stage-nar": "python scripts/python/forecast_lab/track_day_cli.py stage-nar",
     "trackday:sync": "python scripts/python/forecast_lab/track_day_cli.py sync",
     "trackday:ingest": "python scripts/python/forecast_lab/track_day_cli.py ingest",
     "forecast:pytest": "python -m unittest discover -s scripts/python -t scripts/python -p \"test_*.py\""

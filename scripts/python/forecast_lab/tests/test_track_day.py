@@ -78,6 +78,23 @@ class TrackDay(unittest.TestCase):
         b["published_at"] = None
         self.assertFalse(snapshot([b], b, {}, mode="live_observed", computed_at=NOW)["availability_verified"])
 
+    def test_live_receipt_extends_with_late_result(self):
+        first = race(1, observed_at=DAY + "T05:15:00Z")
+        second = race(2, observed_at=DAY + "T05:10:00Z")
+        kwargs = {"mode": "live_observed", "computed_at": NOW, "expected_ids": ["race-1", "race-2"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            before, _ = append(root, snapshot([second], second, {}, **kwargs))
+            updated, written = append(root, snapshot([first, second], second, {}, **kwargs))
+            self.assertTrue(written)
+            self.assertEqual(updated["revision_reason"], "late_delivery")
+            self.assertEqual(updated["previous_input_hash"], before["input_hash"])
+            second["observed_at"] = NOW
+            self.assertFalse(append(root, snapshot([first, second], second, {}, **kwargs))[1])
+            second["entries"][0].update(corners=[2, 2, 2])
+            with self.assertRaisesRegex(Conflict, "OFFICIAL_CORRECTION_EVIDENCE_REQUIRED"):
+                append(root, snapshot([first, second], second, {}, **kwargs))
+
     def test_parallel_append_repeat_correction_and_conflict(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

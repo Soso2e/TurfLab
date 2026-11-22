@@ -4,7 +4,7 @@ import io
 import re
 
 from .source import staged_copy
-from analyze_history import decode_csv_bytes, norm_date, norm_text, norm_track, parse_int, load_nar_csv_dir
+from analyze_history import decode_csv_bytes, norm_date, norm_text, norm_track, norm_surface, parse_int, load_nar_csv_dir
 
 TOKEN = re.compile(r"\((?:\*?\d+,)*\*?\d+\)|\*?\d+")
 
@@ -73,4 +73,10 @@ def load_archive(path):
     kept = [r for (key, _), r in seen.items() if key not in conflicts and key in confirmed]
     return kept, {**provenance, "rows_in": len(loaded), "exact_duplicates_removed": exact,
                   "conflicting_races_quarantined": len(conflicts),
-                  "race_list_ids": sorted([list(key) for key in metadata])}
+                  "race_list_ids": sorted([list(key) for key in metadata]),
+                  "race_list": [
+                      {"track_code": track, "date": day, "race_no": number,
+                       "race_id": f"{day}/{track}/{number}", "surface": norm_surface(value["surface_raw"])}
+                      for (track, day, number), value in sorted(metadata.items())
+                      if (track, day, number) not in conflicts
+                  ]}
