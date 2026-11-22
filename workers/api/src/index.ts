@@ -71,6 +71,7 @@ import { importGitHubChatReview } from "./github-chat-review-intake";
 import { rankPerformance } from "./rank-analytics";
 import { saveResearchBaseline } from "./local-research-baseline";
 import { emitOperationalEvent } from "../../../packages/shared/src/operational-event";
+import { BoatCollector } from "./boatrace-collector";
 import {
   getTablesMetadata,
   getTableData,
@@ -492,10 +493,18 @@ export async function route(
 }
 export class TurfCoordinator {
   private queue: Promise<void> = Promise.resolve();
+  private boat: BoatCollector;
   constructor(
     private state: DurableObjectState,
     private env: Env,
-  ) {}
+  ) {
+    this.boat = new BoatCollector(state);
+  }
+  async alarm(): Promise<void> {
+    const task = this.queue.then(() => this.boat.alarm());
+    this.queue = task.catch(() => {});
+    await task;
+  }
   private underlying(): Repository {
     return this.env.STORAGE_MODE === "sheets"
       ? new SheetsRepository(new GoogleSheetsClient(this.env))
@@ -523,6 +532,8 @@ export class TurfCoordinator {
         return response({ error: "本人用認証が必要です" }, 401);
       try {
         const bridgePath = new URL(request.url).pathname;
+        if (/^\/api\/boatrace(?:\/|$)/.test(bridgePath))
+          return await this.boat.route(request);
         if (bridgePath === "/api/local-predictions/status") {
           requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
           if (request.method === "GET") {
@@ -948,7 +959,7 @@ export default {
       }
       authenticatedRequest = true;
       const result = await env.COORDINATOR.get(
-        env.COORDINATOR.idFromName("owner"),
+        env.COORDINATOR.idFromName(/^\/api\/boatrace(?:\/|$)/.test(url.pathname) ? "boatrace-v1" : "owner"),
       ).fetch(request);
       status = result.status;
       return result;

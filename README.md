@@ -6,6 +6,8 @@ ChatGPTによる競馬分析・展開シミュレーションを記録し、全�
 
 ## 現在の状態
 
+右上スイッチから競艇モードに切り替え、公式データを使う3連単2点v1の仮想購入、精算、展示F補正の比較を行えます。[競艇の設計と操作](docs/boatrace-v1.md)
+
 統計ページを追加。馬・騎手・馬場・オッズを1レースで横並びに比較し、全項目にサンプル数・信頼度・推定/欠測を表示する。TL指数（基準タイム＋馬場差）、データスコア（既存6項目ウェイト）、全頭結果の集計DB（NAR CSV∪Core、`npm run stats:digest`）を含む。[統計ページの設計と整備](docs/stats-page.md)
 
 サーバー稼働中のローカルCLI予想を追加。`npm run predictions:local -- --once` で実行し、Windows Workerで継続できる。[ローカルCLI運用](docs/local-cli-operation.md)

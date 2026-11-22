@@ -1,0 +1,151 @@
+.sport-switch {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  position: relative;
+  isolation: isolate;
+  min-width: 124px;
+  padding: 3px;
+  border: 1px solid #bfcfc7;
+  border-radius: 999px;
+  background: #e7eee9;
+  color: #335748;
+}
+.sport-switch::before {
+  content: "";
+  position: absolute;
+  inset: 3px auto 3px 3px;
+  width: calc((100% - 6px) / 2);
+  z-index: -1;
+  border-radius: 999px;
+  background: #215441;
+  animation: switch-horse 220ms ease-out;
+}
+.sport-switch[data-sport="boat"]::before {
+  transform: translateX(100%);
+  background: #115778;
+  animation-name: switch-boat;
+}
+.sport-switch a {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  color: inherit;
+  font-weight: 700;
+  font-size: .82rem;
+  text-decoration: none;
+  border-radius: 999px;
+}
+.sport-switch a[aria-current] { color: #fff; }
+.sport-switch a:focus-visible, .boat-app a:focus-visible, .boat-app button:focus-visible {
+  outline: 2px solid #076491;
+  outline-offset: 3px;
+}
+@keyframes switch-horse { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes switch-boat { from { transform: none; } to { transform: translateX(100%); } }
+@keyframes sport-enter { from { opacity: .75; } to { opacity: 1; } }
+.horse-sport main, .boat-app main { animation: sport-enter 180ms ease-out; }
+
+.boat-app {
+  min-height: 100dvh;
+  background: #eef5f8;
+  color: #102f43;
+}
+.boat-app main { max-width: 1080px; }
+.boat-app header { border-color: #c9dce7; margin-bottom: 18px; }
+.boat-app .header-brand { color: #103e58; }
+.boat-app .brand-mark { background: #115778; }
+.boat-app h1 { font-size: clamp(1.55rem, 5vw, 2.35rem); margin: .55em 0 .35em; }
+.boat-app h2 { font-size: 1rem; margin: 0 0 .6em; }
+.boat-app h3 { font-size: .88rem; margin: .8em 0 .4em; }
+.boat-app p { margin: .5em 0; line-height: 1.55; }
+.boat-app a { color: #075c85; }
+.boat-app .sport-switch a[aria-current] { color: white; }
+.boat-app .sport-switch a { text-decoration: none; }
+.boat-app :where(button, select, summary) { min-height: 44px; }
+.boat-navigation {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+  margin-bottom: 12px;
+  max-width: 480px;
+}
+.boat-navigation a {
+  display: grid;
+  min-height: 44px;
+  place-items: center;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 700;
+}
+.boat-navigation [aria-current] { background: #d8eaf3; color: #123c52; }
+.boat-collection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: .82rem;
+}
+.boat-collection p { flex: 1 0 100%; }
+.boat-collection button { margin: 0; padding: 5px 12px; }
+.boat-card, .boat-hero {
+  background: #fff;
+  border: 1px solid #ccdfe9;
+  border-radius: 14px;
+  padding: 14px 16px;
+  min-width: 0;
+  margin: 0 0 12px;
+}
+.boat-hero { background: #e1eff6; padding: clamp(14px, 4vw, 28px); }
+.boat-hero h1 { margin-top: 0; }
+.boat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.boat-grid .boat-card { margin: 0; }
+.boat-card-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.boat-card-line a { display: inline-flex; align-items: center; min-height: 44px; }
+.boat-state {
+  background: #e5eff5;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #244c65;
+  font-size: .75rem;
+  white-space: nowrap;
+}
+.boat-state[data-state="settled"] { background: #d9efe7; color: #1b533f; }
+.boat-state[data-state="missing"], .boat-state[data-state="void"] { background: #f9e8d5; color: #643606; }
+.boat-muted { font-size: .83rem; color: #496275; }
+.boat-tickets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.boat-tickets li { display: grid; gap: 2px; background: #e9f3f8; padding: 6px 10px; border-radius: 8px; font-size: .86rem; }
+.boat-tickets li span { color: #415e72; }
+.boat-table { overflow-x: auto; }
+.boat-table table { width: 100%; font-size: .83rem; margin: 0; }
+.boat-table :is(th, td) { padding: 7px 6px; text-align: left; }
+.boat-table th { color: #173c54; }
+.boat-table thead th { white-space: normal; }
+.boat-metrics { display: flex; flex-wrap: wrap; gap: 12px 20px; margin: 12px 0 0; }
+.boat-metrics dt { font-size: .8rem; color: #496275; }
+.boat-metrics dd { margin: 2px 0 0; font-weight: 700; }
+.boat-history { list-style: none; margin: 0; padding: 0; }
+.boat-history li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.boat-history a { display: inline-flex; align-items: center; min-height: 44px; }
+
+@media (max-width: 640px) {
+  .horse-sport .header-right .connection { display: none; }
+  .boat-grid { grid-template-columns: minmax(0, 1fr); }
+  .boat-table :is(th, td) { padding-inline: 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sport-switch[data-sport]::before, .horse-sport main, .boat-app main { animation: none; }
+}
