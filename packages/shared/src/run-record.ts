@@ -164,6 +164,20 @@ export function cleanPace(value: unknown): Row | null {
     laps_s: laps,
   };
   if (out.first_3f_s == null && out.race_last_3f_s == null && !laps.length) return null;
+  // Official laps are 1F (200m) splits; the first may be a shorter section, so
+  // 3F sums are taken only when every split looks like a full furlong.
+  const furlongs = laps.length >= 6 && laps.every((x) => x >= 9.5 && x <= 16);
+  const sum3 = (xs: number[]) => Math.round(xs.reduce((a, b) => a + b, 0) * 10) / 10;
+  const derived: string[] = [];
+  if (out.first_3f_s == null && furlongs) {
+    out.first_3f_s = sum3(laps.slice(0, 3));
+    derived.push("first_3f_s");
+  }
+  if (out.race_last_3f_s == null && furlongs) {
+    out.race_last_3f_s = sum3(laps.slice(-3));
+    derived.push("race_last_3f_s");
+  }
+  if (derived.length) out.derived_from_laps = derived;
   out.pace_label = paceLabel(out);
   out.pace_label_basis = "前半3F−レース上がり3F（±1秒）";
   return out;

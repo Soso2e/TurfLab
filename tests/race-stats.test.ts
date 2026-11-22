@@ -237,3 +237,20 @@ describe("race stats API", () => {
     expect(((sheet.track as Row).observations as Row[])).toHaveLength(1);
   });
 });
+
+describe("laps", () => {
+  it("derives the race's first and last 3F from full-furlong laps, flagged as derived", async () => {
+    const { cleanPace } = await import("../packages/shared/src/run-record");
+    const p = cleanPace({ laps_s: [12.5, 10.9, 11.1, 11.6, 11.8, 11.4, 11.2, 11.6] })!;
+    expect(p).toMatchObject({ first_3f_s: 34.5, race_last_3f_s: 34.2, derived_from_laps: ["first_3f_s", "race_last_3f_s"] });
+    // Official values win; an odd first section (short split) is never summed.
+    expect(cleanPace({ first_3f_s: 35, laps_s: [12.5, 10.9, 11.1, 11.6, 11.8, 11.4] })).toMatchObject({ first_3f_s: 35, derived_from_laps: ["race_last_3f_s"] });
+    expect(cleanPace({ laps_s: [6.9, 10.9, 11.1, 11.6, 11.8, 11.4] })!.first_3f_s).toBeNull();
+  });
+  it("labels the race shape from the final deceleration", async () => {
+    const { lapProfile } = await import("../packages/shared/src/stats/race-sheet");
+    expect(lapProfile([12.3, 10.8, 11.3, 11.7, 12.1, 12.1, 12.4])).toMatchObject({ final_decel_s: 1.6, label: "消耗戦（終盤に大きく減速）" });
+    expect(lapProfile([12.8, 11.7, 11.8, 12.0, 11.4, 11.0, 11.2])).toMatchObject({ label: "瞬発戦（終盤まで速い）" });
+    expect(lapProfile([12, 11])).toBeNull();
+  });
+});

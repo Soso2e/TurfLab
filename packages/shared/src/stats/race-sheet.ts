@@ -181,10 +181,30 @@ function runView(run: CorpusRunner, i: number, runs: CorpusRunner[], raceDay: st
     pace_first_minus_last_s: paceDiff,
     pace_label: paceDiff == null ? null : paceDiff <= -1 ? "前傾（ハイ）" : paceDiff >= 1 ? "後傾（スロー）" : "平均",
     laps_s: pace?.laps_s ?? [],
+    lap_profile: lapProfile(pace?.laps_s ?? []) as unknown as Json,
     /** Race last 3F − own last 3F: + = finished faster than the race. */
     sustain_s: sustain,
     source: run.source,
     estimated_fields: run.estimated_fields,
+  };
+}
+
+/** Shape of a race's official 1F laps: how much the race slowed at the end
+ * (last 1F − fastest 1F) and how even the middle section was. */
+export function lapProfile(laps: number[]): Row | null {
+  if (laps.length < 5 || !laps.every((x) => x >= 9.5 && x <= 16)) return null;
+  const fastest = Math.min(...laps.slice(1));
+  const last = laps[laps.length - 1];
+  const mid = laps.slice(2, -2);
+  const m = mean(mid);
+  const sd = m == null || mid.length < 2 ? null : Math.sqrt(mid.reduce((a, b) => a + (b - m) ** 2, 0) / (mid.length - 1));
+  const decel = round(last - fastest, 1);
+  return {
+    fastest_1f_s: fastest,
+    last_1f_s: last,
+    final_decel_s: decel,
+    middle_sd_s: sd == null ? null : round(sd, 2),
+    label: decel >= 1.0 ? "消耗戦（終盤に大きく減速）" : decel <= 0.3 ? "瞬発戦（終盤まで速い）" : "持続戦",
   };
 }
 
@@ -240,6 +260,7 @@ function horseSummary(entry: SheetEntry, runs: CorpusRunner[], race: SheetRace, 
   // Condition.
   const intervals = views.map((v) => v.interval_days as number | null);
   const last = runs[0] ?? null;
+  const lapShape = dimTallies(runs, (r) => (lapProfile(r.pace?.laps_s ?? [])?.label as string | undefined) ?? null);
   const pace = dimTallies(runs, (r) => {
     const p = r.pace;
     if (p?.first_3f_s == null || p.race_last_3f_s == null) return null;
@@ -307,6 +328,7 @@ function horseSummary(entry: SheetEntry, runs: CorpusRunner[], race: SheetRace, 
       estimated: true,
       basis: "公式に個馬ラップは無い。レース上がり3F−自身の上がり3F、上がり順位、4角→着順の変化から推定",
       by_pace: pace as unknown as Json,
+      by_lap_shape: lapShape as unknown as Json,
     },
     same_distance: {
       exact: same.length > 0,

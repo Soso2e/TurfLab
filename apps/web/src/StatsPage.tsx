@@ -18,7 +18,7 @@ const sec = (v: unknown) => {
 const signed = (v: unknown, d = 1) => (n(v) == null ? "—" : `${n(v)! > 0 ? "+" : ""}${n(v)!.toFixed(d)}`);
 const CONF: Record<string, string> = { high: "高", medium: "中", low: "低", insufficient: "不足" };
 const COMPONENT_LABEL: Record<string, string> = {
-  ability: "能力", course: "コース", pace: "展開", going: "馬場", draw_weight: "枠・斤量", horse_jockey_course: "騎手・相性",
+  ability: "能力", course: "コース", pace: "展開", going: "馬場", draw_weight: "枠・斤量", horse_jockey_course: "騎手相性",
 };
 
 /** n=12・中 のような標本バッジ。 */
@@ -54,6 +54,13 @@ function Bar({ value, max = 100 }: { value: number | null; max?: number }) {
   );
 }
 
+/** "東京|芝|1600" → "東京 芝1600m" */
+const courseLabel = (key: unknown) => {
+  const [t, sf, d] = String(key ?? "").split("|");
+  return t ? `${t} ${sf && sf !== "?" ? sf : ""}${d && d !== "?" ? `${d}m` : ""}`.trim() : "";
+};
+const shortSource = (v: unknown) => (String(v ?? "").startsWith("集計DB") ? "集計DB" : v ? "Core" : "データなし");
+
 const finishText = (runs: Row[]) =>
   runs.length ? runs.map((r) => (n(r.finish) == null ? "×" : String(r.finish))).join("-") : "—";
 
@@ -82,7 +89,7 @@ function HorseDetail({ h, j }: { h: Row; j: Row }) {
                   <td>{sec(r.last_3f_s)}{r.last_3f_rank != null && <small>({String(r.last_3f_rank)})</small>}</td>
                   <td>{Array.isArray(r.corners) && r.corners.length ? (r.corners as number[]).join("-") : "—"}{r.style ? <small> {String(r.style)}</small> : null}</td>
                   <td>{n(fig.value) == null ? "—" : String(fig.value)}<Est on={fig.estimated} why={(fig.basis as string[] | undefined)?.join(" / ")} /></td>
-                  <td>{r.pace_label ? <small>{String(r.pace_label)}</small> : "—"}</td>
+                  <td>{r.pace_label ? <small>{String(r.pace_label)}</small> : "—"}{o(r.lap_profile).label ? <small title={`ラスト1F ${String(o(r.lap_profile).last_1f_s)}秒・最速1F ${String(o(r.lap_profile).fastest_1f_s)}秒`}>{String(o(r.lap_profile).label)}</small> : null}</td>
                 </tr>
               );
             })}
@@ -119,6 +126,7 @@ function HorseDetail({ h, j }: { h: Row; j: Row }) {
           <p>{String(o(h.sustain).label ?? "—")} <Est on why={String(o(h.sustain).basis ?? "")} /></p>
           <p className="st-sub">上がり順位平均 {o(h.sustain).last_3f_rank_mean == null ? "—" : String(o(h.sustain).last_3f_rank_mean)} · レース上がり差 {signed(o(h.sustain).sustain_mean_s)}秒 · <Conf n={o(h.sustain).n} /></p>
           <p>{a(o(h.sustain).by_pace).map((t) => <span key={String(t.label)} className="st-chip">{String(t.label)} {String(t.top3)}/{String(t.starts)}</span>)}</p>
+          <p>{a(o(h.sustain).by_lap_shape).map((t) => <span key={String(t.label)} className="st-chip">{String(t.label)} {String(t.top3)}/{String(t.starts)}</span>)}</p>
         </section>
         <section>
           <h4>騎手との相性</h4>
@@ -205,7 +213,7 @@ function JockeysTab({ sheet }: { sheet: Row }) {
             const m = o(j.market);
             return (
               <tr key={String(j.horse_number)}>
-                <th className="st-sticky"><span className="horse-no size-sm">{String(j.horse_number)}</span><span className="st-name">{String(j.jockey_name ?? "—")}<small>{j.source ? String(j.source) : "データなし"}</small></span></th>
+                <th className="st-sticky"><span className="horse-no size-sm">{String(j.horse_number)}</span><span className="st-name">{String(j.jockey_name ?? "—")}<small title={String(j.source ?? "")}>{shortSource(j.source)}</small></span></th>
                 <td><RateCell t={j.overall} /></td>
                 <td><RateCell t={j.at_track} /></td>
                 <td><RateCell t={j.at_course} /></td>
@@ -312,7 +320,7 @@ function TrackTab({ sheet, api, reload }: { sheet: Row; api: Api; reload: () => 
         <details className="st-more"><summary>馬場を手入力する</summary><ObservationForm sheet={sheet} api={api} onSaved={reload} /></details>
       </section>
       <section className="panel st-panel">
-        <h3>過去の傾向 {String(hist.key ?? "")} <Conf n={hist.races} c={hist.confidence} /></h3>
+        <h3>過去の傾向 {courseLabel(hist.key)} <Conf n={hist.races} c={hist.confidence} /></h3>
         {hist.races ? (
           <>
             <p className="st-sub">{String(hist.source ?? "")} · {String(o(hist.period).from ?? "")}〜{String(o(hist.period).to ?? "")} · {String(hist.runners)}頭{course.races ? "" : "（同コースが無いため同場同面）"}</p>
