@@ -32,6 +32,10 @@ export function csvRunToResearch(r: NarRun): Row {
     margin: r.margin ?? null,
     carried_weight_kg: r.carried_weight_kg ?? null,
     body_weight_kg: r.body_weight_kg ?? null,
+    body_weight_change_kg: r.body_weight_change_kg ?? null,
+    popularity: r.popularity ?? null,
+    win_odds: r.win_odds ?? null,
+    race_class: r.race_class ?? null,
     jockey: r.jockey || null,
   };
 }

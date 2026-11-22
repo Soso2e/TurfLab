@@ -1,13 +1,14 @@
 // One past run of one horse, kept in `performances` (1 row = 1 run).
 // Field-level provenance lives in evidence_json.fields so a run can be built
 // from several sources (NAR CSV first, then the official result page) and the
-// coverage of each field is measured on its own: having three runs is not
+// coverage of each field is measured on its own: having five runs is not
 // "done" while times, jockeys or sources are missing.
 import type { Json, Row } from "./domain";
 
 export const RUN_VERSION = "run-record-v1";
-/** Each horse needs this many past runs before its history counts as collected. */
-export const RUNS_PER_HORSE = 3;
+/** Each horse needs this many past runs before its history counts as collected.
+ * Predictions weight the newest runs most (stats/stat-math.ts recencyWeight). */
+export const RUNS_PER_HORSE = 5;
 
 export type RunSourceKind = "nar_csv" | "official_page" | "official_result";
 export type FieldSource = {
@@ -37,6 +38,10 @@ export const RUN_FIELDS: { key: string; label: string; required: boolean }[] = [
   { key: "draw_number", label: "枠", required: false },
   { key: "carried_weight_kg", label: "斤量", required: false },
   { key: "body_weight_kg", label: "馬体重", required: false },
+  { key: "body_weight_change_kg", label: "馬体重増減", required: false },
+  { key: "popularity", label: "人気", required: false },
+  { key: "win_odds", label: "単勝オッズ", required: false },
+  { key: "race_class", label: "クラス", required: false },
   { key: "weather", label: "天候", required: false },
   { key: "pace_json", label: "ペース", required: false },
 ];

@@ -184,6 +184,25 @@ export async function raceStatsSheet(repo: Repository, raceId: string, digest: S
   });
 }
 
+/** GET /race-stats/core-corpus — every Core runner and official trio payout,
+ * for the local worker's stats digest (it merges them with the NAR CSV). */
+export async function coreCorpusExport(repo: Repository): Promise<Row> {
+  const infos = await raceInfos(repo);
+  const runners = await coreCorpus(repo, infos);
+  const results = await repo.list("race_results");
+  const payouts = await repo.list("payouts");
+  const trio: Row[] = [];
+  for (const info of infos.values()) {
+    const res = results
+      .filter((r) => r.race_id === info.race_id && r.official_status === "official")
+      .sort((x, y) => Number(y.revision ?? 0) - Number(x.revision ?? 0))[0];
+    const yen = res ? trioYen(payouts, String(res.result_id)) : null;
+    if (yen != null && info.track && info.race_date_jst)
+      trio.push({ race_key: `${info.track}|${info.race_date_jst}|${info.race_number}`, yen });
+  }
+  return { runners: runners as unknown as Json, trio: trio as unknown as Json };
+}
+
 /** Races of one JST day for the page's race picker (default: today, else the latest day with races). */
 export async function raceStatsDay(repo: Repository, date: string | null, now: string, digest: StatsDigest | null): Promise<Row> {
   const infos = await raceInfos(repo);

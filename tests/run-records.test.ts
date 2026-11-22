@@ -51,10 +51,11 @@ describe("run record fields and coverage", () => {
     expect(finish).toMatchObject({ filled: 3, rate: 1 });
   });
 
-  it("complete only with three fully sourced runs, or fewer confirmed career runs", () => {
+  it("complete only with five fully sourced runs, or fewer confirmed career runs", () => {
     const { row } = mergeRun(null, runColumns(fullRun), page());
     expect(missingFields(row)).toEqual([]);
-    expect(runCoverage([{ horse_number: 1, runs: [row, row, row] }]).complete).toBe(true);
+    expect(runCoverage([{ horse_number: 1, runs: [row, row, row, row, row] }]).complete).toBe(true);
+    expect(runCoverage([{ horse_number: 1, runs: [row, row, row] }]).complete).toBe(false);
     expect(runCoverage([{ horse_number: 1, runs: [row] }]).complete).toBe(false);
     expect(runCoverage([{ horse_number: 1, runs: [row], career_runs_confirmed: 1 }]).complete).toBe(true);
   });
@@ -165,7 +166,7 @@ describe("performances as the single store of past runs", () => {
     expect(await r.list("performances")).toHaveLength(1);
   });
 
-  it("race view lists the latest three runs per horse with coverage", async () => {
+  it("race view lists the latest five runs per horse with coverage", async () => {
     const r = await repo();
     await r.put("tracks", { schema_version: "0.2", track_id: "t1", name: "名古屋", jurisdiction: "NAR" });
     await r.put("course_layouts", { schema_version: "0.2", course_id: "c1", track_id: "t1", surface: "ダート", distance_m: 1500, revision: 1 });
@@ -174,12 +175,16 @@ describe("performances as the single store of past runs", () => {
     await r.put("race_entries", { schema_version: "0.2", entry_id: "e9", race_id: "r9", horse_id: "h1", jockey_id: "j1", horse_number: 1, status: "active" });
     for (const d of ["2026-10-20", "2026-09-20", "2026-08-20", "2026-07-20"])
       await upsertRun(r, { horse_id: "h1" }, runColumns({ ...fullRun, date_jst: d, source_url: url(d, 5) }), { ...page(), source_url: url(d, 5) }, now);
-    const view = await raceRunView(r, "r9");
+    let view = await raceRunView(r, "r9");
+    expect((view.coverage as Row).complete).toBe(false); // 4 of 5 runs
+    for (const d of ["2026-06-20", "2026-05-20"])
+      await upsertRun(r, { horse_id: "h1" }, runColumns({ ...fullRun, date_jst: d, source_url: url(d, 5) }), { ...page(), source_url: url(d, 5) }, now);
+    view = await raceRunView(r, "r9");
     const horse = (view.horses as Row[])[0];
-    expect((horse.runs as Row[]).map((x) => x.date_jst)).toEqual(["2026-10-20", "2026-09-20", "2026-08-20"]);
+    expect((horse.runs as Row[]).map((x) => x.date_jst)).toEqual(["2026-10-20", "2026-09-20", "2026-08-20", "2026-07-20", "2026-06-20"]);
     expect((view.coverage as Row).complete).toBe(true);
     const stats = await statRuns(r, { before_date: "2026-11-13", jockeys: ["騎手一"], horse_ids: [] });
-    expect(stats.runs as Row[]).toHaveLength(4);
+    expect(stats.runs as Row[]).toHaveLength(6);
   });
 
   it("performances keeps old columns; new ones are additive", () => {

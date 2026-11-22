@@ -66,6 +66,13 @@ export function runColumns(run: Row): Row {
     margin: text(run.margin, 24),
     carried_weight_kg: pos(run.carried_weight_kg),
     body_weight_kg: pos(run.body_weight_kg),
+    body_weight_change_kg:
+      typeof run.body_weight_change_kg === "number" && Number.isInteger(run.body_weight_change_kg) && Math.abs(run.body_weight_change_kg) <= 60
+        ? run.body_weight_change_kg
+        : null,
+    popularity: rank(run.popularity) as Json,
+    win_odds: pos(run.win_odds) != null && Number(run.win_odds) >= 1 && Number(run.win_odds) < 10000 ? run.win_odds! : null,
+    race_class: text(run.race_class, 24),
     corner_positions_json:
       corners.length <= 4 && corners.every((c) => rank(c) != null) ? (corners as Json) : [],
     pace_json: cleanPace(run.pace),
@@ -99,6 +106,10 @@ export function asPackRun(row: Row): Row {
     margin: row.margin ?? null,
     carried_weight_kg: row.carried_weight_kg ?? null,
     body_weight_kg: row.body_weight_kg ?? null,
+    body_weight_change_kg: row.body_weight_change_kg ?? null,
+    popularity: row.popularity ?? null,
+    win_odds: row.win_odds ?? null,
+    race_class: row.race_class ?? null,
     jockey: row.jockey_name ?? null,
     pace: row.pace_json ?? null,
     source_url: page,
@@ -253,6 +264,7 @@ export async function saveResultRuns(
   sourceUrl: string,
   checkedAt: string,
   now: string,
+  details: Map<number, Row> = new Map(),
 ): Promise<number> {
   const base = await raceColumns(repo, str(race, "race_id"));
   const index = await runIndex(repo);
@@ -272,6 +284,7 @@ export async function saveResultRuns(
       finish_position: finish.get(number) ?? null,
       corner_positions_json: cornersByHorse.get(number) ?? [],
       pace_json: pace,
+      ...resultDetailColumns(details.get(number)),
     };
     const result = await upsertRun(repo, { horse_id: str(entry, "horse_id"), horse_name: horse?.horse_name ?? null }, columns,
       { source: "official_result", source_url: sourceUrl, file_sha256: null, retrieved_at: checkedAt }, now, index,
@@ -286,6 +299,22 @@ export async function saveResultRuns(
     if (result.changed.length) saved++;
   }
   return saved;
+}
+
+/** Optional per-runner values of an official result page (人気・単勝・時計・
+ * 上がり・着差・馬体重). Implausible values are dropped, never guessed. */
+export function resultDetailColumns(d: Row | undefined): Row {
+  if (!d) return {};
+  const c = runColumns({
+    popularity: d.popularity, win_odds: d.win_odds, last_3f_s: d.last_3f_s, margin: d.margin,
+    body_weight_kg: d.body_weight_kg, body_weight_change_kg: d.body_weight_change_kg,
+  });
+  const out: Row = {};
+  for (const k of ["popularity", "win_odds", "last_3f_s", "margin", "body_weight_kg", "body_weight_change_kg"])
+    if (c[k] != null) out[k] = c[k]!;
+  const t = d.finish_time_s;
+  if (typeof t === "number" && Number.isFinite(t) && t > 20 && t < 600) out.finish_time_s = t;
+  return out;
 }
 
 /** Positions per horse from the official 「コーナー通過順」 lines, e.g.
@@ -408,7 +437,7 @@ export async function horseRunView(repo: Repository, horseId: string, before: st
   };
 }
 
-/** GET /races/:id/runs — every active horse with its latest three runs before
+/** GET /races/:id/runs — every active horse with its latest five runs before
  * the race day, and per-field coverage over the whole field. */
 export async function raceRunView(repo: Repository, raceId: string): Promise<Row> {
   const race = await get(repo, "races", raceId);

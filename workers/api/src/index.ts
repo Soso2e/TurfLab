@@ -1,7 +1,7 @@
 import { entityMemory, saveEntityMemory } from "./entity-memory";
 import { backfillRunRecords, horseRunView, raceRunView, saveCsvRuns, saveJockeyStats, statRuns } from "./run-records";
 import { raceTrends } from "./race-trends";
-import { raceStatsDay, raceStatsSheet, saveTrackObservation } from "./race-stats";
+import { coreCorpusExport, raceStatsDay, raceStatsSheet, saveTrackObservation } from "./race-stats";
 import { chunkJson, digestSummary, validateDigest, type StatsDigest } from "../../../packages/shared/src/stats/digest";
 import {
   canonical,
@@ -173,6 +173,8 @@ export async function route(
     return raceStatsDay(repo, url.searchParams.get("date"), now, digest);
   if (method === "GET" && path === "/race-stats/corpus")
     return { digest: digestSummary(digest) };
+  if (method === "GET" && path === "/race-stats/core-corpus")
+    return coreCorpusExport(repo);
   if (method === "GET" && /^\/race-stats\/races\/[^/]+$/.test(path))
     return raceStatsSheet(repo, decodeURIComponent(path.split("/")[3]), digest, now);
   if (method === "POST" && path === "/race-stats/track-observations")

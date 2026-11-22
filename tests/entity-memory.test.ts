@@ -47,11 +47,12 @@ it("stores sourced past runs once per horse and reuses them", async () => {
     .toMatchObject({ saved_runs: 0, saved_jockey_notes: 0 });
   const memory = await entityMemory(r, { snapshot_id: "s1" }, now);
   const [a, b] = memory.horses as Row[];
-  expect(a).toMatchObject({ runs_missing: 0 });
+  // Five runs per horse are collected; three are stored, two still to find.
+  expect(a).toMatchObject({ runs_missing: 2 });
   expect((a.saved_runs as Row[]).map((x) => x.date_jst)).toEqual(["2026-10-20", "2026-10-01", "2026-09-10"]);
   expect(a.jockey_notes).toHaveLength(1);
   // Unsourced runs never enter the store, so horse 2 still needs a search.
-  expect(b).toMatchObject({ runs_missing: 3, jockey_notes: [] });
+  expect(b).toMatchObject({ runs_missing: 5, jockey_notes: [] });
   expect(memory.complete).toBe(false);
   // Three runs are stored, but time, jockey, race name etc. are not: not complete.
   expect(memory.runs_complete).toBe(false);
