@@ -13,6 +13,7 @@ import {
   planBreakdown, planOutcomeDetailed, PRIOR_WEIGHTS,
 } from "./lab-learning";
 import { SELECTIVE_DAILY_BUDGET_YEN, selectivePlan } from "./bet-plans";
+import { evaluateTrackBias } from "./track-bias-evaluation";
 
 export async function exchangeFiles(exchange: string, kind: string): Promise<Row[]> {
   const output: Row[] = [];
@@ -82,6 +83,9 @@ export async function offlineLearningReport(exchange: string, now: string): Prom
   const currentSaved = plans.filter((p) => p.plan_lane !== "selective" && p.plan_lane !== "evm");
   return {
     ...report,
+    track_bias_evaluation: evaluateTrackBias(
+      [...latestLabs.values()], [...results.values()],
+    ),
     walk_forward_backtest: {
       note: "既存の保存済み予想(lab)と発走前オッズ(prerace)に対し、未来日を使わず時系列順に新方式(selective-plan-v1)を仮想適用した結果と現行方式の同一レース比較",
       comparison: compareStrategies([...currentSaved, ...backtestPlans]),
