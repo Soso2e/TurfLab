@@ -1734,7 +1734,8 @@ function App() {
                         const rPurchase = obj(doc.reported_purchase ?? {});
                         const rFinish = obj(doc.reported_finish ?? {});
                         const rOutcome = rFinish.purchase_outcome_if_report_correct ? obj(rFinish.purchase_outcome_if_report_correct) : null;
-                        const timeStr = rRace.scheduled_start_jst ? hhmm(rRace.scheduled_start_jst) : "--:--";
+                        const starts = rRace.scheduled_start_at_jst ?? rRace.scheduled_start_jst;
+                        const timeStr = starts ? hhmm(starts) : "--:--";
                         return (
                           <button
                             className="race-card review-card"
@@ -1742,7 +1743,7 @@ function App() {
                             onClick={() => setSelectedChatReview(rev)}
                           >
                             <div className="race-no">
-                              <b>{String(rRace.number ?? "—")}<small>R</small></b>
+                              <b>{String(rRace.race_no ?? rRace.number ?? "—")}<small>R</small></b>
                               <span>{timeStr}</span>
                             </div>
                             <div className="race-title">
@@ -1907,8 +1908,8 @@ function App() {
                         const evidence = obj(r.evidence_json ?? {});
                         return (
                           <article key={String(r.review_id)} style={{ marginTop: 10 }}>
-                            <p><strong>事後参考</strong>{evidence.official_result_verified === true
-                              ? " · 結果の公式照合あり" : " · 公式結果は別途要確認"}</p>
+                            <p><strong>事後参考</strong>{evidence.source_claims_official_result_verified === true
+                              ? " · 元レビュー記載：公式照合済み" : " · 元レビューの公式照合は未確認"}</p>
                             {Array.isArray(r.observations_json) && r.observations_json.length > 0 && (
                               <p>{r.observations_json.map(String).join(" / ")}</p>
                             )}
