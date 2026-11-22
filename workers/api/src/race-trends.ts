@@ -3,6 +3,8 @@
 import { obj, rows, str, type Row } from "../../../packages/shared/src/domain";
 import type { Repository } from "../../../packages/shared/src/repository";
 import { entityMemory } from "./entity-memory";
+import { fieldSources } from "../../../packages/shared/src/run-record";
+import { summarizeSameDayBias } from "../../../packages/shared/src/track-bias";
 import { inputPack } from "./race-wizard";
 
 const mean = (values: number[]) =>
@@ -49,12 +51,50 @@ export async function raceTrends(repo: Repository, input: Row, now: string): Pro
     sameCourse.has(r.course_id) && Date.parse(String(r.scheduled_start_at)) < start);
   const results = await repo.list("race_results");
   const entries = await repo.list("race_entries");
+  const performances = await repo.list("performances");
+  const layouts = await repo.list("course_layouts");
+  const biasObserved: Row[] = [];
   let inner = 0, placed = 0, winnersInner = 0, settled = 0;
   for (const r of earlier) {
     const latest = results.filter((x) => x.race_id === r.race_id && x.official_status === "official" &&
       Date.parse(String(x.published_at ?? x.created_at)) <= Date.parse(now))
       .sort((a, b) => Number(b.revision) - Number(a.revision))[0];
     if (!latest) continue;
+    // Official result publication plus per-field provenance must both predate
+    // this API read. No future or unattributed corner positions enter bias.
+    const finishByNumber = new Map<number, number>();
+    let rank = 1;
+    for (const group of (Array.isArray(latest.finish_order_json) ? latest.finish_order_json : [])) {
+      const tied = (Array.isArray(group) ? group : [group]).map(Number);
+      for (const no of tied) if (Number.isInteger(no)) finishByNumber.set(no, rank);
+      rank += tied.length;
+    }
+    const excluded = obj(latest.entry_status_json ?? {});
+    const starters = entries.filter((e) => e.race_id === r.race_id &&
+      !["scratched", "cancelled", "excluded"].includes(String(excluded[String(e.horse_number)] ?? e.status ?? "")));
+    const biasRunners: Row[] = [];
+    for (const entry of starters) {
+      const run = performances.find((p) => (p.race_id === r.race_id ||
+        (p.horse_id === entry.horse_id && p.run_date_jst === r.race_date_jst)) &&
+        p.horse_id === entry.horse_id);
+      if (!run) continue;
+      const source = fieldSources(run).corner_positions_json;
+      if (!source || !Number.isFinite(Date.parse(source.retrieved_at)) ||
+        Date.parse(source.retrieved_at) > Date.parse(now)) continue;
+      biasRunners.push({
+        horse_number: entry.horse_number!,
+        finish_position: finishByNumber.get(Number(entry.horse_number)) ?? null,
+        corner_positions_json: run.corner_positions_json ?? [],
+        last_3f_s: run.last_3f_s ?? null,
+      });
+    }
+    const layout = layouts.find((c) => c.course_id === r.course_id);
+    if (layout) biasObserved.push({
+      race_id: r.race_id!, scheduled_start_at: r.scheduled_start_at!,
+      published_at: latest.published_at ?? null, official_status: latest.official_status!,
+      surface: layout.surface ?? null, distance_m: layout.distance_m ?? null,
+      field_size: starters.length, runners: biasRunners,
+    });
     const field = entries.filter((e) => e.race_id === r.race_id && e.status === "active");
     const draws = field.map((e) => Number(e.draw_number)).filter((d) => d > 0);
     if (!draws.length) continue;
@@ -70,7 +110,15 @@ export async function raceTrends(repo: Repository, input: Row, now: string): Pro
       if (d <= half) { inner++; if (i === 0) winnersInner++; }
     }
   }
+  const trackBias = summarizeSameDayBias(biasObserved, {
+    race_id: str(race, "race_id"),
+    start_at: str(race, "scheduled_start_at"),
+    as_of: now,
+    surface: String(obj(pack.course).surface ?? ""),
+    distance_m: distance,
+  });
   return {
+    track_bias: trackBias,
     trends_version: "race-trends-v1",
     race_id: race.race_id!,
     computed_at: now,
