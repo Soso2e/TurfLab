@@ -49,6 +49,18 @@ class TrackDay(unittest.TestCase):
         self.assertEqual(measure([{**r, "entries": r["entries"][:3]}])["missing"]["ineligible_races"], 1)
         self.assertEqual(corner_ranks("10-4,2,(5,*8)-(3,7)-6-1-9")[8], 4)
 
+    def test_m1_residual_uses_only_earlier_training(self):
+        r = race(1, race_start_time=DAY + "T05:00:00Z")
+        prediction = {"model_version": "M1", "trained_through": "2026-11-21",
+                      "predicted_at": DAY + "T04:55:00Z",
+                      "probabilities": {str(n): 3 / 7 for n in range(1, 8)}}
+        self.assertAlmostEqual(measure([r], predictions={"race-1": prediction}, strict=True)["pos_residual"], 1)
+        prediction["trained_through"] = DAY
+        self.assertIsNone(measure([r], predictions={"race-1": prediction})["pos_residual"])
+        prediction["trained_through"] = "2026-11-21"
+        prediction["predicted_at"] = DAY + "T05:01:00Z"
+        self.assertIsNone(measure([r], predictions={"race-1": prediction}, strict=True)["pos_residual"])
+
     def test_as_of_and_order(self):
         a, b, future = race(1), race(2), race(3)
         x = snapshot([future, a, b], b, {}, mode="historical_replay", computed_at=NOW)

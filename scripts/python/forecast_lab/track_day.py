@@ -1,6 +1,6 @@
 """Pure Track Day Profile calculations and point-in-time eligibility."""
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 from hashlib import sha256
 import json
 from statistics import mean, median
@@ -95,7 +95,22 @@ def contrast(values, field):
     return a - b if a is not None and b is not None else None
 
 
-def measure(races, shrink_lambda=None, predictions=None):
+def prior_prediction(prediction, race, strict=False):
+    if not prediction or prediction.get("model_version") != "M1":
+        return {}
+    try:
+        if date.fromisoformat(prediction["trained_through"]) >= date.fromisoformat(race["date"]):
+            return {}
+        if strict:
+            predicted, start = instant(prediction.get("predicted_at")), instant(race.get("race_start_time"))
+            if not predicted or not start or predicted >= start:
+                return {}
+    except (KeyError, TypeError, ValueError):
+        return {}
+    return prediction.get("probabilities", {})
+
+
+def measure(races, shrink_lambda=None, predictions=None, strict=False):
     position, draw, residual = (defaultdict(list) for _ in range(3))
     gains = defaultdict(list)
     missing = defaultdict(int)
@@ -109,9 +124,7 @@ def measure(races, shrink_lambda=None, predictions=None):
         usable = eligible(race)
         missing["ineligible_races"] += not usable
         prediction = (predictions or {}).get(race["race_id"])
-        probs = prediction.get("probabilities", {}) if prediction and (
-            prediction.get("trained_through", race["date"]) < race["date"]
-        ) else {}
+        probs = prior_prediction(prediction, race, strict)
         prob_values = [probs.get(str(number)) for number in numbers]
         has_probs = usable and bool(gates) and all(
             isinstance(p, (float, int)) and 0 <= p <= 1 for p in prob_values
@@ -242,7 +255,7 @@ def snapshot(races, target, config, *, mode, computed_at=None, history=(), predi
     }} if mode == "live_observed" else {}
     source_hash = digest(admitted)
     config_hash = digest(config)
-    metrics = measure(comparable_races, config.get("lambda"), predictions)
+    metrics = measure(comparable_races, config.get("lambda"), predictions, strict=mode == "live_observed")
     return {
         "version": TRACK_DAY_VERSION, "schema_version": 1, "calculation_version": TRACK_DAY_VERSION,
         "data_mode": mode, "date": day, "track_code": track, "surface": surface, "as_of_race_no": number,

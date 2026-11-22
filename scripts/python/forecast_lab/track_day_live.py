@@ -33,7 +33,7 @@ def ingest_card(root, card, now):
         record = {"race_id": race["race_id"], "written": 0, "failed": 0}
         try:
             value = snapshot(received.values(), race, {"lambda": None}, mode="live_observed",
-                             computed_at=now, expected_ids=expected)
+                             computed_at=now, expected_ids=expected, predictions=card.get("m1_predictions"))
             correction = card.get("revisions", {}).get(race["race_id"], {})
             _, written = append(root, value, correction_of=correction.get("previous_input_hash"),
                                 correction_evidence=correction.get("official_evidence"))
