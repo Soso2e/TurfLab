@@ -1,5 +1,11 @@
 # PROGRESS.md
 
+## 2026-11-22 Track Day Profile v1
+
+- 次は全Rを対象に公式結果・取得時刻・公開時刻を供給する経路を接続し、Windowsの別プロセスで1開催日を照合する。[運用](docs/experiments/track-day-persistence.md) と [Issue #1](https://github.com/Soso2e/TurfLab/issues/1) を参照。
+- NAR 14場・7,540Rの [監査](docs/experiments/track-day-audit.md) と実データの [開発リプレイ](docs/experiments/track-day-validation.md) を実行。M1への追加特徴は両候補とも損失改善なし。予約34日は採点していない。
+- 公式公開時刻つきの独立前向きデータと厳格 P3 採否判定は未完了。[Issue #25](https://github.com/Soso2e/TurfLab/issues/25)。P4は採用条件と明示承認を満たした場合に再開する。
+
 ## 2026-11-21 予測精度の検証基盤（forecast-v1・数式M・AI数値予測・独立比較）
 
 - 設計: [docs/forecast-validation.md](docs/forecast-validation.md)。数式MとAIが独立に、同じ契約（全頭勝率・3着内・角順位・ペース区分）で発走前に凍結し、未使用の時系列データで同一レース対比較する。オッズ・人気・外部予想は契約で機械的に拒否。
