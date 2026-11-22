@@ -356,7 +356,6 @@ export class LocalPredictionWorker {
   }
 
   private failedJob(job: string, error: unknown) {
-    if (job.startsWith("packs/") || job === "r1") console.error("TRACK_BIAS_DEBUG_EXCEPTION", job, error instanceof Error ? error.stack : error);
     const message = error instanceof Error ? error.message : "";
     if (/^CORE_HTTP_40[13]$/.test(message)) throw error;
     this.blockedJobs++;
