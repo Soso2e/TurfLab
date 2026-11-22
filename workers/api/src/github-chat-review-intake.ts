@@ -56,7 +56,7 @@ export async function importGitHubChatReview(
   const candidates = races.filter((race) => {
     if (race.race_date_jst !== date || race.race_number !== raceNo) return false;
     const course = courseById.get(race.course_id);
-    const track = trackById.get(course?.track_id);
+    const track = course ? trackById.get(course.track_id) : undefined;
     if (normalize(track?.name) !== normalize(sourceTrack)) return false;
     if (sourceRace.distance_m != null && Number(sourceRace.distance_m) !== course?.distance_m) return false;
     if (sourceRace.surface != null && sourceRace.surface !== course?.surface) return false;
