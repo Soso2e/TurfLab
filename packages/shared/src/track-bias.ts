@@ -141,7 +141,7 @@ export function applySameDayPaceAdjustment(
   const deltas = obj(data.adjustment_points ?? {});
   const accepted = data.version === TRACK_BIAS_VERSION && data.eligible === true;
   const applied: Row[] = [];
-  const evaluations = rows(answer.horse_evaluations).map((horse) => {
+  const evaluations = (Array.isArray(answer.horse_evaluations) ? rows(answer.horse_evaluations) : []).map((horse) => {
     const bucket = positionBucket(horse.expected_position);
     const components = obj(horse.components ?? {});
     const oldPace = number(components.pace);
