@@ -25,7 +25,7 @@ export const tableCategories: TableCategory[] = [
     id: "races",
     name: "レース・出走・オッズ",
     description: "レース情報・出走表・過去走・発走前スナップショット・オッズ",
-    tables: ["races", "race_entries", "performances", "race_snapshots", "odds_snapshots"],
+    tables: ["races", "race_entries", "performances", "race_snapshots", "odds_snapshots", "track_observations"],
   },
   {
     id: "predictions",

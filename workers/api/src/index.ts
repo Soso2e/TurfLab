@@ -1,6 +1,8 @@
 import { entityMemory, saveEntityMemory } from "./entity-memory";
 import { backfillRunRecords, horseRunView, raceRunView, saveCsvRuns, saveJockeyStats, statRuns } from "./run-records";
 import { raceTrends } from "./race-trends";
+import { raceStatsDay, raceStatsSheet, saveTrackObservation } from "./race-stats";
+import { chunkJson, digestSummary, validateDigest, type StatsDigest } from "../../../packages/shared/src/stats/digest";
 import {
   canonical,
   DomainError,
@@ -123,7 +125,7 @@ export async function readBody(request: Request): Promise<Row> {
   // Catalog receipts include complete source documents; even one normal
   // production backup exceeds the ordinary mutation limit.
   const pathname = new URL(request.url).pathname;
-  const largeBody = ["/api/restore", "/api/local-predictions/nar-csv/upload"].includes(pathname);
+  const largeBody = ["/api/restore", "/api/local-predictions/nar-csv/upload", "/api/local-predictions/stats-digest"].includes(pathname);
   // The worker publishes two days of race plans, evidence and reviews together.
   const limitKiB = largeBody ? 16 * 1024 : pathname === "/api/local-predictions/status" ? 1024 : 256;
   const reader = request.body?.getReader();
@@ -161,11 +163,20 @@ export async function route(
   request: Request,
   now: string,
   sheets?: SheetsRepository,
+  digest: StatsDigest | null = null,
 ): Promise<unknown> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, "");
   const method = request.method;
   const input = method === "POST" ? await readBody(request) : null;
+  if (method === "GET" && path === "/race-stats")
+    return raceStatsDay(repo, url.searchParams.get("date"), now, digest);
+  if (method === "GET" && path === "/race-stats/corpus")
+    return { digest: digestSummary(digest) };
+  if (method === "GET" && /^\/race-stats\/races\/[^/]+$/.test(path))
+    return raceStatsSheet(repo, decodeURIComponent(path.split("/")[3]), digest, now);
+  if (method === "POST" && path === "/race-stats/track-observations")
+    return saveTrackObservation(repo, input!, now);
   if (method === "GET" && path === "/status")
     return {
       storage_mode: sheets ? "sheets" : "local",
@@ -488,6 +499,22 @@ export class TurfCoordinator {
       ? new SheetsRepository(new GoogleSheetsClient(this.env))
       : new DurableRepository(this.state.storage);
   }
+  /** The latest stats digest pushed by the local worker (null when none). */
+  private async loadDigest(): Promise<StatsDigest | null> {
+    const meta = await this.state.storage.get<Row>("stats-digest-meta");
+    if (!meta) return null;
+    const keys = Array.from({ length: Number(meta.chunks) }, (_, i) => `stats-digest-chunk:${i}`);
+    const parts: string[] = [];
+    for (let i = 0; i < keys.length; i += 100) {
+      const got = await this.state.storage.get<string>(keys.slice(i, i + 100));
+      for (const k of keys.slice(i, i + 100)) parts.push(got.get(k) ?? "");
+    }
+    try {
+      return validateDigest(JSON.parse(parts.join("")));
+    } catch {
+      return null;
+    }
+  }
   async fetch(request: Request): Promise<Response> {
     const task = this.queue.then(async () => {
       if (!(await authenticated(request, this.env.API_TOKEN)))
@@ -559,6 +586,27 @@ export class TurfCoordinator {
             }),
           });
           return response({ status: "saved" });
+        }
+        if (bridgePath === "/api/local-predictions/stats-digest") {
+          if (request.method === "GET")
+            return response({ digest: digestSummary(await this.loadDigest()) });
+          requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
+          requireCondition(request.method === "POST", "POSTが必要です", 405);
+          const digest = validateDigest((await readBody(request)).digest);
+          const current = await this.state.storage.get<Row>("stats-digest-meta");
+          if (current && String(current.built_at) > digest.built_at)
+            return response({ status: "older_ignored", built_at: current.built_at });
+          const chunks = chunkJson(digest);
+          const puts: Record<string, unknown> = {};
+          chunks.forEach((c, i) => (puts[`stats-digest-chunk:${i}`] = c));
+          const entries = Object.entries(puts);
+          for (let i = 0; i < entries.length; i += 100)
+            await this.state.storage.put(Object.fromEntries(entries.slice(i, i + 100)));
+          const stale: string[] = [];
+          for (let i = chunks.length; i < Number(current?.chunks ?? 0); i++) stale.push(`stats-digest-chunk:${i}`);
+          if (stale.length) await this.state.storage.delete(stale);
+          await this.state.storage.put("stats-digest-meta", { built_at: digest.built_at, chunks: chunks.length });
+          return response({ status: "saved", chunks: chunks.length, summary: digestSummary(digest) });
         }
         if (bridgePath === "/api/local-predictions/ledger") {
           requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
@@ -843,6 +891,7 @@ export class TurfCoordinator {
           request,
           new Date().toISOString(),
           repo instanceof SheetsRepository ? repo : undefined,
+          bridgePath.startsWith("/api/race-stats") ? await this.loadDigest() : null,
         );
         if (staged.changes.size) {
           const changes = [...staged.changes.values()];
