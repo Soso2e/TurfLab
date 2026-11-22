@@ -27,6 +27,7 @@ import { officialResearchUrl } from "../packages/shared/src/race-research";
 import { enrichedReference, historyPrompt } from "./local-history-research";
 import { loadNarCsvDir, mergeRuns, narStats, normGoing } from "./nar-csv-stats";
 import { importNarCsvInbox } from "./nar-csv-import";
+import { publishStatsDigest } from "./stats-digest";
 import {
   buildOddsSummary, importNarOdds, ingestPreraceSnapshot, writeOddsSummary, type OddsImportStatus, type RaceRef,
 } from "./nar-odds-import";
@@ -309,6 +310,7 @@ export class LocalPredictionWorker {
   private stages = new Map<string, Row>();
   private cliCalls = 0;
   private csvImport: Row | null = null;
+  private statsDigest: Row | null = null;
   private oddsImport: OddsImportStatus | null = null;
   private oddsStore: OddsStore;
   private raceRefCache = new Map<string, RaceRef | null>();
@@ -554,6 +556,14 @@ export class LocalPredictionWorker {
     } catch (error) {
       this.failedJob("nar-csv-import", error);
     }
+    // Aggregate tables for the stats page (all results ∪ NAR CSV). Rebuilt only
+    // when inputs change; a failure never blocks predictions.
+    if (process.env.TURFLAB_STATS_DIGEST !== "off")
+      this.statsDigest = await publishStatsDigest(this.home, this.api, now).catch((error) => ({
+        status: "failed",
+        error: error instanceof Error ? error.message.slice(0, 200) : "stats digest failed",
+        at: now.toISOString(),
+      }));
     if (!targetUrl) await this.reviewRecent(now, day, hour);
     const state = await this.api("/daily-state");
     const today = rows(state.races).filter(
@@ -589,7 +599,7 @@ JSONは {races:[],limitations:[]}。各raceは track, jurisdiction:"JRA"また�
 research:{source_url:公式出馬表の完全URL,headcount:掲載全頭数,weather:nullまたは観測値,going:nullまたは観測値,selection_reason,limitations:[]}。
 horseは horse_number,horse_name,jockey,draw_number,weight_kg,status:"active"|"scratched"|"cancelled",jockey_observation:nullまたは出馬表で確認した組合せ実績の短い要約,
 recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは着順,corners:[通過順位の整数],field_size:nullまたは頭数, carried_weight_kg:nullまたは斤量}]。
-近走は公式出馬表の掲載から各馬最大3走。読めない値はnull、通過順不明は[]。公式個体ID・未知値を創作しない。予想や展開はこの段階で行わない。採点材料が一部欠けても全頭出馬表を保存できる。出馬表を確保できない場合はraces空とlimitationsに理由。`,
+近走は公式出馬表の掲載から各馬最大5走（直近を優先）。読めない値はnull、通過順不明は[]。公式個体ID・未知値を創作しない。予想や展開はこの段階で行わない。採点材料が一部欠けても全頭出馬表を保存できる。出馬表を確保できない場合はraces空とlimitationsに理由。`,
         );
         if (document && !document.blocked) {
           const races = rows(document.races);
@@ -963,6 +973,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       }),
       ...(ledger ? { ledger } : {}),
       nar_csv_import: this.csvImport,
+      stats_digest: this.statsDigest,
       odds: { import: this.oddsImport, ...(await this.oddsStore.lastFetch()), corrupt_lines: this.oddsStore.corruptLines },
       learning,
       model: this.model,

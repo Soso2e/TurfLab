@@ -1,4 +1,4 @@
-// Past runs from `performances` (run-record-v1): the latest three runs of every
+// Past runs from `performances` (run-record-v1): the latest five runs of every
 // horse in a race with per-field coverage, a horse panel opened by tapping the
 // horse, and the jockey statistics saved for the race.
 import React, { useEffect, useState } from "react";
@@ -147,7 +147,7 @@ export function HorseRunsModal({ api, horseId, before, onClose }: { api: Api; ho
         {data && <>
           <RunTable runs={rows(data.runs ?? [])} />
           <details>
-            <summary>項目別の充足率（直近3走）</summary>
+            <summary>項目別の充足率（直近5走）</summary>
             <Coverage coverage={obj(data.coverage ?? {})} />
           </details>
           {rows(data.runs ?? []).some((r) => rows(r.conflicts ?? []).length) && (
@@ -172,11 +172,11 @@ export function RacePastRuns({ api, raceId }: { api: Api; raceId: string }) {
     setData(undefined);
     api(`/races/${encodeURIComponent(raceId)}/runs`).then(setData).catch((e: Error) => setError(e.message));
   }, [raceId]);
-  if (error) return <section className="panel"><h2>前3走</h2><p className="error">{error}</p></section>;
-  if (!data) return <section className="panel"><h2>前3走</h2><p className="muted">読み込み中</p></section>;
+  if (error) return <section className="panel"><h2>前5走</h2><p className="error">{error}</p></section>;
+  if (!data) return <section className="panel"><h2>前5走</h2><p className="muted">読み込み中</p></section>;
   return (
     <section className="panel">
-      <h2>前3走（全頭・DB保存分）</h2>
+      <h2>前5走（全頭・DB保存分）</h2>
       <Coverage coverage={obj(data.coverage ?? {})} />
       {rows(data.horses ?? []).map((h) => (
         <details key={String(h.horse_id)} className="horse-runs">

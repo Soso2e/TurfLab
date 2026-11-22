@@ -22,6 +22,7 @@
     "predictions:local": "node scripts/run-tool.mjs tsx scripts/local-predictions.ts",
     "odds:import": "node scripts/run-tool.mjs tsx scripts/nar-odds-cli.ts import",
     "odds:report": "node scripts/run-tool.mjs tsx scripts/nar-odds-cli.ts report",
+    "stats:digest": "node scripts/run-tool.mjs tsx scripts/stats-digest.ts",
     "nar:check": "node scripts/run-tool.mjs tsx scripts/nar-csv-check.ts",
     "python:analyze": "python scripts/python/analyze_history.py",
     "results:import": "tsx scripts/import-all-missing-results.ts",

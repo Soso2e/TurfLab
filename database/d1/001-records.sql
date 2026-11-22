@@ -258,6 +258,12 @@ CREATE TABLE reference_adoptions (
   FOREIGN KEY (plan_id) REFERENCES reference_plans(plan_id) DEFERRABLE INITIALLY DEFERRED
 );
 
+CREATE TABLE track_observations (
+  observation_id TEXT PRIMARY KEY NOT NULL,
+  data_json TEXT NOT NULL CHECK(json_valid(data_json)),
+  CHECK(json_extract(data_json, '$.observation_id') = observation_id)
+);
+
 CREATE UNIQUE INDEX entry_number ON race_entries(race_id, json_extract(data_json, '$.horse_number'));
 CREATE UNIQUE INDEX race_external ON races(json_extract(data_json, '$.source'), json_extract(data_json, '$.external_id'));
 CREATE UNIQUE INDEX adoption_race ON prediction_adoptions(race_id);

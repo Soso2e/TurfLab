@@ -1,3 +1,4 @@
+import { StatsPage } from "./StatsPage";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -19,6 +20,7 @@ import { HorseRunsModal, RacePastRuns } from "./PastRuns";
 import {
   IconRace,
   IconChart,
+  IconTable,
   IconDatabase,
   IconSettings,
   IconClock,
@@ -1086,6 +1088,7 @@ function App() {
   const [token, setToken] = useState(() => localStorage.getItem("turflab-token") ?? "");
   const [tokenInput, setTokenInput] = useState("");
   const [tab, setTab] = useState("today");
+  const [statsRaceId, setStatsRaceId] = useState<string | null>(null);
   const [raceTab, setRaceTab] = useState("overview");
   const [date, setDate] = useState(today());
   const [data, setData] = useState<Row>();
@@ -1381,6 +1384,7 @@ function App() {
   const dockActiveId = tab === "detail" ? "today" : tab;
   const dockItems = [
     { id: "today", title: "レース", icon: IconRace },
+    { id: "racestats", title: "統計", icon: IconTable },
     { id: "stats", title: "ダッシュボード", icon: IconChart },
     { id: "db", title: "データベース", icon: IconDatabase },
     { id: "settings", title: "設定", icon: IconSettings },
@@ -1918,6 +1922,16 @@ function App() {
                     <b>{String(race.race_number)}R</b>
                     <span className="detail-sticky-name">{String(race.name)}</span>
                   </div>
+                  <button
+                    type="button"
+                    className="detail-stats-btn"
+                    onClick={() => {
+                      setStatsRaceId(String(race.race_id));
+                      setTab("racestats");
+                    }}
+                  >
+                    統計
+                  </button>
                 </div>
                 <div className="page-heading">
                   <div>
@@ -3106,6 +3120,14 @@ function App() {
                   </>
                 )}
               </>
+            )}
+            {tab === "racestats" && (
+              <StatsPage
+                api={api}
+                raceId={statsRaceId}
+                onRaceChange={setStatsRaceId}
+                onOpenRace={(id) => void openRace(id)}
+              />
             )}
             {tab === "db" && (
               <DatabaseExplorer
