@@ -811,7 +811,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         // Frozen as-of observation is applied only once, and only to pace.
         // This also records an auditable no-op when data is insufficient.
         const { answer, audit: biasAudit } = applySameDayPaceAdjustment(
-          rawAnswer, trends ? obj(trends.track_bias ?? {}) : null,
+          rawAnswer, trends?.track_bias ? obj(trends.track_bias) : null,
         );
         // Code, not the model, decides: an incomplete answer without local evidence stays provisional,
         // while a complete pre-start AI-supplemented evaluation is accepted as formal for learning.
