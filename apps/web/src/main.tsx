@@ -339,10 +339,14 @@ function NarCsvUploadPanel({
 
 const fundedAutoBetLanes = new Set<Json | undefined>(["hit", "ev", "selective", "ai"]);
 
+/** obj() throws on absent values; the odds fields are optional. */
+const maybeObj = (v: unknown): Row =>
+  v && typeof v === "object" && !Array.isArray(v) ? (v as Row) : {};
+
 /** Win odds drift (first → latest pre-race → final) and the EV of the already-fixed probabilities. */
 function OddsPanel({ view, lastFetch }: { view: Row; lastFetch: Row }) {
   const win = rows(view.win ?? []);
-  const ev = obj(view.ev);
+  const ev = maybeObj(view.ev);
   const fixed = (v: Json | undefined) => (typeof v === "number" ? v.toFixed(1) : "–");
   const arrow = (a: Json | undefined, b: Json | undefined) =>
     typeof a === "number" && typeof b === "number" ? (b < a ? "↓" : b > a ? "↑" : "→") : "";
@@ -480,8 +484,8 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
       });
     }
   }
-  const odds = record ? obj(record.odds_view) : {};
-  const oddsStatus = obj(status?.odds);
+  const odds = maybeObj(record?.odds_view);
+  const oddsStatus = maybeObj(status?.odds);
   return (
     <div>
       <OddsPanel view={odds} lastFetch={oddsStatus} />
