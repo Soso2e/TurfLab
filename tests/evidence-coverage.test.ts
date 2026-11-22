@@ -211,11 +211,6 @@ it("fixes odds and a virtual plan before the start, keeping odds out of the pack
   const issues = JSON.stringify(report.job_issues);
   const prerace = JSON.parse(await readFile(path.join(home, "exchange/prerace/2026-11-10", (await readdir(path.join(home, "exchange/prerace/2026-11-10")))[0]), "utf8"));
   expect(prerace).toMatchObject({ odds_complete: true, race_id: "r1" });
-  console.log("TRACK_BIAS_TEMP_DEBUG", JSON.stringify({
-    issues: report.job_issues, stages: report.race_stages, blocked: report.blocked_jobs,
-    prompts: prompts.map((p) => ({ is_odds: p.includes("単勝オッズ"), first: p.slice(0, 70) })),
-    labs: await readdir(path.join(home, "exchange/lab/2026-11-10")).catch(() => []),
-  }));
   const planDir = path.join(home, "exchange/plans/2026-11-10");
   const planFiles = await readdir(planDir);
   const plan = JSON.parse(await readFile(path.join(planDir, planFiles.find((f) => !/-(hit|evm|selective)\.json$/.test(f))!), "utf8"));
