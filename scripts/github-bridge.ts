@@ -114,7 +114,14 @@ interface State {
   official_results?: Record<string, ResultReceipt>;
   last_result_sync?: string;
   last_result?: Row;
-  chat_reviews?: Record<string, { sha: string; checked_at: string }>;
+  chat_reviews?: Record<string, {
+    sha: string;
+    checked_at: string;
+    status?: string;
+    race_id?: string | null;
+    reason?: string;
+    conflict_sha?: string;
+  }>;
   last_review_sync?: string;
   last_sync: string | null;
   last_error: string | null;
@@ -217,6 +224,15 @@ export class PredictionBridge {
       last_daily_export: this.state.last_daily_export ?? null,
       last_reference: this.state.last_reference ?? null,
       last_result: this.state.last_result ?? null,
+      reviews_linked: Object.values(this.state.chat_reviews ?? {}).filter(
+        (r) => r.status === "linked",
+      ).length,
+      reviews_unmatched: Object.values(this.state.chat_reviews ?? {}).filter(
+        (r) => r.status === "unmatched" || r.status === "waiting",
+      ).length,
+      reviews_failed: Object.values(this.state.chat_reviews ?? {}).filter(
+        (r) => r.status === "failed",
+      ).length,
       results_waiting: Object.values(this.state.official_results ?? {}).filter(
         (r) => r.status === "waiting",
       ).length,
@@ -508,8 +524,8 @@ export class PredictionBridge {
     this.state.last_reference_sync = now.toISOString();
     await this.save();
   }
-  // Chat reviews from conversations are reference-only post-race documents.
-  // They are never imported into Core formal predictions or model weights.
+  // Chat reviews only enter Core's review evidence. They are never promoted
+  // to an official prediction, result, bet or training sample.
   async syncChatReviews(force = false) {
     const now = this.io.now();
     if (
@@ -517,29 +533,52 @@ export class PredictionBridge {
       this.state.last_review_sync &&
       now.getTime() - Date.parse(this.state.last_review_sync) <
         (this.config.interval_seconds ?? 300) * 1000
-    )
-      return;
+    ) return;
     const files = await this.io.list();
     this.state.chat_reviews ??= {};
-    const reviewFiles = files.filter((f) => parseReviewPath(f.path));
+    const reviewFiles = files.filter((f) => parseReviewPath(f.path))
+      .sort((a, b) => a.path.localeCompare(b.path, "en", { numeric: true }));
     for (const file of reviewFiles) {
       const prior = this.state.chat_reviews[file.path];
-      if (prior && prior.sha === file.sha) continue;
+      if (prior && prior.sha !== file.sha) {
+        prior.status = "failed";
+        prior.conflict_sha = file.sha;
+        prior.reason = "同じレビューJSONの内容変更は禁止。別版を追加してください";
+        continue;
+      }
+      if (prior && ["linked", "reference_only"].includes(prior.status ?? "")) continue;
       try {
         const text = await this.io.read(file);
-        const document = JSON.parse(text);
-        await this.io.api("/github-bridge/reviews", {
+        if (Buffer.byteLength(text) > 262144 || blobSha(text) !== file.sha)
+          throw new BridgeError("レビューのサイズまたはGitHub Blob SHAが不正です");
+        const document = obj(JSON.parse(text));
+        const envelope = {
           path: file.path,
           sha: file.sha,
           date_jst: file.path.split("/")[1],
           document,
-        });
+        };
+        const linked = await this.io.api("/github-bridge/chat-review-register", envelope);
+        // Daily aggregated coverage is not a single-race review. Keep it only
+        // in the immutable GitHub archive rather than duplicating UI cards.
+        if (linked.status !== "reference_only")
+          await this.io.api("/github-bridge/reviews", {
+            ...envelope, core_link: linked,
+          });
         this.state.chat_reviews[file.path] = {
           sha: file.sha,
           checked_at: now.toISOString(),
+          status: String(linked.status),
+          race_id: typeof linked.race_id === "string" ? linked.race_id : null,
+          reason: typeof linked.reason === "string" ? linked.reason : undefined,
         };
-      } catch {
-        // Chat review failure must not block prediction flow.
+      } catch (error) {
+        this.state.chat_reviews[file.path] = {
+          sha: file.sha,
+          checked_at: now.toISOString(),
+          status: "waiting",
+          reason: error instanceof Error ? error.message.slice(0, 200) : "レビュー取込待ち",
+        };
       }
     }
     this.state.last_review_sync = now.toISOString();
