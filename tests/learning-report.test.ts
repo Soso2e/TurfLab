@@ -48,5 +48,6 @@ it("recomputes the report from saved files without writing anything", async () =
   expect(report.breakdown).toBeDefined();
   expect(report.strategy_comparison).toBeDefined();
   expect(report.walk_forward_backtest).toBeDefined();
+  expect(report.track_bias_evaluation).toMatchObject({ observed_races: 0, paired_races: 0, verdict: "insufficient_sample" });
   expect((await readdir(exchange, { recursive: true })).sort()).toEqual(before);
 });
