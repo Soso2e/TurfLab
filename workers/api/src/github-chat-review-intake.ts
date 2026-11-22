@@ -113,8 +113,8 @@ export async function importGitHubChatReview(
       race_key_human: raceKey || `${date}|${String(sourceTrack)}|${raceNo}R`,
       source_generated_at: document.generated_at ?? null,
       pre_race_classification: obj(document.pre_race_evidence ?? document.chat_prediction ?? {}).classification ?? null,
-      official_result_verified: document.official_result_verified === true,
-      official_payout_verified: document.official_payout_verified === true,
+      source_claims_official_result_verified: document.official_result_verified === true,
+      source_claims_official_payout_verified: document.official_payout_verified === true,
       // Full immutable document remains in TurfLab-data; keep the source
       // reference here without claiming official Core settlement.
       core_prediction_imported: false,
