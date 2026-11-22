@@ -65,6 +65,7 @@ import { importNameReference, withFormalStatus } from "./name-reference-intake";
 import { reconcileReference } from "./reference-intake";
 import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
+import { importGitHubChatReview } from "./github-chat-review-intake";
 import { rankPerformance } from "./rank-analytics";
 import { saveResearchBaseline } from "./local-research-baseline";
 import { emitOperationalEvent } from "../../../packages/shared/src/operational-event";
@@ -281,6 +282,10 @@ export async function route(
     if (path === "/race-import/pack")
       return inputPack(repo, str(input, "snapshot_id"), now);
     if (path === "/race-import/convert") return convertAnswer(repo, input, now);
+  }
+  if (path === "/github-bridge/chat-review-register") {
+    requireCondition(!sheets, "チャットレビューCore連携はlocal保存専用です");
+    return importGitHubChatReview(repo, input, now);
   }
   if (path === "/github-bridge/official-result") {
     requireCondition(!sheets, "公式結果Bridgeはlocal保存専用です");
@@ -715,7 +720,9 @@ export class TurfCoordinator {
                 ? list.filter((r) => {
                     const doc = obj(r.document);
                     const docDate = String(doc.recorded_for_date_jst ?? r.date_jst ?? "");
-                    const raceDate = String(obj(doc.race).scheduled_start_jst ?? "").slice(0, 10);
+                    const race = obj(doc.race ?? {});
+                    const raceDate = String(race.scheduled_start_at_jst ??
+                      race.scheduled_start_jst ?? "").slice(0, 10);
                     return docDate === date || raceDate === date;
                   })
                 : list;
@@ -724,15 +731,23 @@ export class TurfCoordinator {
             requireCondition(request.method === "POST", "POSTが必要です", 405);
             const incoming = await readBody(request);
             requireCondition(typeof incoming.path === "string", "pathが必要です");
+            const prior = stored[String(incoming.path)];
+            requireCondition(!prior || prior.sha === incoming.sha,
+              "同じレビューJSONの内容変更は禁止です。新しい版を作成してください", 409);
+            const link = obj(incoming.core_link ?? {});
             stored[String(incoming.path)] = {
               path: incoming.path,
               sha: incoming.sha,
               date_jst: incoming.date_jst ?? String(incoming.path).split("/")[1],
               document: incoming.document,
+              core_link_status: link.status ?? "unmatched",
+              core_race_id: link.race_id ?? null,
+              core_review_id: link.review_id ?? null,
               updated_at: new Date().toISOString(),
             };
             await this.state.storage.put("github-chat-reviews", stored);
-            return response({ status: "saved", path: incoming.path });
+            return response({ status: "saved", path: incoming.path,
+              core_link_status: link.status ?? "unmatched" });
           }
           requireCondition(request.method === "POST", "POSTが必要です", 405);
           const input = await readBody(request);

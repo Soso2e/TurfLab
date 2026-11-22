@@ -469,33 +469,72 @@ describe("immutable daily state revisions", () => {
     await restarted.exportDailyStateIfDue();
     expect([...s.files.keys()].filter((p) => p.startsWith("state/"))).toHaveLength(1);
   });
-  it("reviews/配下のチャットレビューを同期し、APIへ保存する", async () => {
+  it("同期したチャットレビューのCore照合・SHA確認・冪等性を守る", async () => {
     const s = await setup(0);
     const posted: Row[] = [];
+    const registered: Row[] = [];
     const origApi = s.io.api;
     s.io.api = async (path, body) => {
+      if (path === "/github-bridge/chat-review-register") {
+        registered.push(body as Row);
+        return { status: "linked", race_id: "fixture" };
+      }
       if (path === "/github-bridge/reviews") {
         posted.push(body as Row);
         return { status: "saved" };
       }
       return origApi(path, body);
     };
+    const document = {
+      schema_version: "1",
+      record_type: "chatgpt_reference_race_review",
+      core_importable: false,
+      race: { race_key_human: "2026-11-11|名古屋|11R", track: "名古屋", race_no: 11 },
+    };
+    const content = JSON.stringify(document);
+    const sha = blobSha(content);
+    const file = "reviews/2026-11-11/nagoya-11-chat-review-v1.json";
+    s.files.set(file, { sha, content });
+    await s.bridge.syncChatReviews(true);
+    expect(registered).toHaveLength(1);
+    expect(posted).toHaveLength(1);
+    expect(posted[0].path).toBe(file);
+    expect(posted[0].sha).toBe(sha);
+    expect((posted[0].core_link as Row).status).toBe("linked");
+
+    // 同一SHAの再実行は二重送信しない
+    await s.bridge.syncChatReviews(true);
+    expect(registered).toHaveLength(1);
+    expect(posted).toHaveLength(1);
+
+    // 同名ファイルの不正変更を検知し、既存Core証拠を書き換えない
+    s.files.set(file, { sha: blobSha(content + " "), content: content + " " });
+    await s.bridge.syncChatReviews(true);
+    expect(posted).toHaveLength(1);
+    expect(s.bridge.status().reviews_failed).toBe(1);
+  });
+  it("未照合のチャットレビューは次回同期で再試行する", async () => {
+    const s = await setup(0);
+    let attempts = 0;
+    const origApi = s.io.api;
+    s.io.api = async (path, body) => {
+      if (path === "/github-bridge/chat-review-register") {
+        attempts++;
+        return attempts === 1 ? { status: "unmatched" } : { status: "linked", race_id: "fixture" };
+      }
+      if (path === "/github-bridge/reviews") return { status: "saved" };
+      return origApi(path, body);
+    };
+    const content = JSON.stringify({ schema_version: "1",
+      record_type: "chatgpt_reference_race_review", core_importable: false,
+      race: { race_key_human: "2026-11-11|名古屋|11R" } });
     s.files.set("reviews/2026-11-11/nagoya-11-chat-review-v1.json", {
-      sha: "sha-review-1",
-      content: JSON.stringify({
-        schema_version: "1",
-        record_type: "chatgpt_reference_race_review",
-        core_importable: false,
-        race: { key: "2026-11-11|名古屋|11R", name: "オールワン特別" },
-      }),
+      sha: blobSha(content), content,
     });
     await s.bridge.syncChatReviews(true);
-    expect(posted).toHaveLength(1);
-    expect(posted[0].path).toBe("reviews/2026-11-11/nagoya-11-chat-review-v1.json");
-    expect(posted[0].sha).toBe("sha-review-1");
-
-    // 同一SHAでの再実行時は二重送信しない
+    expect(s.bridge.status().reviews_unmatched).toBe(1);
     await s.bridge.syncChatReviews(true);
-    expect(posted).toHaveLength(1);
+    expect(s.bridge.status().reviews_linked).toBe(1);
+    expect(attempts).toBe(2);
   });
 });

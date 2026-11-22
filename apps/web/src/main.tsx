@@ -923,10 +923,11 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
             <div className="race-tags" style={{ marginBottom: 8 }}>
               <span className="race-tag tag-chatgpt">#ChatGPT</span>
               <span className="race-tag tag-post-review">#事後レビュー</span>
-              <span className="race-tag tag-not-in-core">#Core未取込</span>
-              <span className="race-tag tag-unverified">#公式未照合</span>
+              <span className="race-tag tag-not-in-core">{review.core_link_status === "linked"
+                ? "#Core履歴リンク済み" : "#Core未照合"}</span>
+              <span className="race-tag tag-unverified">#事後参考</span>
             </div>
-            <h2>{String(race.track)} {String(race.number)}R · {String(race.name)}</h2>
+            <h2>{String(race.track ?? "")} {String(race.race_no ?? race.number ?? "—")}R · {String(race.race_name ?? race.name ?? "レース")}</h2>
             <p style={{ margin: "4px 0", color: "#64748b", fontSize: "13px" }}>
               発走: {time(race.scheduled_start_jst)} · {String(race.distance_m)}m · 馬場: {String(race.reported_track_condition ?? "良")}
             </p>
@@ -999,7 +1000,7 @@ function ChatReviewModal({ review, onClose }: { review: Row; onClose: () => void
         </div>
 
         <div className="disclaimer">
-          ⚠️ <strong>Core分離ポリシー:</strong> 本記録は事後会話から作成された参考レビューです。Coreの公式回収率やAIモデル学習には影響しません（Core未取込・公式未照合）。
+          <strong>事後参考:</strong> このチャットレビューは正式な発走前予想・本人購入・公式結果・モデル学習には使用しません。Core履歴の紐付けと公式結果の確定は別です。
         </div>
 
         <div style={{ marginTop: 16, textAlign: "right" }}>
@@ -1733,7 +1734,8 @@ function App() {
                         const rPurchase = obj(doc.reported_purchase ?? {});
                         const rFinish = obj(doc.reported_finish ?? {});
                         const rOutcome = rFinish.purchase_outcome_if_report_correct ? obj(rFinish.purchase_outcome_if_report_correct) : null;
-                        const timeStr = rRace.scheduled_start_jst ? hhmm(rRace.scheduled_start_jst) : "--:--";
+                        const starts = rRace.scheduled_start_at_jst ?? rRace.scheduled_start_jst;
+                        const timeStr = starts ? hhmm(starts) : "--:--";
                         return (
                           <button
                             className="race-card review-card"
@@ -1741,7 +1743,7 @@ function App() {
                             onClick={() => setSelectedChatReview(rev)}
                           >
                             <div className="race-no">
-                              <b>{String(rRace.number ?? "—")}<small>R</small></b>
+                              <b>{String(rRace.race_no ?? rRace.number ?? "—")}<small>R</small></b>
                               <span>{timeStr}</span>
                             </div>
                             <div className="race-title">
@@ -1895,6 +1897,33 @@ function App() {
                   latestResult={latestResult}
                   fieldSize={fieldSize}
                 />
+                {rows(detail.reviews ?? []).some((r) => r.source === "github_chat_reference") && (
+                  <section className="panel">
+                    <h2>ChatGPTの振り返り（Core履歴）</h2>
+                    <p className="muted">事後レビューの証拠をレースに紐付けています。正式予想・本人購入・公式精算とは別です。</p>
+                    {rows(detail.reviews ?? [])
+                      .filter((r) => r.source === "github_chat_reference")
+                      .sort((a, b) => String(b.reviewed_at).localeCompare(String(a.reviewed_at)))
+                      .slice(0, 3).map((r) => {
+                        const evidence = obj(r.evidence_json ?? {});
+                        return (
+                          <article key={String(r.review_id)} style={{ marginTop: 10 }}>
+                            <p><strong>事後参考</strong>{evidence.source_claims_official_result_verified === true
+                              ? " · 元レビュー記載：公式照合済み" : " · 元レビューの公式照合は未確認"}</p>
+                            {Array.isArray(r.observations_json) && r.observations_json.length > 0 && (
+                              <p>{r.observations_json.map(String).join(" / ")}</p>
+                            )}
+                            {Array.isArray(r.hypotheses_json) && r.hypotheses_json.length > 0 && (
+                              <p className="muted">検証候補：{r.hypotheses_json.map(String).join(" / ")}</p>
+                            )}
+                            <p className="muted" style={{ fontSize: 12 }}>
+                              元記録：{String(evidence.git_path ?? "未確認")}
+                            </p>
+                          </article>
+                        );
+                      })}
+                  </section>
+                )}
                 <section className="panel">
                   <h2>このレースの状況</h2>
                   <p>予想 {predictions.some((p) => p.status === "locked") ? "確定済み" : "未確定"} · {raceState(race, latestResult?.official_status)}</p>
