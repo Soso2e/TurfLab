@@ -1908,7 +1908,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       return result ? { ...value, settled: planOutcomeDetailed(value, result) } : value;
     });
     const biasEvaluation = evaluateTrackBias(labs.map(({ value }) => value), [...results.values()]);
-    const report = { ...learningReport([...newest.values()], plans, odds, now.toISOString()),
+    const report: Row = { ...learningReport([...newest.values()], plans, odds, now.toISOString()),
       track_bias_evaluation: biasEvaluation };
     await writeFile(path.join(this.home, "learning-report.json.tmp"), JSON.stringify(report));
     await rename(path.join(this.home, "learning-report.json.tmp"), path.join(this.home, "learning-report.json"));
