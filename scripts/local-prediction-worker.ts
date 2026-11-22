@@ -43,6 +43,7 @@ import { runPythonLedger } from "./python-ledger";
 import { aiForecastFromAnswer, independentAssessment, INDEPENDENT_ASSESSMENT_PROMPT } from "./independent-ai-assessment";
 import { lockForecast } from "./forecast-eval";
 import { jockeyEvidenceSnapshot } from "./jockey-evidence-snapshot";
+import { applySameDayPaceAdjustment } from "../packages/shared/src/track-bias";
 import { aiDiscretionaryPlan, AI_DAY_CAP_YEN } from "./ai-discretionary-plan";
 
 // What counts as evidence for each of the six factors. Missing evidence is
@@ -780,9 +781,9 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
           "欠測項目があっても思考を止めず（blocked:true にせず）、不明点はlimitationsに残した上で全出走馬の6評価（根拠がなければnull可、重要なファクターはAIの判断で比重を自由調整可）、3展開予想（scenarios: slow/middle/high と main_pace）、free_analysis（展開・狙い馬・戦略の自由記述）、および的中の狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]。比較用に保持。基本は三連複（1頭軸流し・2頭軸流し・BOX等）・馬連・馬単・自信があれば三連単で当てに行き、ワイドは自信がない・混戦で絞りきれない場合のみAI判断で選ぶ）を返してよい。\n" +
           INDEPENDENT_ASSESSMENT_PROMPT +
           (currentStrategyRules ? `現在のAI戦略ルール:\n${currentStrategyRules}\n` : "");
-        const answer = await this.generate(
+        const rawAnswer = await this.generate(
           day + "-" + str(pack, "pack_hash") + (this.freeMode ? "-free-v2" : pack.research ? "-context-v3" : "-context-v1"),
-          `分析開始UTC ${new Date().toISOString()}。情報締切はpack.information_cutoff_at。\n` + common +
+          `分析開始UTC ${new Date().toISOString()}。pack固定資料の情報締切はpack.information_cutoff_at。trends.track_biasのみcomputed_at時点に得た別添の当日観測（予想対象レースの発走前限定）。\n` + common +
             (this.freeMode
               ? freePrompt + "正式予想の共通項目（全馬評価・3展開・参考提案）はanswer_schemaの項目名と構造を使う。追加の自由予想項目は回答のトップレベルに置く。\n"
               : pack.research
@@ -790,7 +791,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
                     ? "発走前の未来レース。固定pack.researchを土台にしつつ、Web検索で出馬表・近走実績・重賞成績・脚質・展開を補完して全頭を分析する。発走後の結果やオッズには依存しない。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。あわせて、オッズを見ない的中狙い枠（hit_picks: 合計600円以内・100円単位、ticket_typeは wide/quinella/exacta/trio/trifecta のみ、[{ticket_type, selections_json, amount_yen}]）をレース展開・フォーメーションに合わせて選んで返してよい。基本は三連複（1頭軸・2頭軸・BOX等）や馬連・馬単、自信があれば三連単を選び、ワイドは自信がない・混戦で絞りきれない場合のみAI判断で選ぶ。\n"
                     : "固定pack.researchだけで1Rを分析する。Web再検索禁止。近走の通過順・頭数から過去の位置取りを確認し、今回の逃げ・先行・差し・追込を仮説として分ける。サンプル数を明示。確率・数値MC・期待値は未算出なのでrecommendationsは空、skip_reasonに理由を書く。\n") + scoringRules
                 : "保存済み参考資料を一次入力とし、出典と時点を確認する。") +
-            "固定packのanswer_schemaどおりのJSON。cutoff後の情報を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
+            "固定packのanswer_schemaどおりのJSON。pack本体にはcutoff後の情報を混ぜない。trends.track_biasは取得時点を別に表示して、発走後の観測を混ぜない。6評価は確率ではなく根拠付き相対評価0〜100。" +
             (this.freeMode
               ? "free_analysis（文字列）を追加してよい。\n"
               : coverage
@@ -798,7 +799,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
                     ? "evidence_coverage はローカルpack時点の根拠の有無。formal_allowed がfalseでも、発走前Web検索で近走・コース適性・脚質・馬場・騎手の根拠を確認できた項目は数値（0〜100）で採点し、確認した事実をrationaleに書く。どうしても根拠が見つからない項目だけnullにし、全頭・全6項目の根拠が揃わない場合だけ " + blockedShape + "\n"
                     : "evidence_coverage はコードが固定packから判定した根拠の有無。formal_allowed がtrueのときだけ正式回答にする。falseなら暫定予想として " + blockedShape + " statusがmissingの項目だけnull。weakの項目は弱い根拠だとrationaleに明記して低めの確信で採点し、推測で補わない。\n")
                 : "全馬の全6項目に根拠があるときだけ正式回答にする。1つでも根拠が無ければ正式にせず " + blockedShape + "\n") +
-            (trends ? "trends はコードが保存済みの記録から集計した傾向（馬の距離・馬場別成績、当日の同場確定レースの枠・脚質）。標本数を確認し、少ない標本は弱い根拠として扱う。\n" : "") +
+            (trends ? "trends.track_bias は発走前に公表済みの同場・同日・同芝ダートのレースから得た観測値。位置取りと上がりを混同せず、ペースによる前崩れと馬場固有効果は区別する。AI自身は補正点数を加減しない（後段でpaceに±4点以内の機械補正）。標本不足なら補正なし。\n" : "") +
             (pythonAnalytics ? "python_analytics はPythonが過去CSVとDB走から計算したコースバイアス・騎手成績・出走馬のタイム/上がり偏差サマリー。予想の定量根拠として積極的に活用すること。\n" : "") +
             (external ? "external_forecasts は他の予想サイトの印と根拠。まず固定packだけで評価を作り、次に外部と食い違う馬の根拠を固定pack内の事実で確かめる。外部の印だけで点を上げない。pack内で裏付けられた事実だけで評価を変え、変えた馬と理由をrationaleに書く。人気・オッズに基づく記述は使わない。\n" : "") +
             JSON.stringify({ pack, baseline, source_context: sourceContext,
@@ -806,6 +807,11 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
               ...(pythonAnalytics ? { python_analytics: pythonAnalytics } : {}),
               ...(external ? { external_forecasts: external } : {}) }),
           allowWeb,
+        );
+        // Frozen as-of observation is applied only once, and only to pace.
+        // This also records an auditable no-op when data is insufficient.
+        const { answer, audit: biasAudit } = applySameDayPaceAdjustment(
+          rawAnswer, trends?.track_bias ? obj(trends.track_bias) : null,
         );
         // Code, not the model, decides: an incomplete answer without local evidence stays provisional,
         // while a complete pre-start AI-supplemented evaluation is accepted as formal for learning.
@@ -818,7 +824,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         if (answer?.blocked || (heldBack && answer))
           await this.saveLab(pack, heldBack && answer
             ? { reason: "根拠の欠測があるため暫定", lab_evaluations: answer.horse_evaluations, hit_picks: answer.hit_picks }
-            : answer!, day, coverage);
+            : answer!, day, coverage, "provisional", biasAudit);
         if (answer?.blocked || heldBack)
           this.mark(race, 3, "暫定予想を保存（正式予想ではない）");
         if (answer && !answer.blocked && !heldBack) {
@@ -866,7 +872,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
               main_pace: answer.main_pace,
               main_pace_reason: answer.main_pace_reason,
               scenarios: answer.scenarios,
-            }, day, coverage, converted ? "formal" : "free");
+            }, day, coverage, converted ? "formal" : "free", biasAudit);
         }
       } catch (error) {
         this.failedJob(file, error);
@@ -1368,7 +1374,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
 
   /** Blocked (incomplete) analyses are kept as Lab records: not adopted, not
    * sent to Core, immutable and written only before the scheduled start. */
-  private async saveLab(pack: Row, answer: Row, day: string, coverage: Row | null = null, status: "provisional" | "formal" | "free" = "provisional") {
+  private async saveLab(pack: Row, answer: Row, day: string, coverage: Row | null = null, status: "provisional" | "formal" | "free" = "provisional", trackBiasAudit: Row | null = null) {
     const race = obj(pack.race);
     const savedAt = new Date().toISOString();
     if (Date.parse(str(race, "scheduled_start_at")) <= Date.parse(savedAt)) return;
@@ -1421,6 +1427,8 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             ai_bet_picks: Array.isArray(answer.ai_bet_picks) ? answer.ai_bet_picks : [],
             jockey_evidence: jockeyEvidenceSnapshot(pack) } : {}),
           ...(forecastStatus ? { forecast_status: forecastStatus } : {}),
+          ...(trackBiasAudit ? { track_bias_audit: { ...trackBiasAudit, pack_cutoff_at: pack.information_cutoff_at!,
+            supplement_cutoff_at: trackBiasAudit.computed_at ?? null, supplement_version: "as-of-addendum-v1" } } : {}),
         }));
       }
       return;
@@ -1459,6 +1467,8 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         reason: String(answer.reason ?? "").slice(0, 600),
         missing: missing.slice(0, 120),
         evaluations: (ranked?.evaluations ?? given).slice(0, 20),
+        ...(trackBiasAudit ? { track_bias_audit: { ...trackBiasAudit, pack_cutoff_at: pack.information_cutoff_at!,
+          supplement_cutoff_at: trackBiasAudit.computed_at ?? null, supplement_version: "as-of-addendum-v1" } } : {}),
         ...(hitPicks ? { hit_picks: hitPicks } : {}),
       }),
     );
@@ -1657,6 +1667,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         evaluations: rows(record.evaluations ?? []).slice(0, 20),
         ...(record.independent_assessment ? { independent_assessment: record.independent_assessment } : {}),
         ...(record.jockey_evidence ? { jockey_evidence: record.jockey_evidence } : {}),
+        ...(record.track_bias_audit ? { track_bias_audit: record.track_bias_audit } : {}),
       }];
     });
   }
