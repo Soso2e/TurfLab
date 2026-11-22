@@ -109,6 +109,21 @@ export function LocalPredictionStatus({
             </p>
           )}
           <p>時系列検証 {String(obj(state.learning).holdout_races ?? 0)}R · 重み候補 {obj(state.learning).candidate_ready ? "あり（本人承認待ち）" : "なし"}</p>
+          {state.learning && obj(state.learning).track_bias_evaluation != null && (() => {
+            const bias = obj(obj(state.learning).track_bias_evaluation);
+            const baseline = obj(bias.baseline);
+            const adjusted = obj(bias.adjusted);
+            return (
+              <p>
+                当日バイアス補正: 観測 {String(bias.observed_races ?? 0)}R ／ 補正可能 {String(bias.eligible_races ?? 0)}R ／
+                公式結果との比較 {String(bias.paired_races ?? 0)}R
+                {Number(bias.paired_races ?? 0) > 0
+                  ? ` · 1番手勝利 補正なし ${String(baseline.top1_wins)}/${String(bias.paired_races)}、補正あり ${String(adjusted.top1_wins)}/${String(bias.paired_races)}`
+                  : " · 比較標本なし"}
+                {" · "}{bias.verdict === "insufficient_sample" ? "30R未満のため優劣未判定" : "参考集計（効果未検証）"}
+              </p>
+            );
+          })()}
         </details>
       )}
       {rows(state?.provisional_predictions ?? []).length > 0 && (
