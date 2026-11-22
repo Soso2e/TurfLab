@@ -1,5 +1,11 @@
 # PROGRESS.md
 
+## 2026-11-22 NARオッズの取り込み・時点別蓄積・期待値表示
+
+- 設計は [docs/odds-store.md](docs/odds-store.md)。自動ダウンロードは robots.txt 上不許可のため実装せず、本人保存の当日・月次ZIP/CSVを検出して解析・検証・追記までを自動化。発走前（Workerの時刻付きスナップショット）と確定を `phase` で分離し、確定オッズは購入判断に渡らない。
+- 追加: `odds-contract.ts`、`nar-odds-store.ts`（追記のみNDJSON・重複排除・欠測検出・取得ログ）、`nar-odds-import.ts`、`odds-ev.ts`、`odds:import`/`odds:report`。Workerに統合し、レース詳細に単勝の変動と固定確率×オッズの期待値を表示。日別の集約だけ TurfLab-data `odds-summary/` へwrite-onceで同期。購入ルールは変更なし。
+- **未確認**: 実NAR公式オッズCSVでの取込（この環境から keiba.go.jp に到達できず、列名は見出し名の対応のみ。合成CSVでの保存・再読込・重複・欠測・発走後拒否はテスト済み）。
+
 ## 2026-11-21 予測精度の検証基盤（forecast-v1・数式M・AI数値予測・独立比較）
 
 - 設計: [docs/forecast-validation.md](docs/forecast-validation.md)。数式MとAIが独立に、同じ契約（全頭勝率・3着内・角順位・ペース区分）で発走前に凍結し、未使用の時系列データで同一レース対比較する。オッズ・人気・外部予想は契約で機械的に拒否。
