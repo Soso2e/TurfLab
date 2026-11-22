@@ -105,6 +105,18 @@ describe("pace-only score adjustment", () => {
     expect((answer.horse_evaluations as Row[])[0].components).toEqual(
       { ability: 88, pace: 60, course: 75 });
   });
+  it("preserves a blocked provisional answer with no formal evaluations", () => {
+    const blocked: Row = {
+      blocked: true, reason: "根拠が不足", lab_evaluations: [
+        { horse_number: 1, components: { ability: 60, pace: null } },
+      ],
+    };
+    const bias = summarizeSameDayBias(earlier, target);
+    const result = applySameDayPaceAdjustment(blocked, bias);
+    expect(result.answer).toEqual(blocked);
+    expect(result.audit?.applied_count).toBe(0);
+  });
+
   it("leaves scores untouched when no eligible data exists", () => {
     const bias = summarizeSameDayBias(earlier.slice(0, 2), target);
     const { answer: same, audit } = applySameDayPaceAdjustment(answer, bias);
