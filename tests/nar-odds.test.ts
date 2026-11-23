@@ -56,7 +56,7 @@ it("reads odds ZIPs from the owner's archive in place, once", async () => {
   await mkdir(path.join(home, "nar-archive"));
   await writeFile(path.join(src, "o.csv"), card("2026/03/02"));
   const zip = path.join(home, "nar-archive", "202603_odds.zip");
-  execFileSync("python3", ["-I", "-c", "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1],'w');z.write(sys.argv[2],'o.csv');z.close()", zip, path.join(src, "o.csv")]);
+  execFileSync(process.env.TURFLAB_PYTHON_BIN ?? "python", ["-I", "-c", "import sys,zipfile;z=zipfile.ZipFile(sys.argv[1],'w');z.write(sys.argv[2],'o.csv');z.close()", zip, path.join(src, "o.csv")]);
   const now = new Date("2026-11-22T00:00:00Z");
   expect(await importNarOdds(home, now)).toMatchObject({ files_imported: 1, observations_added: 25 });
   expect(await importNarOdds(home, now)).toMatchObject({ files_imported: 0, observations_added: 0 }); // fingerprint skip
