@@ -219,7 +219,8 @@ const edited = revisions.find((r) => r.status === 200)!.data;
 for (const [suffix, selections, amount] of [
   ["unit", [1], 150],
   ["horse", [99], 100],
-  ["budget", [1], 1000],
+  // 1R・1日の上限は廃止。出資金10万円（AIと共通）の残高を超える額だけを拒否する。
+  ["bankroll", [1], 100_100],
   ["duplicate", [2], 100],
 ] as const) {
   const rejected = await call("/bets", {
@@ -506,7 +507,7 @@ await writeFile(
       core_ui_skip: "complete",
       personal_skip: "saved with race reference and reason",
       invalid_bets:
-        "150yen, missing horse, race budget, duplicate ticket rejected",
+        "150yen, missing horse, over-bankroll, duplicate ticket rejected",
       concurrent_purchase_statuses: concurrent.map((r) => r.status),
       concurrent_revision_statuses: revisions.map((r) => r.status),
       mobile_bet_edit: "400yen, one active bet, two linked revisions",

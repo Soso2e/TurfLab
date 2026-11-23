@@ -242,58 +242,28 @@ describe("本人購入と公式精算", () => {
     });
   });
 
-  it("JSTの同日5,000円上限を6レース目でも守る", async () => {
+  it("本人Betは1R・1日の上限なしで、出資金10万円の残高だけが上限", async () => {
     await ready();
-    for (let i = 1; i <= 6; i++) {
-      const raceId = `budget-race-${i}`,
-        pid = `budget-pred-${i}`;
-      const r = await repo.get("races", "example-race-01");
-      const p = await repo.get("predictions", "example-prediction-01");
-      await repo.put("races", { ...r!, race_id: raceId, external_id: raceId });
-      for (const e of await repo.list("race_entries"))
-        if (e.race_id === "example-race-01")
-          await repo.put("race_entries", {
-            ...e,
-            entry_id: `budget-${i}-${e.entry_id}`,
-            race_id: raceId,
-          });
-      await repo.put("predictions", {
-        ...p!,
-        prediction_id: pid,
-        race_id: raceId,
-      });
-      await repo.put("prediction_adoptions", {
-        ...base,
-        adoption_id: `budget-adopt-${i}`,
-        race_id: raceId,
-        prediction_id: pid,
-        adopted_at: NOW,
-        selection_rule_version: "final-first-v1",
-      });
-      const input = {
-        ...bet(`budget-${i}`, 1000),
-        race_id: raceId,
-        prediction_id: pid,
-      };
-      if (i < 6) await confirmBet(repo, input, NOW);
-      else
-        await expect(confirmBet(repo, input, NOW)).rejects.toThrow("5,000円");
-    }
+    // 1レースに複数買い目を重ねても、旧上限（1R1,000円）では止まらない。
+    await confirmBet(repo, bet("a", 1000), NOW);
+    await confirmBet(repo, { ...bet("b", 1000), selections: [2] }, NOW);
     expect(
-      (await repo.list("virtual_bets")).reduce(
-        (n, b) => n + Number(b.amount_yen),
-        0,
-      ),
-    ).toBe(5000);
+      (await repo.list("virtual_bets")).reduce((n, b) => n + Number(b.amount_yen), 0),
+    ).toBe(2000);
+    // AI側の残りが少ないと、その分だけ本人の上限も下がる（全体で10万円）。
+    await expect(
+      confirmBet(repo, { ...bet("c", 1000), ticket_type: "place" }, NOW, 2500),
+    ).rejects.toThrow("出資金の残高（500円）");
+    // 残高以内なら通る。
+    await confirmBet(repo, { ...bet("d", 500), ticket_type: "place" }, NOW, 2500);
   });
 
-  it("100円単位とレース予算を守る", async () => {
+  it("100円単位を守る", async () => {
     await ready();
     await expect(confirmBet(repo, bet("bad", 150), NOW)).rejects.toThrow(
       "100円",
     );
     await confirmBet(repo, bet("max", 1000), NOW);
-    await expect(confirmBet(repo, bet("over"), NOW)).rejects.toThrow("1レース");
   });
   it("別操作IDでも同じ買い目の二重登録を拒否する", async () => {
     await ready();

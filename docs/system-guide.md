@@ -19,9 +19,9 @@ AI（ローカルCodex CLI または 通常ChatGPT）が出力したJSONはす�
 | レイヤー / 経路 | 主な実装ファイル | 役割と安全境界 |
 | :--- | :--- | :--- |
 | **経路A：ローカルCLI自動運用**<br/>（2026-11-08〜 主力経路） | [`scripts/local-predictions.ts`](../scripts/local-predictions.ts)<br/>[`scripts/local-prediction-worker.ts`](../scripts/local-prediction-worker.ts)<br/>[`scripts/local-codex.ts`](../scripts/local-codex.ts) | • 5分周期で稼働し、ローカルの **Codex CLI (`gpt-6.1-sol`)** を非対話起動。<br/>• `--sandbox read-only`・`shell_tool` 無効・1日最大12回・1回15分上限。<br/>• `local-predictions/exchange/` に GitHub 互換の追記専用ファイル（`flag: "wx"`）を出力し、内部の `PredictionBridge` 経由で Core API へ登録・確定。 |
-| **経路B：ChatGPT + GitHub Bridge**<br/>（定時タスク / 手動ウィザード） | [`scripts/github-sync.ts`](../scripts/github-sync.ts)<br/>[`scripts/github-bridge.ts`](../scripts/github-bridge.ts)<br/>[`prompts/chatgpt-daily.md`](../prompts/chatgpt-daily.md) | • JST 09:00 / 10:00 / 12:00 のChatGPTタスクと非公開 `Soso2e/TurfLab-data` を5分周期で同期。<br/>• 08:00 JST以降15分ごとに Core の読取専用状態を `state/YYYY-MM-DD/daily-vN.json`（最大24版/日）へ差分出力し、翌朝のChatGPTへ引き継ぐ。 |
+| **経路B（補助）：ChatGPT + GitHub Bridge**<br/>（定時タスク / 手動ウィザード） | [`scripts/github-sync.ts`](../scripts/github-sync.ts)<br/>[`scripts/github-bridge.ts`](../scripts/github-bridge.ts)<br/>[`prompts/chatgpt-daily.md`](../prompts/chatgpt-daily.md) | • JST 09:00 / 10:00 / 12:00 のChatGPTタスクと非公開 `Soso2e/TurfLab-data` を5分周期で同期。<br/>• 08:00 JST以降15分ごとに Core の読取専用状態を `state/YYYY-MM-DD/daily-vN.json`（最大24版/日）へ差分出力し、翌朝のChatGPTへ引き継ぐ。 |
 | **中央正本：TurfLab Core API** | [`workers/api/src/index.ts`](../workers/api/src/index.ts)<br/>[`workers/api/src/race-wizard.ts`](../workers/api/src/race-wizard.ts)<br/>[`workers/api/src/race-pipeline.ts`](../workers/api/src/race-pipeline.ts) | • `http://127.0.0.1:8787` で稼働する認証付きローカルAPI（SQLite 29テーブル）。<br/>• 固定パック生成、近走Baseline算出、6項目の固定重み計算、ロック読返し、仮想Bet管理、公式結果保存と精算（`settle`）を直列実行。 |
-| **本人操作：Web / スマホUI** | [`apps/web/src/`](../apps/web/src)<br/>[`Start-TurfLab.bat`](../Start-TurfLab.bat)<br/>[`scripts/windows/Start-All.ps1`](../scripts/windows/Start-All.ps1) | • PC（`127.0.0.1:8787`）および iPhone（Tailscale Serve HTTPS `:8443`）から閲覧。<br/>• **採用版の固定**と**本人の仮想馬券購入（1R最大1,000円 / 1日最大5,000円）**は本人のみが操作可能。AIは一切関与しない。 |
+| **本人操作：Web / スマホUI** | [`apps/web/src/`](../apps/web/src)<br/>[`Start-TurfLab.bat`](../Start-TurfLab.bat)<br/>[`scripts/windows/Start-All.ps1`](../scripts/windows/Start-All.ps1) | • PC（`127.0.0.1:8787`）および iPhone（Tailscale Serve HTTPS `:8443`）から閲覧。<br/>• 採用版は**自動固定**される。**本人の上乗せBet（上限なし・出資金10万円の残高内）**は本人のみが操作可能で、AIは一切関与しない。 |
 
 ---
 
@@ -36,7 +36,7 @@ AI（ローカルCodex CLI または 通常ChatGPT）が出力したJSONはす�
 ### ステップ別の詳細動作
 
 1. **STEP 1（出馬表・近走調査 / CLIプロンプト①）**
-   - **条件**: JST 09:00〜20:59 の間、3時間枠ごと（`YYYY-MM-DD-research-{0..7}`）、当日登録レースが5R未満のとき（または `--once --race-url <公式URL>` 指定時）。
+   - **条件**: JST 09:00〜20:59 の間、3時間枠ごと（`YYYY-MM-DD-research-{0..7}`）、当日登録レースが3R未満のとき（`MAX_AUTO_RACES = 3`、2026-11-11に5Rから変更）（または `--once --race-url <公式URL>` 指定時）。
    - **動作**: `web_search="live"` で公式出馬表を確認し、発走60分以上前のレースから全頭（馬番・馬名・騎手・枠・斤量・状態）と各馬の近走最大3走（着順・通過順・頭数・馬場）を収集。**この段階ではオッズ採取も予想・展開作成も禁止**。
    - **時刻刻印**: AIが自己申告した時刻は使わず、CLI実行証跡（`receipt.json` の `finished_at`）を `generated_at` として `exchange/daily/YYYY-MM-DD/morning-reference-v{timestamp}.json` に保存。
 2. **STEP 2（名前登録・Snapshot固定・Baseline算出 / Core API）**
@@ -46,9 +46,10 @@ AI（ローカルCodex CLI または 通常ChatGPT）が出力したJSONはす�
 3. **STEP 3（固定Packから1R本分析 / CLIプロンプト②）**
    - **条件**: 未確定かつ発走前の `packs/` が存在するとき、1レースずつ直列に実行。
    - **動作**: `pack.research` がある場合は **`web_search="disabled"`（Web再検索禁止）** で起動。固定された `pack` と `baseline`、および前日の振り返り仮説（`feedback`）だけを材料に、過去の位置取り（事実）と今回の展開（`slow` / `middle` / `high` の仮説）を分けて全馬6項目（0〜100）を採点。
-4. **STEP 4（Core Lock 読返し ＆ 本人のスマホ仮想Bet）**
+4. **STEP 4（Core Lock 読返し → 自動採用 → AI仮想Bet ＆ 本人の上乗せ）**
    - `POST /api/github-bridge/convert` でスキーマと `pack_hash` を検証後、`POST /api/pipeline/race` で固定重みによる総合点・順位を算出し `status: "locked"` で保存。直後に `GET /api/races/:id` で読み返し（Readback）が一致して初めて正式予想となる。
-   - 本人はスマホ/PCから予想を確認し、発走前に仮想Betを登録・訂正（`POST /api/bets` / `POST /api/bets/:id/revise`）。
+   - **取り込みは完全自動**：読み返しに成功した時点で、`POST /api/races/:id/adopt` により採用版が自動固定される（Final優先。人手なし）。AIの仮想Bet（1R 1,000円＝的中狙い600円＋期待値買い400円）も自動記録される。
+   - 本人はスマホ/PCで内容を確認し、**任意で上乗せBet**を登録・訂正できる（`POST /api/bets` / `POST /api/bets/:id/revise`）。1R・1日の上限はなく、出資金10万円（AI分と共通）の残高内・100円単位。
 5. **STEP 5（公式結果確認・自動精算 / CLIプロンプト③）**
    - **条件**: 発走予定時刻から **1時間以上経過** し、`official_result` が未登録のレース（6時間枠ごと）。
    - **動作**: `web_search="live"` でJRA / NAR公式結果ページを確認し、全出走馬の着順・完走状態・全券種払戻・公式公表時刻を取得。`POST /api/github-bridge/official-result` で結果保存（`saveResult`）と精算（`settle`）を一括実行。

@@ -955,8 +955,19 @@ export class PredictionBridge {
             )
           )
             throw new BridgeError("Core保存後の読み返しが一致しません", true);
+          // Fully automatic intake: a locked, read-back prediction is adopted right away
+          // (Final first, else Morning). A fixed adoption or a late start is not an intake failure.
+          let adoption = "自動採用済み";
+          try {
+            await this.io.api(
+              `/races/${encodeURIComponent(str(prediction, "race_id"))}/adopt`,
+              { prediction_id: str(prediction, "prediction_id") },
+            );
+          } catch (error) {
+            adoption = `採用は未実施（${error instanceof Error ? error.message.slice(0, 80) : "理由不明"}）`;
+          }
           receipt.status = "success";
-          receipt.reason = "Core確定・読み返し済み。本人Betは別操作です";
+          receipt.reason = `Core確定・読み返し済み。${adoption}。本人の上乗せBetは別操作です`;
           receipt.prediction_id = str(prediction, "prediction_id");
         } catch (e) {
           receipt.status =

@@ -52,6 +52,7 @@ import {
 import {
   audit,
   confirmBet,
+  userBankroll,
   reviseBet,
   purchaseStats,
   recommendationStats,
@@ -165,6 +166,7 @@ export async function route(
   now: string,
   sheets?: SheetsRepository,
   digest: StatsDigest | null = null,
+  aiCashYen: number | null = null,
 ): Promise<unknown> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, "");
@@ -210,6 +212,7 @@ export async function route(
     };
   if (method === "GET" && path === "/analytics/ranks")
     return rankPerformance(repo);
+  if (method === "GET" && path === "/user-bankroll") return userBankroll(repo);
   if (method === "GET" && path === "/daily-state") {
     requireCondition(!sheets, "日次GitHubエクスポートはlocal保存専用です");
     return dailyStateExport(repo, now);
@@ -334,7 +337,7 @@ export async function route(
   const revision = path.match(/^\/bets\/([^/]+)\/revise$/);
   if (revision)
     return reviseBet(repo, decodeURIComponent(revision[1]), input, now);
-  if (path === "/bets") return confirmBet(repo, input, now);
+  if (path === "/bets") return confirmBet(repo, input, now, aiCashYen);
   if (path === "/skip") return skipRace(repo, input, now);
   if (path === "/results") return saveResult(repo, input, now);
   if (path === "/reviews") return saveReview(repo, input, now);
@@ -511,6 +514,13 @@ export class TurfCoordinator {
       : new DurableRepository(this.state.storage);
   }
   /** The latest stats digest pushed by the local worker (null when none). */
+  /** Cash left on the AI side of the shared bankroll (local ledger); null until a ledger exists. */
+  private async aiCashYen(): Promise<number | null> {
+    const ledger = await this.state.storage.get<Row>("local-prediction-ledger");
+    const cash = Number(ledger?.cash_balance_yen);
+    return Number.isFinite(cash) ? cash : null;
+  }
+
   private async loadDigest(): Promise<StatsDigest | null> {
     const meta = await this.state.storage.get<Row>("stats-digest-meta");
     if (!meta) return null;
@@ -905,6 +915,9 @@ export class TurfCoordinator {
           new Date().toISOString(),
           repo instanceof SheetsRepository ? repo : undefined,
           bridgePath.startsWith("/api/race-stats") ? await this.loadDigest() : null,
+          bridgePath === "/api/bets" && request.method === "POST"
+            ? await this.aiCashYen()
+            : null,
         );
         if (staged.changes.size) {
           const changes = [...staged.changes.values()];
