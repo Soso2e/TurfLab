@@ -1,4 +1,4 @@
-import { StatsPage } from "./StatsPage";
+import { RaceStatsView, StatsPage } from "./StatsPage";
 import { BoatRaceApp } from "./BoatRaceApp";
 import { isBoatPath, SportSwitch, useSportPath } from "./SportNavigation";
 import React, { useEffect, useRef, useState } from "react";
@@ -18,6 +18,7 @@ import { MobileRaceBrief } from "./MobileRaceBrief";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
 import { DatabaseExplorer } from "./DatabaseExplorer";
+import { HorseResultAnalysisPanel } from "./HorseResultAnalysis";
 import { HorseRunsModal, RacePastRuns } from "./PastRuns";
 import {
   IconRace,
@@ -1967,6 +1968,7 @@ function App() {
                 <div className="race-tabs" role="tablist" aria-label="レース詳細">
                   <button type="button" role="tab" id="rt-overview" aria-selected={raceTab === "overview"} aria-controls="rp-overview" className={"race-tab" + (raceTab === "overview" ? " active" : "")} onClick={() => setRaceTab("overview")}>概要</button>
                   <button type="button" role="tab" id="rt-horses" aria-selected={raceTab === "horses"} aria-controls="rp-horses" className={"race-tab" + (raceTab === "horses" ? " active" : "")} onClick={() => setRaceTab("horses")}>出走馬</button>
+                  <button type="button" role="tab" id="rt-stats" aria-selected={raceTab === "stats"} aria-controls="rp-stats" className={"race-tab" + (raceTab === "stats" ? " active" : "")} onClick={() => setRaceTab("stats")}>統計</button>
                   <button type="button" role="tab" id="rt-forecast" aria-selected={raceTab === "forecast"} aria-controls="rp-forecast" className={"race-tab" + (raceTab === "forecast" ? " active" : "")} onClick={() => setRaceTab("forecast")}>予想・展開</button>
                   <button type="button" role="tab" id="rt-bets" aria-selected={raceTab === "bets"} aria-controls="rp-bets" className={"race-tab" + (raceTab === "bets" ? " active" : "")} onClick={() => setRaceTab("bets")}>購入</button>
                   <button type="button" role="tab" id="rt-result" aria-selected={raceTab === "result"} aria-controls="rp-result" className={"race-tab" + (raceTab === "result" ? " active" : "")} onClick={() => setRaceTab("result")}>結果</button>
@@ -2293,6 +2295,18 @@ function App() {
                     </table>
                   </div>
                 </section>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-stats" aria-labelledby="rt-stats" hidden={raceTab !== "stats"}>
+                  <RaceStatsView
+                    api={api}
+                    raceId={String(race.race_id)}
+                    active={raceTab === "stats"}
+                    embedded
+                    onOpenFullStats={(id) => {
+                      setStatsRaceId(id);
+                      setTab("racestats");
+                    }}
+                  />
                 </div>
                 <div className="race-tab-panel" role="tabpanel" id="rp-forecast" aria-labelledby="rt-forecast" hidden={raceTab !== "forecast"}>
                 <section className="panel">
@@ -2999,6 +3013,12 @@ function App() {
                     <summary>観測・原因仮説・未確認・次回検証</summary>
                     <JsonView value={detail.reviews} />
                   </details>
+                  {rows(detail.horse_result_analyses ?? []).length > 0 && (
+                    <HorseResultAnalysisPanel
+                      analyses={rows(detail.horse_result_analyses ?? [])}
+                      entries={rows(detail.entries)}
+                    />
+                  )}
                 </section>
                 </div>
               </>

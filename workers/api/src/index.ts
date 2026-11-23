@@ -70,6 +70,10 @@ import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
 import { importGitHubChatReview } from "./github-chat-review-intake";
 import { rankPerformance } from "./rank-analytics";
+import {
+  saveHorseResultAnalysis,
+  listHorseResultAnalyses,
+} from "./horse-result-analysis-intake";
 import { saveResearchBaseline } from "./local-research-baseline";
 import { emitOperationalEvent } from "../../../packages/shared/src/operational-event";
 import { BoatCollector } from "./boatrace-collector";
@@ -200,6 +204,13 @@ export async function route(
     return raceRunView(repo, decodeURIComponent(path.split("/")[2]));
   if (method === "GET" && /^\/horses\/[^/]+\/runs$/.test(path))
     return horseRunView(repo, decodeURIComponent(path.split("/")[2]), url.searchParams.get("before"));
+  if (method === "GET" && path === "/horse-result-analysis") {
+    requireCondition(!sheets, "馬別結果分析はlocal保存専用です");
+    return listHorseResultAnalyses(repo, {
+      race_id: url.searchParams.get("race_id") ?? undefined,
+      horse_id: url.searchParams.get("horse_id") ?? undefined,
+    });
+  }
   if (method === "GET" && /^\/races\/[^/]+$/.test(path))
     return detail(repo, decodeURIComponent(path.split("/")[2]));
   if (method === "GET" && path === "/stats")
@@ -247,6 +258,14 @@ export async function route(
       decodeURIComponent(path.split("/")[2]),
     );
   if (!input) throw new DomainError("APIが見つかりません", 404);
+  if (path === "/horse-result-analysis") {
+    requireCondition(!sheets, "馬別結果分析はlocal保存専用です");
+    return saveHorseResultAnalysis(
+      repo,
+      input as unknown as Parameters<typeof saveHorseResultAnalysis>[1],
+      now,
+    );
+  }
   if (path === "/local-predictions/baseline") {
     requireCondition(!sheets, "調査ベースラインはlocal保存専用です");
     return saveResearchBaseline(repo, input, now);

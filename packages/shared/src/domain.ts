@@ -112,6 +112,10 @@ export const tableDefinitions = {
     "observation_id",
     "track date_jst surface observed_at going moisture_goal_pct moisture_4c_pct cushion_value lane_note note",
   ],
+  horse_result_analyses: [
+    "analysis_id",
+    "race_id entry_id result_id horse_id prediction_id predicted_rank predicted_score predicted_win_probability predicted_top3_probability predicted_corner_ranks_json actual_finish_position actual_time_s actual_last_3f_s actual_corner_positions_json actual_margin outcome_categories_json irregular_factors_json irregular_certainty learning_flag analysis_summary prediction_match_assessment analyst evidence_sources_json analysis_at",
+  ],
 } as const;
 export type Table = keyof typeof tableDefinitions;
 /** Columns added after a table first shipped. Existing Sheets tabs may lack
@@ -365,6 +369,12 @@ export const references: Partial<Record<Table, Record<string, Table>>> = {
     race_id: "races",
     prediction_id: "predictions",
     plan_id: "reference_plans",
+  },
+  horse_result_analyses: {
+    race_id: "races",
+    entry_id: "race_entries",
+    result_id: "race_results",
+    horse_id: "horses",
   },
 };
 export function validateRow(table: Table, row: Row): void {

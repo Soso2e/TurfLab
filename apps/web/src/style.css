@@ -3590,6 +3590,11 @@ img, svg, video { max-width: 100%; }
 .detail-stats-btn { flex-shrink: 0; white-space: nowrap; padding: 7px 12px; font-size: 13px; font-weight: 600; }
 .st-page { min-width: 0; }
 .st-page .race-tabs { top: 0; }
+.st-embedded { min-width: 0; display: grid; gap: 10px; }
+.st-embedded-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.st-embedded-bar .st-sub { margin: 0; }
+.st-embedded .race-tabs.st-subtabs { position: static; top: auto; z-index: auto; margin: 0; padding: 2px 0 8px; background: transparent; backdrop-filter: none; border-bottom: 1px solid #dce1d7; }
+.st-embedded .race-tabs.st-subtabs .race-tab { min-height: 36px; min-width: 64px; padding: 0 12px; font-size: 13px; }
 .st-picker { display: grid; gap: 8px; margin-bottom: 12px; min-width: 0; }
 .st-picker select { justify-self: start; min-height: 40px; }
 .st-races { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
@@ -3669,3 +3674,77 @@ thead .st-sticky { background: #f6f8f3; z-index: 3; }
   .st-cov { grid-template-columns: 1fr 56px; }
   .st-cov small { grid-column: 1 / -1; }
 }
+
+/* ─── 馬別結果分析 (HorseResultAnalysis) ─────────────────────── */
+.hra-panel { border-radius: 8px; border: 1px solid #d4ddd5; margin-top: 16px; overflow: hidden; }
+.hra-panel-summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; cursor: pointer; font-weight: 600;
+  background: #eef2ee; list-style: none;
+}
+.hra-panel-summary::-webkit-details-marker { display: none; }
+.hra-panel-count { font-size: 12px; font-weight: normal; color: #5c7a62; background: #d8e8da; padding: 1px 7px; border-radius: 10px; }
+.hra-panel-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.hra-disclaimer { font-size: 12px; padding: 6px 10px; background: #fffaec; border-left: 3px solid #e8c84a; border-radius: 4px; margin: 0 0 4px; }
+
+.hra-card { border: 1px solid #d8e0da; border-radius: 7px; overflow: hidden; }
+.hra-card-summary {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; cursor: pointer; list-style: none; background: #f7f9f7;
+}
+.hra-card-summary::-webkit-details-marker { display: none; }
+.hra-card[open] .hra-card-summary { background: #eef2ee; }
+.hra-card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+.hra-horse-name { font-weight: 600; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hra-summary-text { margin: 0; font-size: 13px; line-height: 1.5; }
+.hra-match-assessment { margin: 0; font-size: 12px; color: #4a6050; }
+.hra-no-prediction { margin: 0; font-size: 12px; color: #8a9e90; font-style: italic; }
+
+/* 着順バッジ */
+.hra-finish { display: inline-block; min-width: 32px; padding: 2px 5px; border-radius: 5px; font-size: 12px; font-weight: 700; text-align: center; }
+.hra-finish-1 { background: #ffd700; color: #3d2900; }
+.hra-finish-2 { background: #c0c0c0; color: #2a2a2a; }
+.hra-finish-3 { background: #c88040; color: #fff; }
+.hra-finish-other { background: #e8eceb; color: #4a5a50; }
+.hra-finish-na { color: #9aada0; font-size: 12px; }
+
+/* 分類バッジ */
+.hra-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.hra-badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+.hra-expected { background: #d4edda; color: #1a5c2a; }
+.hra-mismatch { background: #fde8cc; color: #7a3c00; }
+.hra-pace { background: #d6eaff; color: #0a3d7a; }
+.hra-irregular { background: #fce4e4; color: #7a1a1a; }
+.hra-unknown { background: #e8e8e8; color: #4a4a4a; }
+
+/* 推測バッジ */
+.hra-unconfirmed-badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #fff3cc; color: #7a5a00; border: 1px solid #e8c840; font-weight: 600; }
+
+/* イレギュラー詳細 */
+.hra-irregular-detail { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.hra-cert { font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+.hra-cert-confirmed { background: #c8e6c9; color: #1b5e20; }
+.hra-cert-probable { background: #fff9c4; color: #5a4a00; }
+.hra-cert-speculative { background: #ffe8cc; color: #6a3800; border: 1px dashed #e09040; }
+.hra-factor { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #f0e8ff; color: #4a2080; }
+
+/* メタ */
+.hra-meta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hra-lflag { font-size: 11px; padding: 2px 7px; border-radius: 4px; background: #e8f0ee; color: #2a5040; border: 1px solid #c0d8cc; }
+.hra-lflag-ability_model_candidate { background: #fde8cc; color: #7a3c00; border-color: #e0a060; }
+.hra-lflag-pace_model_candidate { background: #d6eaff; color: #0a3d7a; border-color: #80b8f0; }
+.hra-lflag-irregular_one_time { background: #fce4e4; color: #7a1a1a; border-color: #e08080; }
+.hra-lflag-horse_risk_accumulate { background: #3c0000; color: #ffcccc; border-color: #800000; }
+.hra-lflag-pending { background: #f0f0f0; color: #505050; }
+.hra-analyst { font-size: 11px; color: #6a8070; }
+.hra-times { display: flex; gap: 12px; font-size: 12px; color: #3a5048; }
+.hra-prediction-row { display: flex; gap: 12px; font-size: 12px; color: #3a5048; }
+.hra-sources { font-size: 12px; }
+.hra-sources ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* 履歴リスト（馬詳細ページ） */
+.hra-history { margin-top: 8px; }
+.hra-history-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
+.hra-history-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hra-history-summary { font-size: 12px; color: #5a7060; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
