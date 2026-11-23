@@ -4,6 +4,8 @@
 
 > 1日の動きの正本は **[docs/daily-flow.md](docs/daily-flow.md)**。図解とプロンプト全文は [system-guide](docs/system-guide.md)、履歴は [status-log](docs/status-log.md)。
 
+競馬のほか、右上スイッチから**競艇モード**（公式データによる3連単2点v1の仮想購入・精算）も使える。[競艇の設計と操作](docs/boatrace-v1.md)
+
 ## 全体像：サーバー・データベース・ウェブ
 
 ```mermaid

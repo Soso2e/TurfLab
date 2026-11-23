@@ -1,4 +1,6 @@
 import { StatsPage } from "./StatsPage";
+import { BoatRaceApp } from "./BoatRaceApp";
+import { isBoatPath, SportSwitch, useSportPath } from "./SportNavigation";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -1390,7 +1392,7 @@ function App() {
     { id: "settings", title: "設定", icon: IconSettings },
   ];
   return (
-    <div className="app app-dock-layout">
+    <div className="app app-dock-layout horse-sport">
       <GooFilterSvg />
       <main>
         <header>
@@ -1416,6 +1418,7 @@ function App() {
             <span className="connection">
               {token ? "ローカルDB (SQLite)" : "未接続"}
             </span>
+            <SportSwitch />
           </div>
         </header>
         {!token ? (
@@ -3399,4 +3402,9 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+function TurfLab() {
+  const pathname = useSportPath();
+  return isBoatPath(pathname) ? <BoatRaceApp pathname={pathname} /> : <App />;
+}
+
+createRoot(document.getElementById("root")!).render(<TurfLab />);
