@@ -52,6 +52,7 @@ import {
 import {
   audit,
   confirmBet,
+  userBankroll,
   reviseBet,
   purchaseStats,
   recommendationStats,
@@ -210,6 +211,7 @@ export async function route(
     };
   if (method === "GET" && path === "/analytics/ranks")
     return rankPerformance(repo);
+  if (method === "GET" && path === "/user-bankroll") return userBankroll(repo);
   if (method === "GET" && path === "/daily-state") {
     requireCondition(!sheets, "日次GitHubエクスポートはlocal保存専用です");
     return dailyStateExport(repo, now);

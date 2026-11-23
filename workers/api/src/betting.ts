@@ -55,6 +55,24 @@ export async function audit(
     ...(evidence ? { evidence_json: evidence } : {}),
   });
 }
+/** The user's side of the shared bankroll: stakes not yet settled and the net of settled bets. */
+export async function userBankroll(
+  repo: Repository,
+): Promise<{ open_stake_yen: number; settled_net_yen: number }> {
+  const bets = (await repo.list("virtual_bets")).filter((b) => b.status === "confirmed");
+  const settled = await repo.list("settlements");
+  const superseded = new Set(settled.map((s) => s.supersedes_settlement_id).filter(Boolean));
+  const settledBetIds = new Set(settled.map((s) => s.bet_id));
+  return {
+    open_stake_yen: bets
+      .filter((b) => !settledBetIds.has(b.bet_id))
+      .reduce((s, b) => s + num(b, "amount_yen"), 0),
+    settled_net_yen: settled
+      .filter((s) => !superseded.has(s.settlement_id))
+      .reduce((s, x) => s + num(x, "net_yen"), 0),
+  };
+}
+
 /** Total bankroll shared by the automatic AI plans and the user's own bets. */
 export const INITIAL_CAPITAL_YEN = 100_000;
 
@@ -135,15 +153,7 @@ export async function confirmBet(
   );
   // Own bets sit on top of the automatic AI plans. There is no per-race or per-day cap any more;
   // the only limit is the shared bankroll (initial 100,000 yen).
-  const settled = await repo.list("settlements");
-  const superseded = new Set(settled.map((s) => s.supersedes_settlement_id).filter(Boolean));
-  const settledBetIds = new Set(settled.map((s) => s.bet_id));
-  const settledNet = settled
-    .filter((s) => !superseded.has(s.settlement_id))
-    .reduce((s, x) => s + num(x, "net_yen"), 0);
-  const openStake = bets
-    .filter((b) => !settledBetIds.has(b.bet_id))
-    .reduce((s, b) => s + num(b, "amount_yen"), 0);
+  const { open_stake_yen: openStake, settled_net_yen: settledNet } = await userBankroll(repo);
   const available = (aiCashYen ?? INITIAL_CAPITAL_YEN) + settledNet - openStake;
   requireCondition(
     amount <= available,

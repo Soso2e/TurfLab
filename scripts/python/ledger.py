@@ -164,6 +164,9 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
         or DEFAULT_INITIAL_CAPITAL_YEN
     )
     target_date = str(payload.get("target_date") or "")
+    # The user's own bets live in Core; the worker passes their open stake and settled net in.
+    user_open_stake = int(payload.get("user_open_stake_yen") or 0)
+    user_settled_net = int(payload.get("user_settled_net_yen") or 0)
 
     results_by_race = _load_results(exchange_dir) if exchange_dir else {}
     plan_items = _load_plans(exchange_dir) if exchange_dir else []
@@ -269,6 +272,10 @@ def compute_ledger(payload: dict[str, Any]) -> dict[str, Any]:
         "calculated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "initial_capital_yen": initial_capital,
         "cash_balance_yen": cash_balance,
+        "user_open_stake_yen": user_open_stake,
+        "user_settled_net_yen": user_settled_net,
+        # One bankroll for AI and user: what is left for the next stake of either side.
+        "available_cash_yen": cash_balance - user_open_stake + user_settled_net,
         "total_assets_yen": total_assets,
         "pending_stake_yen": pending_stake,
         "settled_stake_yen": settled_stake,

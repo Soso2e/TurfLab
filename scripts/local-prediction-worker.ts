@@ -986,15 +986,37 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
 
   /** Recompute capital & P&L ledger deterministically via Python and push immediately. */
   private async refreshLedger(day: string): Promise<Row | null> {
+    // The user's own bets share the same 100,000-yen bankroll; Core holds them.
+    const user = await this.api("/user-bankroll").catch(() => null);
     const ledger = await runPythonLedger({
       exchangeDir: this.exchange,
       targetDate: day,
+      userOpenStakeYen: Number(user?.open_stake_yen ?? 0),
+      userSettledNetYen: Number(user?.settled_net_yen ?? 0),
     });
     if (ledger) {
       await this.api("/local-predictions/ledger", { ledger }).catch(() => {});
     }
     return ledger;
   }
+  /** One bankroll for the AI plans and the user's bets: a plan whose stake exceeds what is left is skipped, not shrunk.
+   * If the ledger cannot be computed (no Python), nothing is blocked — the cash is unknown, not zero. */
+  private async withinBankroll(plan: Row, day: string): Promise<Row> {
+    const stake = rows(plan.picks ?? []).reduce((s, x) => s + Number(x.amount_yen ?? 0), 0);
+    if (stake <= 0) return plan;
+    const ledger = await this.refreshLedger(day).catch(() => null);
+    const available = Number(ledger?.available_cash_yen);
+    if (!Number.isFinite(available) || stake <= available) return plan;
+    return {
+      ...plan,
+      picks: [],
+      skip_reason: `出資金の残高不足のため見送り（残高${Math.max(0, available)}円・必要${stake}円）`,
+      skipped_by_bankroll: true,
+      skipped_stake_yen: stake,
+      bankroll_available_yen: available,
+    };
+  }
+
   /** Latest stage of a race in this tick, for the Web status. */
   private mark(race: Row, stage: RaceStage, detail: string) {
     const id = String(race.race_id);
@@ -1559,14 +1581,14 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
               (sum, pick) => sum + Number(pick.amount_yen ?? 0), 0);
           }
           await immutableLocalFile(this.exchange, aiName, JSON.stringify(
-            aiDiscretionaryPlan(record, new Date().toISOString(),
-              Math.max(0, AI_DAY_CAP_YEN - spentAiToday))));
+            await this.withinBankroll(aiDiscretionaryPlan(record, new Date().toISOString(),
+              Math.max(0, AI_DAY_CAP_YEN - spentAiToday)), day)));
         }
         // Stage 3 lane: 600 yen, fixed with the prediction, never reads odds.
         const hitName = `plans/${day}/${key}-hit.json`;
         if (!(await exists(hitName))) {
           await immutableLocalFile(this.exchange, hitName, JSON.stringify(
-            hitPlan(record, weights, calibrated, new Date().toISOString())));
+            await this.withinBankroll(hitPlan(record, weights, calibrated, new Date().toISOString()), day)));
           await this.refreshLedger(day).catch(() => {});
         }
         // Stage 4 lane: 400 yen from the time-stamped pre-race odds.
@@ -1593,7 +1615,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           continue;
         }
         await immutableLocalFile(this.exchange, name, JSON.stringify(
-          evPlan(record, odds, weights, calibrated, new Date().toISOString())));
+          await this.withinBankroll(evPlan(record, odds, weights, calibrated, new Date().toISOString()), day)));
         // Selective lane: 0-3 picks, flexible ticket type, active skip, daily 5,000 yen cap.
         const selectiveName = `plans/${day}/${key}-selective.json`;
         if (!(await exists(selectiveName))) {
@@ -1608,9 +1630,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             }
           }
           await immutableLocalFile(this.exchange, selectiveName, JSON.stringify(
-            selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
+            await this.withinBankroll(selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
               remainingDailyBudgetYen: Math.max(0, SELECTIVE_DAILY_BUDGET_YEN - spentToday),
-            })));
+            }), day)));
         }
         await this.refreshLedger(day).catch(() => {});
         this.mark(race, 4, "的中狙い600円・期待値買い400円・新方式を固定済み");
