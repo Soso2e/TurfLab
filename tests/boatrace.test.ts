@@ -150,7 +150,7 @@ it("公式の段組を解釈し、締切時オッズを明示する", () => {
 
 afterEach(() => vi.useRealTimers());
 
-it("番組→アラーム凍結→再起動→欠測・訂正精算を同じ永続DBで繰り返せる", async () => {
+it("毎時1レースだけ購入し、再起動後の翌時精算・訂正・残高不足を同じ台帳で扱う", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   const database = new DatabaseSync(":memory:");
   const kv = new Map<string, unknown>();
@@ -163,6 +163,16 @@ it("番組→アラーム凍結→再起動→欠測・訂正精算を同じ永�
       const rows = read ? statement.all(...bind) : [];
       return { toArray: () => rows, one: () => rows[0], [Symbol.iterator]: () => rows[Symbol.iterator]() };
     } },
+    transactionSync: (fn: () => void) => {
+      database.exec("BEGIN");
+      try {
+        fn();
+        database.exec("COMMIT");
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
     get: async (key: string) => structuredClone(kv.get(key)),
     put: async (key: string | Record<string, unknown>, value?: unknown) => {
       for (const [k, v] of Object.entries(typeof key === "string" ? { [key]: value } : key)) kv.set(k, structuredClone(v));
@@ -172,55 +182,76 @@ it("番組→アラーム凍結→再起動→欠測・訂正精算を同じ永�
   } } as unknown as DurableObjectState;
   const path = `/owpc/pc/race/racelist?hd=20261123&jcd=12&rno=1`;
   let published = "";
+  const programRow = (number: number, time: string) =>
+    `<tr>${td(`<a href="${path.replace("rno=1", `rno=${number}`)}">${number}R</a>`)}${td(time)}${td("発売前")}${
+      race.entries.map((entry) => td(`<a>${entry.name}</a><div class="is-fs12">${entry.grade_original}</div>`)).join("")
+    }</tr>`;
   const contents: Record<string, () => string> = {
     index: () => `<table><tbody><tr><td><img src="/text_place1_12.png" alt="住之江"></td>
       <td><a href="/owpc/pc/race/raceindex?hd=20261123&jcd=12">開催</a></td></tr></tbody></table>`,
-    raceindex: () => `<table><tbody><tr>${td(`<a href="${path}">1R</a>`)}${td("15:27")}${td("発売前")}${
-      race.entries.map((entry) => td(`<a>${entry.name}</a><div class="is-fs12">${entry.grade_original}</div>`)).join("")
-    }</tr></tbody></table>`,
+    raceindex: () => `<table><tbody>${programRow(1, "15:27")}${programRow(2, "15:28")}${programRow(3, "17:27")}</tbody></table>`,
     odds2tf: () => oddsHtml("odds2tf"),
     odds3t: () => oddsHtml("odds3t"),
     beforeinfo: () => `<div class="table1_boatImage1"><span class="table1_boatImage1Number">2</span>
       <span class="table1_boatImage1Time">F.03</span></div>`,
     raceresult: () => published,
   };
-  const source = { page: async (url: string) => ({
+  const source = { page: vi.fn(async (url: string) => ({
     html: contents[new URL(url).pathname.split("/").at(-1)!](), evidence: evidence(url, new Date().toISOString()),
-  }) };
+  })) };
   const request = (path: string, method = "GET") => new Request("https://example.test/api/boatrace/" + path, { method });
   const detail = `races/${race.id}`;
   try {
     vi.setSystemTime(new Date(`${date}T15:20:00+09:00`));
     let collector = new BoatCollector(state, source);
+    const bankroll = async () => (await (await collector.route(request("status"))).json() as { bankroll: unknown }).bankroll;
     expect((await collector.route(request("collect", "POST"))).ok).toBe(true);
+    expect(await bankroll()).toMatchObject({ initial: 100_000, balance: 100_000, stake: 0 });
     await collector.alarm();
     expect(new Date(alarmTime).toISOString()).toBe(new Date(Date.parse(cutoff) - 145_000).toISOString());
     vi.setSystemTime(freezeTime);
     await collector.alarm();
     const saved = (await (await collector.route(request(detail))).json() as { race: BoatRecord }).race.freeze;
     expect(saved?.plans.adjusted.second).toBe(2);
+    expect(await bankroll()).toMatchObject({ balance: 99_800, stake: 200, pending: 200 });
+    expect(new Date(alarmTime)).toEqual(new Date(`${date}T16:00:00+09:00`));
     collector = new BoatCollector(state, source);
-    vi.setSystemTime(new Date(`${date}T15:34:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T15:26:00+09:00`));
+    source.page.mockClear();
+    await collector.alarm();
+    expect(source.page).not.toHaveBeenCalled();
+    expect(await (await collector.route(request(`races/${date}-12-2`))).json()).toMatchObject({ funded: false });
+    vi.setSystemTime(new Date(`${date}T16:00:00+09:00`));
     await collector.alarm();
     expect(await (await collector.route(request(detail))).json()).toMatchObject({
       race: { freeze: saved, issue: "公式3連単払戻・返還情報の確定待ち" }, settlements: { adjusted: null },
     });
     published = payouts(["1-2-4/800"], [[1, 1], [2, 2], [4, 3]], [5]);
-    vi.setSystemTime(new Date(`${date}T15:43:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T17:00:00+09:00`));
     await collector.alarm();
     expect(await (await collector.route(request(detail))).json()).toMatchObject({
-      settlements: { adjusted: { net: 700 } }, revisions: [{ payouts: { "1-2-4": 800 } }],
+      funded: true, settlements: { adjusted: { net: 700 } }, revisions: [{ payouts: { "1-2-4": 800 } }],
     });
+    expect(await bankroll()).toMatchObject({ balance: 100_700, stake: 200, payout: 800, refund: 100, pending: 0 });
+    database.exec("INSERT INTO boat_auto_bets VALUES ('other', 0, 100600, 0, 0)");
+    vi.setSystemTime(new Date(`${date}T17:25:00+09:00`));
+    source.page.mockClear();
+    await collector.alarm();
+    expect(source.page).not.toHaveBeenCalled();
+    expect(await bankroll()).toMatchObject({ balance: 100 });
     published = payouts(["1-2-4/900"], [[1, 1], [2, 2], [4, 3]], [5]);
-    vi.setSystemTime(new Date(`${date}T16:28:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T18:00:00+09:00`));
     await collector.alarm();
     expect(await (await collector.route(request(detail))).json()).toMatchObject({
       race: { freeze: saved }, settlements: { adjusted: { net: 800 } },
       revisions: [{ payouts: { "1-2-4": 800 } }, { payouts: { "1-2-4": 900 } }],
     });
+    expect(await bankroll()).toMatchObject({ balance: 200, payout: 900, refund: 100, pending: 0 });
     expect(await (await collector.route(request("stats"))).json()).toMatchObject({ settled: 1 });
     expect(await (await collector.route(request("archive?date=" + date))).json()).toMatchObject({
-      date, records: [{ freeze: saved }], revisions: [{ raceId: race.id }, { raceId: race.id }],
+      date, records: [{ freeze: saved }, { id: `${date}-12-2` }, { id: `${date}-12-3` }],
+      autoBets: [{ race_id: race.id, stake: 200, payout: 900, refund: 100 }],
+      revisions: [{ raceId: race.id }, { raceId: race.id }],
     });
   } finally {
     database.close();

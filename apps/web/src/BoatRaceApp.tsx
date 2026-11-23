@@ -26,10 +26,16 @@ interface RaceSummary {
 }
 type RaceDetail = {
   race: BoatRecord;
+  funded: boolean;
   settlements: Record<Lane, ReturnType<typeof settleBoatRace>>;
   revisions: NonNullable<BoatRecord["result"]>[];
 };
-type CollectorStatus = { enabled: boolean; lastRun: string | null; issue: string | null };
+type CollectorStatus = {
+  enabled: boolean;
+  lastRun: string | null;
+  issue: string | null;
+  bankroll: { initial: number; balance: number; stake: number; payout: number; refund: number; pending: number };
+};
 type Day = { date: string; races: number; purchased: number; settled: number };
 type Data = { races: RaceSummary[] } | RaceDetail |
   (ReturnType<typeof summarizeBoatRaces> & { from: string }) | { days: Day[] };
@@ -102,7 +108,7 @@ function RacePage({ detail }: { detail: RaceDetail }) {
         const plan = freeze.plans[lane];
         const settlement = settlements[lane];
         return <section className="boat-card" key={lane}>
-          <h2>{labels[lane]}</h2>
+          <h2>{labels[lane]}{detail.funded && (lane === "adjusted" ? "・仮想購入" : "・比較用")}</h2>
           <p>1着 1号艇・2着 {plan.second}号艇</p>
           <h3>3連単 2点 × 各100円</h3>
           <TicketList tickets={plan.tickets} />
@@ -117,7 +123,8 @@ function RacePage({ detail }: { detail: RaceDetail }) {
           </> : <p>{race.issue ?? "公式払戻の取得後に自動精算します。"}</p>}
         </section>;
       })}</div>
-    </> : <p role="status" className="boat-card">{race.issue ?? "締切前の買い目はまだ凍結されていません。"}</p>}
+    </> : <p role="status" className="boat-card">{race.issue ?? (race.cutoff && Date.parse(race.cutoff) <= Date.now()
+      ? "このレースの購入記録はありません。" : "締切前の買い目はまだ凍結されていません。")}</p>}
     {result && <section className="boat-card">
       <h2>公式結果</h2>
       {result.status === "void" ? <p>3連単 中止・不成立</p> : result.special ? <p>3連単 特払 {money(result.special.per100)}</p> :
@@ -202,6 +209,7 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
   const dataKey = `${path}:${endpoint}`;
   const data = loaded?.key === dataKey ? loaded.data : undefined;
   const loadError = loaded?.key === dataKey ? loaded.error : undefined;
+  const bankroll = status?.bankroll;
   useEffect(() => {
     if (!token) return;
     let controller: AbortController | undefined;
@@ -262,8 +270,18 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
     content = <>
       {path === "/" ? <section className="boat-hero">
         <h1>競艇ダッシュボード</h1>
-        <p>1号艇を1着固定。2連単オッズと級別・展示Fで2着を決め、3連単オッズが低い2点を各100円で仮想購入します。</p>
-        <p className="boat-muted">1号艇1着率80%は検証仮説。実測値による見送り条件はありません。</p>
+        <p>毎時最大1レースを選び、展示F補正ありの3連単2点を各100円で仮想購入します。次の時間帯から公式結果を確認して精算します。</p>
+        {bankroll && <>
+          <dl className="boat-metrics">
+            <div><dt>仮想資金残高</dt><dd>{money(bankroll.balance)}</dd></div>
+            <div><dt>開始資金</dt><dd>{money(bankroll.initial)}</dd></div>
+            <div><dt>未精算の購入額</dt><dd>{money(bankroll.pending)}</dd></div>
+            <div><dt>累計購入</dt><dd>{money(bankroll.stake)}</dd></div>
+            <div><dt>累計払戻</dt><dd>{money(bankroll.payout)}</dd></div>
+            <div><dt>累計返還</dt><dd>{money(bankroll.refund)}</dd></div>
+          </dl>
+          {bankroll.balance < 200 && <p role="status">残高不足のため新規の仮想購入を見送っています。</p>}
+        </>}
         <dl className="boat-metrics">
           <div><dt>対象</dt><dd>{data.races.length}R</dd></div>
           <div><dt>凍結</dt><dd>{data.races.filter((race) => race.tickets.length).length}R</dd></div>

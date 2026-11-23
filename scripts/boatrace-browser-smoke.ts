@@ -14,6 +14,8 @@ export async function checkBoatMode(page: Page, origin: string, output: string, 
 
   await choose("競艇");
   await boat.waitFor();
+  await page.getByText("仮想資金残高", { exact: true }).waitFor();
+  await page.getByText("100,000円", { exact: true }).first().waitFor();
   assert.equal(await nav().getByRole("link", { name: "競艇" }).getAttribute("aria-current"), "true");
   assert.equal(await horse.count(), 0);
   assert(await nav().getByRole("link", { name: "競艇" }).evaluate((e) => e.getBoundingClientRect().height) >= 44);
