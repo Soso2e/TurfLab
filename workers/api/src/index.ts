@@ -52,6 +52,7 @@ import {
 import {
   audit,
   confirmBet,
+  userBankroll,
   reviseBet,
   purchaseStats,
   recommendationStats,
@@ -69,8 +70,13 @@ import { validateReferenceMirror } from "./reference-report";
 import { importOfficialResult } from "./official-result-intake";
 import { importGitHubChatReview } from "./github-chat-review-intake";
 import { rankPerformance } from "./rank-analytics";
+import {
+  saveHorseResultAnalysis,
+  listHorseResultAnalyses,
+} from "./horse-result-analysis-intake";
 import { saveResearchBaseline } from "./local-research-baseline";
 import { emitOperationalEvent } from "../../../packages/shared/src/operational-event";
+import { BoatCollector } from "./boatrace-collector";
 import {
   getTablesMetadata,
   getTableData,
@@ -164,6 +170,7 @@ export async function route(
   now: string,
   sheets?: SheetsRepository,
   digest: StatsDigest | null = null,
+  aiCashYen: number | null = null,
 ): Promise<unknown> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/api/, "");
@@ -197,6 +204,13 @@ export async function route(
     return raceRunView(repo, decodeURIComponent(path.split("/")[2]));
   if (method === "GET" && /^\/horses\/[^/]+\/runs$/.test(path))
     return horseRunView(repo, decodeURIComponent(path.split("/")[2]), url.searchParams.get("before"));
+  if (method === "GET" && path === "/horse-result-analysis") {
+    requireCondition(!sheets, "馬別結果分析はlocal保存専用です");
+    return listHorseResultAnalyses(repo, {
+      race_id: url.searchParams.get("race_id") ?? undefined,
+      horse_id: url.searchParams.get("horse_id") ?? undefined,
+    });
+  }
   if (method === "GET" && /^\/races\/[^/]+$/.test(path))
     return detail(repo, decodeURIComponent(path.split("/")[2]));
   if (method === "GET" && path === "/stats")
@@ -209,6 +223,7 @@ export async function route(
     };
   if (method === "GET" && path === "/analytics/ranks")
     return rankPerformance(repo);
+  if (method === "GET" && path === "/user-bankroll") return userBankroll(repo);
   if (method === "GET" && path === "/daily-state") {
     requireCondition(!sheets, "日次GitHubエクスポートはlocal保存専用です");
     return dailyStateExport(repo, now);
@@ -243,6 +258,14 @@ export async function route(
       decodeURIComponent(path.split("/")[2]),
     );
   if (!input) throw new DomainError("APIが見つかりません", 404);
+  if (path === "/horse-result-analysis") {
+    requireCondition(!sheets, "馬別結果分析はlocal保存専用です");
+    return saveHorseResultAnalysis(
+      repo,
+      input as unknown as Parameters<typeof saveHorseResultAnalysis>[1],
+      now,
+    );
+  }
   if (path === "/local-predictions/baseline") {
     requireCondition(!sheets, "調査ベースラインはlocal保存専用です");
     return saveResearchBaseline(repo, input, now);
@@ -333,7 +356,7 @@ export async function route(
   const revision = path.match(/^\/bets\/([^/]+)\/revise$/);
   if (revision)
     return reviseBet(repo, decodeURIComponent(revision[1]), input, now);
-  if (path === "/bets") return confirmBet(repo, input, now);
+  if (path === "/bets") return confirmBet(repo, input, now, aiCashYen);
   if (path === "/skip") return skipRace(repo, input, now);
   if (path === "/results") return saveResult(repo, input, now);
   if (path === "/reviews") return saveReview(repo, input, now);
@@ -492,16 +515,31 @@ export async function route(
 }
 export class TurfCoordinator {
   private queue: Promise<void> = Promise.resolve();
+  private boat: BoatCollector;
   constructor(
     private state: DurableObjectState,
     private env: Env,
-  ) {}
+  ) {
+    this.boat = new BoatCollector(state);
+  }
+  async alarm(): Promise<void> {
+    const task = this.queue.then(() => this.boat.alarm());
+    this.queue = task.catch(() => {});
+    await task;
+  }
   private underlying(): Repository {
     return this.env.STORAGE_MODE === "sheets"
       ? new SheetsRepository(new GoogleSheetsClient(this.env))
       : new DurableRepository(this.state.storage);
   }
   /** The latest stats digest pushed by the local worker (null when none). */
+  /** Cash left on the AI side of the shared bankroll (local ledger); null until a ledger exists. */
+  private async aiCashYen(): Promise<number | null> {
+    const ledger = await this.state.storage.get<Row>("local-prediction-ledger");
+    const cash = Number(ledger?.cash_balance_yen);
+    return Number.isFinite(cash) ? cash : null;
+  }
+
   private async loadDigest(): Promise<StatsDigest | null> {
     const meta = await this.state.storage.get<Row>("stats-digest-meta");
     if (!meta) return null;
@@ -523,6 +561,8 @@ export class TurfCoordinator {
         return response({ error: "本人用認証が必要です" }, 401);
       try {
         const bridgePath = new URL(request.url).pathname;
+        if (/^\/api\/boatrace(?:\/|$)/.test(bridgePath))
+          return await this.boat.route(request);
         if (bridgePath === "/api/local-predictions/status") {
           requireCondition(this.env.STORAGE_MODE === "local", "local保存専用です");
           if (request.method === "GET") {
@@ -894,6 +934,9 @@ export class TurfCoordinator {
           new Date().toISOString(),
           repo instanceof SheetsRepository ? repo : undefined,
           bridgePath.startsWith("/api/race-stats") ? await this.loadDigest() : null,
+          bridgePath === "/api/bets" && request.method === "POST"
+            ? await this.aiCashYen()
+            : null,
         );
         if (staged.changes.size) {
           const changes = [...staged.changes.values()];
@@ -948,7 +991,7 @@ export default {
       }
       authenticatedRequest = true;
       const result = await env.COORDINATOR.get(
-        env.COORDINATOR.idFromName("owner"),
+        env.COORDINATOR.idFromName(/^\/api\/boatrace(?:\/|$)/.test(url.pathname) ? "boatrace-v1" : "owner"),
       ).fetch(request);
       status = result.status;
       return result;

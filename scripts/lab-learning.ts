@@ -800,8 +800,42 @@ export function errorSummary(outcomes: Row[], plans: Row[]): Row {
   return counts;
 }
 
+/** Summarizes horse_result_analyses learning_flag distribution for Core learning. */
+export function summarizeAnalysisFeedback(analyses: Row[]): Row {
+  const counts: Record<string, number> = {};
+  const abilityCandidates: Row[] = [];
+  const paceCandidates: Row[] = [];
+  const horseRisk: Record<string, number> = {};
+  for (const row of analyses) {
+    const flag = String(row.learning_flag ?? "normal");
+    counts[flag] = (counts[flag] ?? 0) + 1;
+    const item = { race_id: row.race_id, entry_id: row.entry_id, horse_id: row.horse_id };
+    if (flag === "ability_model_candidate" && abilityCandidates.length < 20) abilityCandidates.push(item);
+    else if (flag === "pace_model_candidate" && paceCandidates.length < 20) paceCandidates.push(item);
+    else if (flag === "horse_risk_accumulate" && row.horse_id) {
+      const hid = String(row.horse_id);
+      horseRisk[hid] = (horseRisk[hid] ?? 0) + 1;
+    }
+  }
+  return {
+    total: analyses.length,
+    by_flag: counts,
+    pending_excluded: counts.pending ?? 0,
+    irregular_downweighted: counts.irregular_one_time ?? 0,
+    ability_model_candidates: abilityCandidates,
+    pace_model_candidates: paceCandidates,
+    horse_risk_accumulate: Object.entries(horseRisk).map(([horse_id, count]) => ({ horse_id, count })),
+  };
+}
+
 /** One sample per race: the last pre-start record is what the race was judged on. */
-export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<string, Row>, now: string): Row {
+export function learningReport(
+  outcomes: Row[],
+  plans: Row[],
+  oddsByRace: Map<string, Row>,
+  now: string,
+  analyses: Row[] = [],
+): Row {
   const judged = latestPerRace(outcomes);
   const samples = outcomeSamples(judged, oddsByRace);
   const bets = (kind: "win" | "place") => judged.flatMap((o) => {
@@ -883,6 +917,7 @@ export function learningReport(outcomes: Row[], plans: Row[], oddsByRace: Map<st
     recorded_probabilities: recordedCalibration(plans, judged, oddsByRace),
     market_blend: walkForwardBlend(samples),
     learning: walkForward(samples),
+    ...(analyses.length ? { horse_result_analysis_feedback: summarizeAnalysisFeedback(analyses) } : {}),
     note: "仮想の記録。実馬券は購入しない。回収率は標本数と信頼区間を併せて読む",
   };
 }

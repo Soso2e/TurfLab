@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from .analysis_feedback import AnalysisIndex, summarize_feedback
 from .data import HistoryIndex, group_races, strip_prerace
 from .features import FEATURES, FEATURE_GROUPS, build_race_features
 from . import pace as P
@@ -63,13 +64,14 @@ def _bucket_missing(frac: float) -> str:
 
 
 def run_backtest(runs: list[dict], cfg: dict | None = None, mode: str = "dev", state_dir: Path | None = None,
-                 allow_repeat_holdout: bool = False) -> dict[str, Any]:
+                 allow_repeat_holdout: bool = False, analyses: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     cfg = {**DEFAULT_CONFIG, **(cfg or {})}
     races = group_races(runs)
     excluded = dict(getattr(group_races, "last_excluded", {}))
     if len(races) < cfg["min_train_races"] + 30:
         return {"version": VERSION, "status": "insufficient_data", "races": len(races), "excluded": excluded}
     idx = HistoryIndex(runs)
+    aidx = AnalysisIndex(analyses) if analyses is not None else None
     checked = check_time_invariance(runs, races, cfg["invariance_samples"])
     X = [build_race_features(r, r["entries"], idx) for r in races]
     winners = [r["winner_index"] for r in races]
@@ -112,7 +114,8 @@ def run_backtest(runs: list[dict], cfg: dict | None = None, mode: str = "dev", s
             continue
         if last_fit_day is None or _days(d, last_fit_day) >= cfg["refit_days"]:
             tx, tw = [X[i] for i in train_ix], [winners[i] for i in train_ix]
-            models = {k: ConditionalLogit(cols).fit(tx, tw) for k, cols in variants.items()}
+            rw = [aidx.race_training_weight(races[i], races[i]["entries"]) for i in train_ix] if aidx is not None else None
+            models = {k: ConditionalLogit(cols).fit(tx, tw, race_weights=rw) for k, cols in variants.items()}
             pt = [i for i in train_ix if pace_t[i]["z"] is not None]
             pace_model = None
             if len(pt) >= 40:
@@ -199,6 +202,8 @@ def run_backtest(runs: list[dict], cfg: dict | None = None, mode: str = "dev", s
     }
     if cfg["ablate"]:
         report["ablation"] = _ablation(per, days)
+    if analyses is not None:
+        report["learning_flag_feedback"] = summarize_feedback(analyses)
     if mode == "final" and lock is not None:
         state_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
         lock.write_text(json.dumps({"consumed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "config_hash": chash,

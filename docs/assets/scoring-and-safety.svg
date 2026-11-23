@@ -102,8 +102,8 @@
   <text x="844" y="303" fill="#fce7f3" font-size="11">既存ファイルの上書き・SHA変更を拒否。修正は別版へ</text>
 
   <rect x="832" y="322" width="274" height="48" rx="8" fill="#1f091d" stroke="#db2777"/>
-  <text x="844" y="341" fill="#fde047" font-size="12" font-weight="700">④ AI参考推奨と本人仮想Betの完全分離</text>
-  <text x="844" y="359" fill="#fce7f3" font-size="11">予想保存でBetは作らない。本人Betは1R 1千円/日5千円</text>
+  <text x="844" y="341" fill="#fde047" font-size="12" font-weight="700">④ AI分と本人Betの完全分離</text>
+  <text x="844" y="359" fill="#fce7f3" font-size="11">AIは1R1,000円を自動記録。本人は上乗せのみ(残高内)</text>
 
   <rect x="832" y="378" width="274" height="48" rx="8" fill="#1f091d" stroke="#db2777"/>
   <text x="844" y="397" fill="#fde047" font-size="12" font-weight="700">⑤ 30R以上の未使用検証まで重み不変</text>

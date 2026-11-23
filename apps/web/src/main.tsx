@@ -1,4 +1,6 @@
 import { RaceStatsView, StatsPage } from "./StatsPage";
+import { BoatRaceApp } from "./BoatRaceApp";
+import { isBoatPath, SportSwitch, useSportPath } from "./SportNavigation";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -16,6 +18,7 @@ import { MobileRaceBrief } from "./MobileRaceBrief";
 import { GitHubSyncStatus } from "./GitHubSyncStatus";
 import { LocalPredictionStatus } from "./LocalPredictionStatus";
 import { DatabaseExplorer } from "./DatabaseExplorer";
+import { HorseResultAnalysisPanel } from "./HorseResultAnalysis";
 import { HorseRunsModal, RacePastRuns } from "./PastRuns";
 import {
   IconRace,
@@ -1390,7 +1393,7 @@ function App() {
     { id: "settings", title: "設定", icon: IconSettings },
   ];
   return (
-    <div className="app app-dock-layout">
+    <div className="app app-dock-layout horse-sport">
       <GooFilterSvg />
       <main>
         <header>
@@ -1416,6 +1419,7 @@ function App() {
             <span className="connection">
               {token ? "ローカルDB (SQLite)" : "未接続"}
             </span>
+            <SportSwitch />
           </div>
         </header>
         {!token ? (
@@ -2679,7 +2683,7 @@ function App() {
                   </p>
                   <h3>本人の仮想Bet</h3>
                   <p>
-                    1R最大1,000円・JST当日最大5,000円・100円単位。発走後は購入・変更できません。実馬券は購入しません。
+                    AIの予想は1R1,000円が自動で記録されます（本人の操作は不要）。ここはその上に本人が上乗せする分です。1R・1日の上限はなく、出資金10万円（AI分と共通）の残高内・100円単位。発走後は購入・変更できません。実馬券は購入しません。
                   </p>
                   {rows(detail.skips ?? []).map((skip) => (
                     <p key={String(skip.event_id)} className="muted">
@@ -3009,6 +3013,12 @@ function App() {
                     <summary>観測・原因仮説・未確認・次回検証</summary>
                     <JsonView value={detail.reviews} />
                   </details>
+                  {rows(detail.horse_result_analyses ?? []).length > 0 && (
+                    <HorseResultAnalysisPanel
+                      analyses={rows(detail.horse_result_analyses ?? [])}
+                      entries={rows(detail.entries)}
+                    />
+                  )}
                 </section>
                 </div>
               </>
@@ -3412,4 +3422,9 @@ function App() {
     </div>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+function TurfLab() {
+  const pathname = useSportPath();
+  return isBoatPath(pathname) ? <BoatRaceApp pathname={pathname} /> : <App />;
+}
+
+createRoot(document.getElementById("root")!).render(<TurfLab />);

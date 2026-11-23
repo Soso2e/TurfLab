@@ -53,7 +53,7 @@ _\*TL_* の業務タブの書き込み入口はWorkersに限定する。_* Durab
 2. ChatGPTに [prompt](../prompts/chatgpt-daily.md) と [JSON Schema](../database/sheets/chatgpt-import.schema.json) を渡す。
 3. 同じ出力の再送ではimport_id/operation_idを変えない。内容が変わる場合は別ID・別版にする。
 4. Webの「Sheetsの出力を確認」で検証と保存を行う。保存は確定・購入とは別。`confirmed:true` は本人が出典を確認したものにだけ付ける。未確認・example.invalidは確定不可。
-5. Webで予想確定→発走前に採用版固定→本人の仮想購入または見送り。Morning/Finalの選択はFinal優先。採用固定後は変更不可。
+5. Webで予想確定→発走前に採用版固定→本人の仮想購入または見送り（**2026-11-23改訂**：AIの予想は確定後に自動採用され、AIの仮想Bet（1R1,000円）も自動記録される。本人のBetはその上乗せで、1R・日の上限は廃止し、出資金10万円（AI分と共通）の残高が上限。詳細は [daily-flow.md](daily-flow.md)）。Morning/Finalの選択はFinal優先。採用固定後は変更不可。
 6. 公式結果と全払戻を入力し `payouts_complete:true` を確認する。結果がofficial/cancelledの場合だけ精算する。訂正はrevisionを増やし、supersedes_result_idを指定する。全出走馬の状態と全着順が必要。同着は `[[1,2],[3]]` のように同順位の配列にする。
 7. 翌朝レビューは観測・原因仮説・未確認・次の検証を分け、本人が確認して保存する。モデルを自動変更しない。
 

@@ -67,6 +67,9 @@ const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整�
 const BIAS_PREFIX = "[当日傾向] ";
 /** Automatic selection per JST day (race-flow-v2: deeper research on fewer races). */
 export const MAX_AUTO_RACES = 3;
+/** Stage 4 runs once, starting 10 minutes before the start; the last tick that may start it is 5 minutes before. */
+export const PRERACE_START_MS = 600_000;
+export const PRERACE_LAST_START_MS = 300_000;
 /** Stage 2 gap-fill searches per race (race-flow-v2). */
 export const MAX_FILL_ROUNDS = 2;
 
@@ -700,7 +703,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         ) {
           this.mark(race, 4, prechecked
             ? "予想確定済み。発走前の再調査を実施"
-            : "予想確定済み。発走60〜10分前の再調査待ち");
+            : "予想確定済み。発走10分前の再調査待ち");
           continue;
         }
         const predictionPath = str(output, "prediction_path");
@@ -983,15 +986,52 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
 
   /** Recompute capital & P&L ledger deterministically via Python and push immediately. */
   private async refreshLedger(day: string): Promise<Row | null> {
+    // The user's own bets share the same 100,000-yen bankroll; Core holds them.
+    const user = await this.api("/user-bankroll").catch(() => null);
     const ledger = await runPythonLedger({
       exchangeDir: this.exchange,
       targetDate: day,
+      userOpenStakeYen: Number(user?.open_stake_yen ?? 0),
+      userSettledNetYen: Number(user?.settled_net_yen ?? 0),
     });
     if (ledger) {
+      const cash = Number(ledger.cash_balance_yen);
+      this.ledgerCash = Number.isFinite(cash) ? cash : null;
+      this.stakedSinceLedger = 0;
       await this.api("/local-predictions/ledger", { ledger }).catch(() => {});
     }
     return ledger;
   }
+  /** AI-side cash from the last ledger run, and what the AI has staked since then. Reused so the
+   * gate does not start Python for every plan (slow on Windows); each refreshLedger resets it. */
+  private ledgerCash: number | null = null;
+  private stakedSinceLedger = 0;
+
+  /** One bankroll for the AI plans and the user's bets: a plan whose stake exceeds what is left is skipped, not shrunk.
+   * If the ledger cannot be computed (no Python), nothing is blocked — the cash is unknown, not zero. */
+  private async withinBankroll(plan: Row, day: string): Promise<Row> {
+    const stake = rows(plan.picks ?? []).reduce((s, x) => s + Number(x.amount_yen ?? 0), 0);
+    if (stake <= 0) return plan;
+    if (this.ledgerCash === null) await this.refreshLedger(day).catch(() => null);
+    if (this.ledgerCash === null) return plan;
+    // The user's side is read fresh (a cheap Core call): their bets can change between ticks.
+    const user = await this.api("/user-bankroll").catch(() => null);
+    const available = this.ledgerCash - this.stakedSinceLedger
+      - Number(user?.open_stake_yen ?? 0) + Number(user?.settled_net_yen ?? 0);
+    if (stake <= available) {
+      this.stakedSinceLedger += stake;
+      return plan;
+    }
+    return {
+      ...plan,
+      picks: [],
+      skip_reason: `出資金の残高不足のため見送り（残高${Math.max(0, available)}円・必要${stake}円）`,
+      skipped_by_bankroll: true,
+      skipped_stake_yen: stake,
+      bankroll_available_yen: available,
+    };
+  }
+
   /** Latest stage of a race in this tick, for the Web status. */
   private mark(race: Row, stage: RaceStage, detail: string) {
     const id = String(race.race_id);
@@ -1319,7 +1359,9 @@ JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_
     const research = obj(pack.research);
     const start = Date.parse(str(race, "scheduled_start_at"));
     const left = start - Date.now();
-    if (left > 3600_000 || left < 600_000) return null;
+    // The 400-yen EV lane is decided once, at 10 minutes before the start (no 60-minute pass).
+    // Ticks run every 5 minutes, so the first tick inside 10..5 minutes starts the job.
+    if (left > PRERACE_START_MS || left < PRERACE_LAST_START_MS) return null;
     const key = raceKey(str(race, "race_id"));
     const jobKey = `${day}-prerace-${key}`;
     // Stage 4 reads odds only for the combinations the model already ranks highest.
@@ -1554,14 +1596,14 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
               (sum, pick) => sum + Number(pick.amount_yen ?? 0), 0);
           }
           await immutableLocalFile(this.exchange, aiName, JSON.stringify(
-            aiDiscretionaryPlan(record, new Date().toISOString(),
-              Math.max(0, AI_DAY_CAP_YEN - spentAiToday))));
+            await this.withinBankroll(aiDiscretionaryPlan(record, new Date().toISOString(),
+              Math.max(0, AI_DAY_CAP_YEN - spentAiToday)), day)));
         }
         // Stage 3 lane: 600 yen, fixed with the prediction, never reads odds.
         const hitName = `plans/${day}/${key}-hit.json`;
         if (!(await exists(hitName))) {
           await immutableLocalFile(this.exchange, hitName, JSON.stringify(
-            hitPlan(record, weights, calibrated, new Date().toISOString())));
+            await this.withinBankroll(hitPlan(record, weights, calibrated, new Date().toISOString()), day)));
           await this.refreshLedger(day).catch(() => {});
         }
         // Stage 4 lane: 400 yen from the time-stamped pre-race odds.
@@ -1588,7 +1630,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           continue;
         }
         await immutableLocalFile(this.exchange, name, JSON.stringify(
-          evPlan(record, odds, weights, calibrated, new Date().toISOString())));
+          await this.withinBankroll(evPlan(record, odds, weights, calibrated, new Date().toISOString()), day)));
         // Selective lane: 0-3 picks, flexible ticket type, active skip, daily 5,000 yen cap.
         const selectiveName = `plans/${day}/${key}-selective.json`;
         if (!(await exists(selectiveName))) {
@@ -1603,9 +1645,9 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             }
           }
           await immutableLocalFile(this.exchange, selectiveName, JSON.stringify(
-            selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
+            await this.withinBankroll(selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
               remainingDailyBudgetYen: Math.max(0, SELECTIVE_DAILY_BUDGET_YEN - spentToday),
-            })));
+            }), day)));
         }
         await this.refreshLedger(day).catch(() => {});
         this.mark(race, 4, "的中狙い600円・期待値買い400円・新方式を固定済み");

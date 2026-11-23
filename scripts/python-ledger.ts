@@ -6,6 +6,9 @@ export type PythonLedgerOptions = {
   exchangeDir: string;
   targetDate: string;
   initialCapitalYen?: number;
+  /** The user's own bets (from Core): open stake and net of settled bets. */
+  userOpenStakeYen?: number;
+  userSettledNetYen?: number;
   scriptPath?: string;
   pythonBin?: string;
   timeoutMs?: number;
@@ -22,6 +25,8 @@ export async function runPythonLedger(
   const payload = {
     exchange_dir: options.exchangeDir,
     target_date: options.targetDate,
+    user_open_stake_yen: options.userOpenStakeYen ?? 0,
+    user_settled_net_yen: options.userSettledNetYen ?? 0,
     ...(typeof options.initialCapitalYen === "number" &&
     options.initialCapitalYen > 0
       ? { initial_capital_yen: options.initialCapitalYen }

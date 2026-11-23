@@ -7,6 +7,7 @@ import path from "node:path";
 import { chromium, type Browser } from "@playwright/test";
 import { obj, rows, type Row } from "../packages/shared/src/domain";
 import { wizardDraft, wizardAnswer } from "../tests/wizard-fixture";
+import { checkBoatMode } from "./boatrace-browser-smoke";
 
 // Own process, separate port, separate empty DO storage. Never stop 8787.
 const port = 8791,
@@ -169,6 +170,7 @@ try {
   await page.getByLabel("本人用接続キー").fill(token);
   await page.getByRole("button", { name: "接続する" }).click();
   await page.getByRole("heading", { name: "本日のレース" }).waitFor();
+  const boatProof = await checkBoatMode(page, origin, output, token);
   await page.getByRole("tab", { name: /設定/ }).click();
   await page
     .getByLabel("公式出馬表JSON", { exact: true })
@@ -296,6 +298,11 @@ try {
   browser = undefined;
   await stop();
   await start();
+  if (boatProof) {
+    const restoredBoat = await api("/boatrace/races/" + boatProof.id);
+    if (JSON.stringify(obj(restoredBoat.race).program) !== JSON.stringify(boatProof.program))
+      throw new Error("再起動後に競艇公式番組の出典が一致しません");
+  }
   const after = await api("/backup");
   if (before.hash !== after.hash) throw new Error("再起動後ハッシュ不一致");
   const restoredPack = await api("/race-import/pack", {
@@ -313,6 +320,11 @@ try {
         browser: edge ? "Edge/Chromium" : "Chromium",
         iphone: "unverified",
         real_race: "unverified",
+        boatrace: {
+          width: 390,
+          mode_switch: "verified",
+          official_program: boatProof ?? null,
+        },
         steps: [
           "official-form-preview",
           "master-confirm-readback",

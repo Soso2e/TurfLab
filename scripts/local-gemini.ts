@@ -6,6 +6,28 @@ import { obj, type Row } from "../packages/shared/src/domain";
 import { extractJson, predictWithCodex } from "./local-codex";
 import { emitOperationalEvent } from "../packages/shared/src/operational-event";
 
+// agyのrun_command(シェル実行)は、Windowsで実行のたびに一瞬コンソールが出る。
+// 調査は検索・URL読み込みで足りる想定なので、既定ではシェルを拒否する。
+// 従来どおり許可するときは TURFLAB_GEMINI_ALLOW_SHELL=1。
+export function geminiCliArgs(
+  model: string,
+  allowShell = process.env.TURFLAB_GEMINI_ALLOW_SHELL === "1",
+): string[] {
+  const args = [
+    "--model",
+    model,
+    "--input-format",
+    "stream-json",
+    "--output-format",
+    "stream-json",
+    "--disable-slash-commands",
+  ];
+  if (!allowShell) {
+    args.push("--settings", JSON.stringify({ permissions: { deny: ["command(*)"] } }));
+  }
+  return args;
+}
+
 export async function predictWithGemini(
   directory: string,
   prompt: string,
@@ -38,15 +60,7 @@ export async function predictWithGemini(
   const stdout = await new Promise<string>((resolve, reject) => {
     const child = spawn(
       "agy",
-      [
-        "--model",
-        model,
-        "--input-format",
-        "stream-json",
-        "--output-format",
-        "stream-json",
-        "--disable-slash-commands",
-      ],
+      geminiCliArgs(model),
       {
         cwd: directory,
         env,
