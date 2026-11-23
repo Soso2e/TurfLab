@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
-import { predictWithGemini, predictWithHelper } from "../scripts/local-gemini";
+import {
+  geminiCliArgs,
+  predictWithGemini,
+  predictWithHelper,
+} from "../scripts/local-gemini";
 
 describe("local-gemini and fallback", () => {
+  it("denies agy shell commands by default and can opt back in", () => {
+    const denied = geminiCliArgs("m", false);
+    const at = denied.indexOf("--settings");
+    expect(at).toBeGreaterThan(-1);
+    expect(JSON.parse(denied[at + 1])).toEqual({
+      permissions: { deny: ["command(*)"] },
+    });
+    expect(geminiCliArgs("m", true)).not.toContain("--settings");
+    expect(denied.slice(0, 2)).toEqual(["--model", "m"]);
+  });
+
   it("exports predictWithGemini and predictWithHelper functions", () => {
     expect(typeof predictWithGemini).toBe("function");
     expect(typeof predictWithHelper).toBe("function");
