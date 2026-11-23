@@ -36,7 +36,7 @@ AI（ローカルCodex CLI または 通常ChatGPT）が出力したJSONはす�
 ### ステップ別の詳細動作
 
 1. **STEP 1（出馬表・近走調査 / CLIプロンプト①）**
-   - **条件**: JST 09:00〜20:59 の間、3時間枠ごと（`YYYY-MM-DD-research-{0..7}`）、当日登録レースが5R未満のとき（または `--once --race-url <公式URL>` 指定時）。
+   - **条件**: JST 09:00〜20:59 の間、3時間枠ごと（`YYYY-MM-DD-research-{0..7}`）、当日登録レースが3R未満のとき（`MAX_AUTO_RACES = 3`、2026-11-11に5Rから変更）（または `--once --race-url <公式URL>` 指定時）。
    - **動作**: `web_search="live"` で公式出馬表を確認し、発走60分以上前のレースから全頭（馬番・馬名・騎手・枠・斤量・状態）と各馬の近走最大3走（着順・通過順・頭数・馬場）を収集。**この段階ではオッズ採取も予想・展開作成も禁止**。
    - **時刻刻印**: AIが自己申告した時刻は使わず、CLI実行証跡（`receipt.json` の `finished_at`）を `generated_at` として `exchange/daily/YYYY-MM-DD/morning-reference-v{timestamp}.json` に保存。
 2. **STEP 2（名前登録・Snapshot固定・Baseline算出 / Core API）**
