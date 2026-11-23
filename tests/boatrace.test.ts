@@ -150,7 +150,7 @@ it("公式の段組を解釈し、締切時オッズを明示する", () => {
 
 afterEach(() => vi.useRealTimers());
 
-it("毎時1レースだけ購入し、再起動後の翌時精算・訂正・残高不足を同じ台帳で扱う", async () => {
+it("30分に1レースを購入し、再起動後の精算・訂正・残高不足を同じ台帳で扱う", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   const database = new DatabaseSync(":memory:");
   const kv = new Map<string, unknown>();
@@ -189,16 +189,24 @@ it("毎時1レースだけ購入し、再起動後の翌時精算・訂正・残
   const contents: Record<string, () => string> = {
     index: () => `<table><tbody><tr><td><img src="/text_place1_12.png" alt="住之江"></td>
       <td><a href="/owpc/pc/race/raceindex?hd=20261123&jcd=12">開催</a></td></tr></tbody></table>`,
-    raceindex: () => `<table><tbody>${programRow(1, "15:27")}${programRow(2, "15:28")}${programRow(3, "17:27")}</tbody></table>`,
+    raceindex: () => `<table><tbody>${programRow(1, "15:27")}${programRow(2, "15:28")}${
+      programRow(3, "15:57")}${programRow(4, "16:27")}</tbody></table>`,
     odds2tf: () => oddsHtml("odds2tf"),
     odds3t: () => oddsHtml("odds3t"),
     beforeinfo: () => `<div class="table1_boatImage1"><span class="table1_boatImage1Number">2</span>
       <span class="table1_boatImage1Time">F.03</span></div>`,
     raceresult: () => published,
   };
-  const source = { page: vi.fn(async (url: string) => ({
-    html: contents[new URL(url).pathname.split("/").at(-1)!](), evidence: evidence(url, new Date().toISOString()),
-  })) };
+  const source = { page: vi.fn(async (url: string) => {
+    const parsed = new URL(url);
+    const page = parsed.pathname.split("/").at(-1)!;
+    let html = contents[page]();
+    if (parsed.searchParams.get("rno") === "3") {
+      html = page === "raceresult" ? payouts(["不成立/100"], []) :
+        html.replace("15:24", "15:54").replace("<td>15:27</td>", "<td>15:27</td><td>15:28</td><td>15:57</td>");
+    }
+    return { html, evidence: evidence(url, new Date().toISOString()) };
+  }) };
   const request = (path: string, method = "GET") => new Request("https://example.test/api/boatrace/" + path, { method });
   const detail = `races/${race.id}`;
   try {
@@ -214,44 +222,49 @@ it("毎時1レースだけ購入し、再起動後の翌時精算・訂正・残
     const saved = (await (await collector.route(request(detail))).json() as { race: BoatRecord }).race.freeze;
     expect(saved?.plans.adjusted.second).toBe(2);
     expect(await bankroll()).toMatchObject({ balance: 99_800, stake: 200, pending: 200 });
-    expect(new Date(alarmTime)).toEqual(new Date(`${date}T16:00:00+09:00`));
+    expect(new Date(alarmTime)).toEqual(new Date(`${date}T15:30:00+09:00`));
     collector = new BoatCollector(state, source);
     vi.setSystemTime(new Date(`${date}T15:26:00+09:00`));
     source.page.mockClear();
     await collector.alarm();
     expect(source.page).not.toHaveBeenCalled();
     expect(await (await collector.route(request(`races/${date}-12-2`))).json()).toMatchObject({ funded: false });
-    vi.setSystemTime(new Date(`${date}T16:00:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T15:30:00+09:00`));
     await collector.alarm();
     expect(await (await collector.route(request(detail))).json()).toMatchObject({
       race: { freeze: saved, issue: "公式3連単払戻・返還情報の確定待ち" }, settlements: { adjusted: null },
     });
+    vi.setSystemTime(new Date(`${date}T15:55:00+09:00`));
+    await collector.alarm();
+    expect(await (await collector.route(request(`races/${date}-12-3`))).json()).toMatchObject({ funded: true });
+    expect(await bankroll()).toMatchObject({ balance: 99_600, stake: 400, pending: 400 });
     published = payouts(["1-2-4/800"], [[1, 1], [2, 2], [4, 3]], [5]);
-    vi.setSystemTime(new Date(`${date}T17:00:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T16:00:00+09:00`));
     await collector.alarm();
     expect(await (await collector.route(request(detail))).json()).toMatchObject({
       funded: true, settlements: { adjusted: { net: 700 } }, revisions: [{ payouts: { "1-2-4": 800 } }],
     });
-    expect(await bankroll()).toMatchObject({ balance: 100_700, stake: 200, payout: 800, refund: 100, pending: 0 });
+    expect(await bankroll()).toMatchObject({ balance: 100_700, stake: 400, payout: 800, refund: 300, pending: 0 });
     database.exec("INSERT INTO boat_auto_bets VALUES ('other', 0, 100600, 0, 0)");
-    vi.setSystemTime(new Date(`${date}T17:25:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T16:25:00+09:00`));
     source.page.mockClear();
     await collector.alarm();
     expect(source.page).not.toHaveBeenCalled();
     expect(await bankroll()).toMatchObject({ balance: 100 });
     published = payouts(["1-2-4/900"], [[1, 1], [2, 2], [4, 3]], [5]);
-    vi.setSystemTime(new Date(`${date}T18:00:00+09:00`));
+    vi.setSystemTime(new Date(`${date}T16:30:00+09:00`));
     await collector.alarm();
     expect(await (await collector.route(request(detail))).json()).toMatchObject({
       race: { freeze: saved }, settlements: { adjusted: { net: 800 } },
       revisions: [{ payouts: { "1-2-4": 800 } }, { payouts: { "1-2-4": 900 } }],
     });
-    expect(await bankroll()).toMatchObject({ balance: 200, payout: 900, refund: 100, pending: 0 });
-    expect(await (await collector.route(request("stats"))).json()).toMatchObject({ settled: 1 });
+    expect(await bankroll()).toMatchObject({ balance: 200, payout: 900, refund: 300, pending: 0 });
+    expect(await (await collector.route(request("stats"))).json()).toMatchObject({ settled: 2 });
     expect(await (await collector.route(request("archive?date=" + date))).json()).toMatchObject({
-      date, records: [{ freeze: saved }, { id: `${date}-12-2` }, { id: `${date}-12-3` }],
-      autoBets: [{ race_id: race.id, stake: 200, payout: 900, refund: 100 }],
-      revisions: [{ raceId: race.id }, { raceId: race.id }],
+      date, records: [{ freeze: saved }, { id: `${date}-12-2` }, { id: `${date}-12-3` }, { id: `${date}-12-4` }],
+      autoBets: [{ race_id: race.id, stake: 200, payout: 900, refund: 100 },
+        { race_id: `${date}-12-3`, stake: 200, payout: 0, refund: 200 }],
+      revisions: [{ raceId: race.id }, { raceId: race.id }, { raceId: `${date}-12-3` }],
     });
   } finally {
     database.close();

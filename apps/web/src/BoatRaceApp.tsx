@@ -270,7 +270,7 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
     content = <>
       {path === "/" ? <section className="boat-hero">
         <h1>競艇ダッシュボード</h1>
-        <p>毎時最大1レースを選び、展示F補正ありの3連単2点を各100円で仮想購入します。次の時間帯から公式結果を確認して精算します。</p>
+        <p>30分ごとに最大1レースを選び、展示F補正ありの3連単2点を各100円で仮想購入します。次の巡回から公式結果を確認して精算します。</p>
         {bankroll && <>
           <dl className="boat-metrics">
             <div><dt>仮想資金残高</dt><dd>{money(bankroll.balance)}</dd></div>

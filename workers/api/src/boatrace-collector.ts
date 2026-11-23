@@ -7,12 +7,12 @@ import {
 } from "./boatrace-official";
 
 const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
+const CYCLE = 30 * MINUTE;
 const DAY = 1440 * MINUTE;
 const FIRST_CAPTURE = 145_000;
 const INITIAL_BANKROLL = 100_000;
 const BET_COST = 2 * BOAT_STAKE;
-const hourStart = (time: number) => Math.floor(time / HOUR) * HOUR;
+const cycleStart = (time: number) => time - time % CYCLE;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const ID_PATTERN = /^\d{4}-\d{2}-\d{2}-(?:0[1-9]|1\d|2[0-4])-(?:[1-9]|1[0-2])$/;
 const message = (err: unknown) => err instanceof Error ? err.message : String(err);
@@ -83,8 +83,13 @@ export class BoatCollector {
     return { initial: INITIAL_BANKROLL, balance, ...totals };
   }
 
-  private boughtIn(hour: number) {
-    return this.sql.exec("SELECT 1 FROM boat_auto_bets WHERE hour = ?", hour).toArray().length > 0;
+  private boughtIn(cycle: number) {
+    // Existing hourly purchases keep their original ledger key. Use their
+    // cutoff to also count purchases made in the second half of that hour.
+    return this.sql.exec(`SELECT 1 FROM boat_auto_bets AS b
+      JOIN boat_races AS r ON r.id = b.race_id
+      WHERE b.hour IN (?, ?) AND r.cutoff >= ? AND r.cutoff < ? LIMIT 1`,
+    cycle, cycle - CYCLE, cycle, cycle + CYCLE).toArray().length > 0;
   }
 
   private row(id: string) {
@@ -125,10 +130,10 @@ export class BoatCollector {
       }
     }));
     sync.errors.push(...failed.filter((error) => error !== null));
-    sync.next = sync.pending.length ? now + 5000 : sync.errors.length ? now + 5 * MINUTE : hourStart(now) + HOUR;
+    sync.next = sync.pending.length ? now + 5000 : sync.errors.length ? now + 5 * MINUTE : cycleStart(now) + CYCLE;
   }
 
-  private async freeze(row: Row, hour: number) {
+  private async freeze(row: Row, cycle: number) {
     const race = JSON.parse(row.body) as BoatRecord;
     const url = (name: "odds2tf" | "odds3t" | "beforeinfo") => officialUrl(name, race.date, race.venue, race.number);
     try {
@@ -148,13 +153,13 @@ export class BoatCollector {
         trifecta: parseOdds(trifecta.value, "trifecta"),
         exhibition,
       }, now);
-      if (hourStart(now.getTime()) !== hour || !(await this.status()).enabled) return;
+      if (cycleStart(now.getTime()) !== cycle || !(await this.status()).enabled) return;
       delete race.issue;
       this.state.storage.transactionSync(() => {
-        if (Date.now() >= Date.parse(freeze.cutoff) || this.boughtIn(hour) ||
+        if (Date.now() >= Date.parse(freeze.cutoff) || this.boughtIn(cycle) ||
           this.bankroll().balance < BET_COST || this.row(row.id)?.body !== row.body) return;
-        this.sql.exec("INSERT INTO boat_auto_bets (race_id, hour, stake) VALUES (?, ?, ?)", race.id, hour, BET_COST);
-        this.save({ ...race, freeze }, 0, hour + HOUR);
+        this.sql.exec("INSERT INTO boat_auto_bets (race_id, hour, stake) VALUES (?, ?, ?)", race.id, cycle, BET_COST);
+        this.save({ ...race, freeze }, 0, cycle + CYCLE);
       });
     } catch (err) {
       if (this.row(row.id)?.body !== row.body) return;
@@ -177,9 +182,9 @@ export class BoatCollector {
       }) !== current;
       if (changed) race.result = result;
       delete race.issue;
-      // Recheck on the next hour after first publication, and once after the race day.
+      // Recheck on the next cycle after first publication, and once after the race day.
       const now = Date.now();
-      const next = !previous ? hourStart(now) + HOUR
+      const next = !previous ? cycleStart(now) + CYCLE
         : japanDate(now) === race.date ? Date.parse(`${race.date}T00:00:00+09:00`) + DAY : 0;
       const settlement = settleBoatRace(race, "adjusted");
       if (!settlement) throw new BoatDataMissing("公式結果の精算待ち");
@@ -194,7 +199,7 @@ export class BoatCollector {
       const stored = JSON.parse(row.body) as BoatRecord;
       if (!stored.result) stored.issue = message(err);
       const now = Date.now();
-      this.save(stored, 0, now < row.cutoff + 3 * DAY ? hourStart(now) + HOUR : 0);
+      this.save(stored, 0, now < row.cutoff + 3 * DAY ? cycleStart(now) + CYCLE : 0);
     }
   }
 
@@ -203,11 +208,12 @@ export class BoatCollector {
     if (!status.enabled) return;
     this.initialize();
     const now = Date.now();
-    const hour = hourStart(now);
+    const cycle = cycleStart(now);
     // Set a fallback first so transient failures cannot permanently stop collection.
     await this.state.storage.setAlarm(now + MINUTE);
     let sync = await this.state.storage.get<ProgramSync>("boat-program");
     if (sync?.date !== japanDate(now)) sync = { date: japanDate(now), pending: [], next: now, errors: [] };
+    sync.next = Math.min(sync.next, cycle + CYCLE);
     let issue: string | null = null;
     try {
       const results = this.sql.exec<Row>(`SELECT * FROM boat_races WHERE result_next > 0
@@ -215,12 +221,12 @@ export class BoatCollector {
         ORDER BY result_next, id LIMIT 4`, now).toArray();
       await Promise.all(results.map((row) => this.result(row)));
       if (sync.next <= now) await this.program(now, sync);
-      if (!this.boughtIn(hour) && this.bankroll().balance >= BET_COST) {
+      if (!this.boughtIn(cycle) && this.bankroll().balance >= BET_COST) {
         const at = Date.now();
         const capture = this.sql.exec<Row>(`SELECT * FROM boat_races WHERE capture_next > 0
           AND capture_next <= ? AND cutoff > ? AND cutoff < ? ORDER BY cutoff, id LIMIT 1`,
-        at, at, hour + HOUR).toArray()[0];
-        if (capture && (await this.status()).enabled) await this.freeze(capture, hour);
+        at, at, cycle + CYCLE).toArray()[0];
+        if (capture && (await this.status()).enabled) await this.freeze(capture, cycle);
       }
       issue = sync.errors.length ? sync.errors.join(" / ") : null;
     } catch (err) {
@@ -228,15 +234,15 @@ export class BoatCollector {
       sync.next = now + 5 * MINUTE;
     }
     const at = Date.now();
-    const activeHour = hourStart(at);
-    const earliestCutoff = this.boughtIn(activeHour) ? activeHour + HOUR : at + 1;
+    const activeCycle = cycleStart(at);
+    const earliestCutoff = this.boughtIn(activeCycle) ? activeCycle + CYCLE : at + 1;
     const wake = this.sql.exec<{ due: number | null }>(`
       SELECT MIN(due) AS due FROM (
         SELECT MIN(MAX(capture_next, cutoff - cutoff % ?)) AS due
           FROM boat_races WHERE capture_next > 0 AND cutoff >= ? AND ?
         UNION ALL SELECT MIN(result_next) FROM boat_races
           WHERE result_next > 0 AND json_type(body, '$.freeze') IS NOT NULL
-      )`, HOUR, earliestCutoff, this.bankroll().balance >= BET_COST ? 1 : 0).one().due;
+      )`, CYCLE, earliestCutoff, this.bankroll().balance >= BET_COST ? 1 : 0).one().due;
     if (!(await this.status()).enabled) return;
     await this.state.storage.put({
       "boat-status": { enabled: true, lastRun: new Date().toISOString(), issue },
