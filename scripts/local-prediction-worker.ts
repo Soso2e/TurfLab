@@ -67,6 +67,9 @@ const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整�
 const BIAS_PREFIX = "[当日傾向] ";
 /** Automatic selection per JST day (race-flow-v2: deeper research on fewer races). */
 export const MAX_AUTO_RACES = 3;
+/** Stage 4 runs once, starting 10 minutes before the start; the last tick that may start it is 5 minutes before. */
+export const PRERACE_START_MS = 600_000;
+export const PRERACE_LAST_START_MS = 300_000;
 /** Stage 2 gap-fill searches per race (race-flow-v2). */
 export const MAX_FILL_ROUNDS = 2;
 
@@ -700,7 +703,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         ) {
           this.mark(race, 4, prechecked
             ? "予想確定済み。発走前の再調査を実施"
-            : "予想確定済み。発走60〜10分前の再調査待ち");
+            : "予想確定済み。発走10分前の再調査待ち");
           continue;
         }
         const predictionPath = str(output, "prediction_path");
@@ -1319,7 +1322,9 @@ JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_
     const research = obj(pack.research);
     const start = Date.parse(str(race, "scheduled_start_at"));
     const left = start - Date.now();
-    if (left > 3600_000 || left < 600_000) return null;
+    // The 400-yen EV lane is decided once, at 10 minutes before the start (no 60-minute pass).
+    // Ticks run every 5 minutes, so the first tick inside 10..5 minutes starts the job.
+    if (left > PRERACE_START_MS || left < PRERACE_LAST_START_MS) return null;
     const key = raceKey(str(race, "race_id"));
     const jobKey = `${day}-prerace-${key}`;
     // Stage 4 reads odds only for the combinations the model already ranks highest.
