@@ -55,10 +55,15 @@ export async function audit(
     ...(evidence ? { evidence_json: evidence } : {}),
   });
 }
+/** Total bankroll shared by the automatic AI plans and the user's own bets. */
+export const INITIAL_CAPITAL_YEN = 100_000;
+
 export async function confirmBet(
   repo: Repository,
   input: Row,
   now: string,
+  /** AI-side cash from the local ledger (initial capital minus AI stakes plus returns); null = untouched bankroll. */
+  aiCashYen: number | null = null,
 ): Promise<Row> {
   const op = str(input, "operation_id");
   const prior = (await repo.list("virtual_bets")).find(
@@ -128,22 +133,21 @@ export async function confirmBet(
   const bets = (await repo.list("virtual_bets")).filter(
     (b) => b.status === "confirmed",
   );
+  // Own bets sit on top of the automatic AI plans. There is no per-race or per-day cap any more;
+  // the only limit is the shared bankroll (initial 100,000 yen).
+  const settled = await repo.list("settlements");
+  const superseded = new Set(settled.map((s) => s.supersedes_settlement_id).filter(Boolean));
+  const settledBetIds = new Set(settled.map((s) => s.bet_id));
+  const settledNet = settled
+    .filter((s) => !superseded.has(s.settlement_id))
+    .reduce((s, x) => s + num(x, "net_yen"), 0);
+  const openStake = bets
+    .filter((b) => !settledBetIds.has(b.bet_id))
+    .reduce((s, b) => s + num(b, "amount_yen"), 0);
+  const available = (aiCashYen ?? INITIAL_CAPITAL_YEN) + settledNet - openStake;
   requireCondition(
-    bets
-      .filter((b) => b.race_id === raceId)
-      .reduce((s, b) => s + num(b, "amount_yen"), 0) +
-      amount <=
-      1000,
-    "1レース1,000円の予算を超えます",
-    409,
-  );
-  requireCondition(
-    bets
-      .filter((b) => b.budget_date_jst === date)
-      .reduce((s, b) => s + num(b, "amount_yen"), 0) +
-      amount <=
-      5000,
-    "JST1日5,000円の予算を超えます",
+    amount <= available,
+    `出資金の残高（${Math.max(0, available).toLocaleString("ja-JP")}円）を超えます`,
     409,
   );
   requireCondition(
