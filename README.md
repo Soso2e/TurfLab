@@ -1,38 +1,68 @@
 # TurfLab
 
-ChatGPTによる競馬分析・展開シミュレーションを記録し、全予想の精度と本人の仮想購入収支を別々に検証する個人用ポータル。
+競馬のレースを、**AIの予想（採用参考）** と **本人の仮想購入** に分けて記録し、結果と照合して精度と収支を別々に検証する個人用ポータル。実馬券の購入・資金移動は行わない。
 
-> 📊 **[システム全体設計・動作フロー完全ガイド（SVG図解・CLIプロンプト全文）](docs/system-guide.md)**
+> 1日の動きの正本は **[docs/daily-flow.md](docs/daily-flow.md)**。図解とプロンプト全文は [system-guide](docs/system-guide.md)、履歴は [status-log](docs/status-log.md)。
 
-## 現在の状態
+競馬のほか、右上スイッチから**競艇モード**（公式データによる3連単2点v1の仮想購入・精算）も使える。[競艇の設計と操作](docs/boatrace-v1.md)
 
-サーバー稼働中のローカルCLI予想を追加。`npm run predictions:local -- --once` で実行し、Windows Workerで継続できる。[ローカルCLI運用](docs/local-cli-operation.md)
+## 全体像：サーバー・データベース・ウェブ
 
-毎朝09:00タスクの指示は [置換用本文](prompts/chatgpt-daily.md)、出馬表準備から翌日精算までの担当・実装済み/未実装・受入条件は [日次運用フロー](docs/daily-operation-flow.md) を参照。通常ChatGPTの実タスク設定は、リポジトリ編集では変更されない。
+```mermaid
+flowchart LR
+  subgraph SV["サーバー（Windows PC・常駐）"]
+    LW["Local Prediction Worker<br/>5分ごと・CLI(Gemini/Codex)"]
+    GS["GitHub Sync Worker"]
+    API["Core API 127.0.0.1:8787<br/>検証・lock・精算"]
+  end
+  subgraph DB["データベース"]
+    CORE[("Core DB<br/>races/horses/performances<br/>predictions/results/bets/reviews")]
+    EX[("exchange/ ファイル")]
+    GH[("TurfLab-data 非公開GitHub")]
+  end
+  subgraph WEB["ウェブ"]
+    UI["PC / iPhone（Tailscale）<br/>閲覧・採用・仮想Bet"]
+  end
+  LW --> API <--> CORE
+  LW --> EX --> GS --> GH
+  UI <--> API
+```
 
-GitHub Prediction Bridge（Phase 1・2）: 非公開 `Soso2e/TurfLab-data` へ固定入力パックを出力し、予想JSONをWindows Workerが受信して既存Coreで検証・確定・読み返す。5分同期・手動同期・履歴・再起動復旧を実装。本人Betは別操作。セットアップと受入境界は [GitHub同期手順](docs/github-prediction-bridge.md) を参照。実レース1R・既存ChatGPT朝9時タスクのGitHub書込みは未検証。参考JSONの名前一致による自動登録→固定pack→完全回答の正式化を追加。公式ID照合付き手動登録も維持。[名前登録の条件と限界](docs/name-only-reference-intake.md)を参照。
+## 1日の流れ（要約）
 
-React / TypeScript / ViteのWebとCloudflare Workers API、Sheets Repository、予想取込・採用固定、仮想購入・訂正精算、数値シミュレーション、受信同期、評価を実装した。型・lint・テスト・ビルドとローカルWorkers/PC/スマホ操作を確認済み。
+```mermaid
+flowchart TD
+  M["朝 09:00〜<br/>前日レビューを読み、最大3Rを選定"] --> S1["段階1 収集<br/>全頭・近走5走・騎手 → 個体DBに積む"]
+  S1 --> S2["段階2 再評価<br/>欠測だけ補完検索・傾向集計"]
+  S2 --> S3["段階3 予想<br/>6評価・3展開 → Coreでlock<br/>的中狙い600円を固定"]
+  S3 --> S4["段階4 発走10分前（1回）<br/>馬場・オッズ → 期待値買い400円を確定/見送り"]
+  S3 --> U["自動採用・AI仮想Bet1,000円<br/>＋本人は上乗せBetのみ"]
+  S4 --> R["発走1時間後〜 公式結果→精算"]
+  U --> R
+  R --> V["翌日 レビュー → 次の朝の調査・予想へ"]
+  V -.-> M
+```
 
-本番接続は未設定。既存Sheetsを読み取り調査し、原本を変更せず旧タブ用の閲覧と新規TL_*用の保存基盤を用意した。Google認証・新規タブ・既存ChatGPT出力連携など、完了していない受入条件は [Issue別の実装状況](docs/implementation-status.md) に記録している。GitHub issueは閉じていない。
+| 時間帯 | 動き |
+|---|---|
+| 常時（5分ごと） | CSV取込・統計・結果確認の対象探索 |
+| 08:00〜 | 日次状態を `TurfLab-data/state/` へ追記（15分ごと） |
+| 09:00〜21:00 | 3時間枠で最大3Rを選定し、収集→補完→予想 |
+| 発走10分前 | 馬場・オッズ確認、期待値買い400円を確定 or 見送り（1回のみ） |
+| 取り込み直後〜発走前 | **自動**：locked読返し→採用版固定→AI仮想Bet（1R1,000円）。本人は上乗せBetだけ（上限なし・出資金10万円の残高内） |
+| 発走1時間後〜 | 公式結果・払戻 → 精算 → 比較 |
+| 翌日 | レビューが翌日のプロンプトに入る |
 
-Issue #30の手動Core実行を追加。6項目の固定スコア、全馬の3展開、1Rずつの参考プラン確定・復旧、最大5Rの独立実行に対応する。本番Sheets接続・自動推論・定時切替は未完了。[Coreの入力と操作](docs/core-pipeline.md) · [監査とADR](docs/adr/0001-race-core-pipeline.md)。
+## 運用の約束
 
-今回の合意方針と差分は [運用方針監査](docs/operating-policy-audit.md) を参照。ChatGPTが予想・展開/数値シミュレーションを担当し、Core/MCは取り込み画面で明示的に表示する検証用です。本人Betの券種・買い目・金額は発走前だけ変更でき、旧新の記録と関連監査を残します。AI推奨は変更しません。
-
-発走前の予想に加え、**独自baseline→複数の外部予想根拠の照合→相違点を再調査→結果後の監査**を行う運用指針は [外部予想根拠監査](docs/external-forecast-audit.md) を参照。多数決や人気の加点はしない。2026-11-05の笠松12R・園田12Rのチャット参考予想とユーザー報告着順は非公開 `TurfLab-data/reviews/2026-11-05/` に別保存（公式結果・Core確定・本人Betとは別）。同日、既存ChatGPT定時タスクには監査ルールを別操作で追記済み（更新成功を確認）。次回実行での成果は未検証。Coreの外部根拠自動取込やモデル再学習は未実装。
-
-## 構成と運用
-
-Issue #57 の第1段階では、`npm run c2:status` で Windows Worker の日次証跡を読み取れます。Core 確定・結果取込は Worker が読み返した範囲で表示します。[診断の実行方法](docs/daily-operation-flow.md#c2-日次診断) · [C2の責務と段階導入](docs/adr/0002-c2-job-orchestration.md)
-
-**既存ChatGPT毎朝9時タスク → Google Sheets ↔ Web**。ChatGPTは前日の結果解析と原則5レースの予想を行う。有料AI APIは使わず、既存スケジュールも変更しない。Webは検証・表示・本人操作・集計を担当する。
-
-- JRA・地方競馬を対象に、条件が不足する日は5レース未満や見送り可。
-- 本人の仮想購入は1レース最大1,000円、JST1日最大5,000円。予算消化は義務ではない。
-- 予想時点・出典・モデル版を固定。再予想は別ID。予想保存だけで購入を作らない。
-- 公式結果・全払戻を確認して精算。暫定結果を収支に混ぜず、訂正は履歴と差額で記録する。
-- 実資金・暗号資産送金・自動馬券購入は対象外。
+- **AIは候補を出すだけ**。総合点・順位・確率・精算はコードが決め、Coreが `locked` で読み返せて初めて正式予想になる。
+- 自動選定は**最大3R/日**（調査コストのため）。条件不足の日は見送りも可。
+- 予想時点・出典・モデル版を固定。再予想は別ID。オッズ・人気は能力評価に使わない（期待値買いの計算のみ）。
+- **予想の取り込みは完全自動**（検証→lock→採用→AI仮想Bet）。本人の操作は「上乗せBet」だけで、1R・1日の上限はなく、出資金10万円はAIと本人で**1つを共有**する。AIは残高が足りなければ縮めず見送り、本人も残高内でのみ上乗せできる。
+- AIの採用参考収支と本人Bet収支は混ぜない。本人Betの内容はAIに渡さない。
+- 公式結果・全払戻を確認して精算。暫定結果は収支に入れず、訂正は履歴と差額で残す。
+- 重みは自動で変えない。未使用30R以上の検証と本人承認が必要。
+- 補助経路として、ChatGPT朝9時タスク＋GitHub Bridgeも残る（[日次運用フロー](docs/daily-operation-flow.md)）。
 
 ## 起動
 

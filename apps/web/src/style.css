@@ -3581,3 +3581,170 @@ img, svg, video { max-width: 100%; }
   }
 }
 
+
+.odds-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+.odds-table th, .odds-table td { padding: 0.2rem 0.35rem; text-align: right; border-bottom: 1px solid rgba(128, 128, 128, 0.25); white-space: nowrap; }
+.odds-table th:first-child, .odds-table td:first-child { text-align: left; }
+
+/* ===== 統計ページ（スマホ優先・比較表） ===== */
+.detail-stats-btn { flex-shrink: 0; white-space: nowrap; padding: 7px 12px; font-size: 13px; font-weight: 600; }
+.st-page { min-width: 0; }
+.st-page .race-tabs { top: 0; }
+.st-embedded { min-width: 0; display: grid; gap: 10px; }
+.st-embedded-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.st-embedded-bar .st-sub { margin: 0; }
+.st-embedded .race-tabs.st-subtabs { position: static; top: auto; z-index: auto; margin: 0; padding: 2px 0 8px; background: transparent; backdrop-filter: none; border-bottom: 1px solid #dce1d7; }
+.st-embedded .race-tabs.st-subtabs .race-tab { min-height: 36px; min-width: 64px; padding: 0 12px; font-size: 13px; }
+.st-picker { display: grid; gap: 8px; margin-bottom: 12px; min-width: 0; }
+.st-picker select { justify-self: start; min-height: 40px; }
+.st-races { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }
+.st-race { flex: none; min-height: 40px; padding: 0 12px; border: 1px solid #d3dccf; border-radius: 999px; background: #fff; color: #3f5a4c; font-size: 13px; white-space: nowrap; }
+.st-race b { margin-left: 2px; }
+.st-race.active { background: #153d32; border-color: #153d32; color: #fff; }
+.st-race-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 6px; font-size: 14px; }
+.st-body { display: grid; gap: 12px; min-width: 0; }
+.st-panel { padding: 14px; margin-bottom: 0; }
+.st-panel h3 { margin: 4px 0 8px; font-size: 15px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.st-panel h4 { margin: 10px 0 6px; font-size: 13px; }
+.st-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid #dce3d5; border-radius: 8px; background: #fff; }
+.st-table { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; }
+.st-table th, .st-table td { padding: 6px 7px; border-bottom: 1px solid #eef1ea; text-align: left; vertical-align: top; white-space: nowrap; }
+.st-table thead th { position: sticky; top: 0; background: #f6f8f3; font-weight: 600; color: #4f6359; z-index: 1; }
+.st-table small { display: block; color: #7c8876; font-size: 10.5px; font-weight: 400; }
+.st-table td b { font-size: 13px; }
+.st-sticky { position: sticky; left: 0; background: #fff; z-index: 2; box-shadow: 1px 0 0 #e4e9df; }
+thead .st-sticky { background: #f6f8f3; z-index: 3; }
+.st-name { display: inline-block; vertical-align: middle; margin-left: 5px; max-width: 8.5em; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.st-row { cursor: pointer; }
+.st-row.open > *, .st-row:hover > * { background: #f3f7ef; }
+.st-detail-row > td { padding: 0; white-space: normal; background: #fafbf8; }
+.st-detail { padding: 8px; display: grid; gap: 8px; position: sticky; left: 0; max-width: min(100vw - 40px, 900px); }
+.st-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 8px; }
+.st-facts section { background: #fff; border: 1px solid #e4e9df; border-radius: 6px; padding: 8px; }
+.st-facts h4 { margin: 0 0 4px; font-size: 12px; }
+.st-facts p { margin: 3px 0; font-size: 12px; }
+.st-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.st-rate { display: inline-flex; align-items: baseline; gap: 3px; }
+.st-rate small { display: inline; }
+.st-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #c9d1c4; }
+.st-conf { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 999px; font-size: 10px; line-height: 16px; background: #eef1ea; color: #5c6d64; white-space: nowrap; }
+.st-dot.st-conf-high, .st-conf.st-conf-high { background: #1f7a46; color: #fff; }
+.st-dot.st-conf-medium, .st-conf.st-conf-medium { background: #8fbf6a; color: #fff; }
+.st-dot.st-conf-low, .st-conf.st-conf-low { background: #e0b44c; color: #3b2d00; }
+.st-dot.st-conf-insufficient, .st-conf.st-conf-insufficient { background: #d9dcd6; color: #6f7a73; }
+.st-est { display: inline-block; margin-left: 3px; padding: 0 4px; border-radius: 3px; font-size: 10px; line-height: 15px; background: #fff2d6; color: #8a5a00; border: 1px solid #f0d49a; font-style: normal; }
+.st-missing { color: #a2aaa0; }
+.st-missing-line { color: #7c8876; font-size: 12px; margin: 4px 0; }
+.st-sub { color: #6f8077; font-size: 12px; margin: 4px 0; }
+.st-big { font-size: 18px; font-weight: 700; margin: 2px 0 6px; display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.st-big small { font-size: 12px; font-weight: 400; color: #6f8077; }
+.st-chip { display: inline-block; margin: 2px 4px 2px 0; padding: 1px 7px; border-radius: 999px; background: #eef3ea; color: #3f5a4c; font-size: 11.5px; white-space: nowrap; font-weight: 500; }
+.st-bar { display: inline-block; width: 56px; height: 6px; border-radius: 3px; background: #e7ece3; overflow: hidden; vertical-align: middle; }
+.st-bar i { display: block; height: 100%; background: #2e8b3e; }
+.st-tally { display: grid; gap: 4px; font-size: 12px; }
+.st-tally > div { display: grid; grid-template-columns: 4.5em 1fr auto; align-items: center; gap: 6px; }
+.st-tally .st-bar { width: 100%; }
+.st-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 16px; }
+.st-score { background: #fff; border: 1px solid #dce3d5; border-radius: 8px; padding: 10px; display: grid; gap: 4px; }
+.st-score header { display: flex; align-items: center; gap: 6px; }
+.st-total { margin-left: auto; font-size: 18px; font-weight: 700; }
+.st-total small { font-size: 11px; color: #7c8876; margin-left: 2px; }
+.st-ai { color: #5b6fa8; font-size: 11px; }
+.st-comp { display: grid; grid-template-columns: 5.5em 1fr 2.2em auto auto auto; align-items: center; gap: 5px; font-size: 12px; }
+.st-comp .st-bar { width: 100%; }
+.st-cov { display: grid; grid-template-columns: minmax(8em, 13em) 64px 1fr; gap: 8px; align-items: center; font-size: 12px; padding: 3px 0; }
+.st-cov small { color: #6f8077; }
+.st-cov-missing span:first-child { color: #c0392b; }
+.st-cov-partial span:first-child { color: #9a6a00; }
+.st-cov .st-bar { width: 64px; }
+.st-limits { margin: 6px 0 0 18px; font-size: 12px; color: #6f8077; }
+.st-more summary { cursor: pointer; font-size: 12px; color: #3f5a4c; padding: 6px 4px; }
+.st-mini { padding: 4px 8px; font-size: 12px; }
+.st-mini p { margin: 2px 0; }
+.st-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; align-items: end; font-size: 12px; }
+.st-form label { display: grid; gap: 2px; }
+.st-form input, .st-form select { min-height: 36px; width: 100%; box-sizing: border-box; }
+.st-form .st-wide { grid-column: 1 / -1; }
+.st-missing-line + .st-more { margin-top: 4px; }
+@media (max-width: 520px) {
+  .st-table th, .st-table td { padding: 5px 5px; }
+  .st-name { max-width: 6.5em; }
+  .st-comp { grid-template-columns: 4.6em 1fr 2em auto auto; }
+  .st-comp .st-ai { display: none; }
+  .st-cov { grid-template-columns: 1fr 56px; }
+  .st-cov small { grid-column: 1 / -1; }
+}
+
+/* ─── 馬別結果分析 (HorseResultAnalysis) ─────────────────────── */
+.hra-panel { border-radius: 8px; border: 1px solid #d4ddd5; margin-top: 16px; overflow: hidden; }
+.hra-panel-summary {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; cursor: pointer; font-weight: 600;
+  background: #eef2ee; list-style: none;
+}
+.hra-panel-summary::-webkit-details-marker { display: none; }
+.hra-panel-count { font-size: 12px; font-weight: normal; color: #5c7a62; background: #d8e8da; padding: 1px 7px; border-radius: 10px; }
+.hra-panel-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+.hra-disclaimer { font-size: 12px; padding: 6px 10px; background: #fffaec; border-left: 3px solid #e8c84a; border-radius: 4px; margin: 0 0 4px; }
+
+.hra-card { border: 1px solid #d8e0da; border-radius: 7px; overflow: hidden; }
+.hra-card-summary {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; cursor: pointer; list-style: none; background: #f7f9f7;
+}
+.hra-card-summary::-webkit-details-marker { display: none; }
+.hra-card[open] .hra-card-summary { background: #eef2ee; }
+.hra-card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+.hra-horse-name { font-weight: 600; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hra-summary-text { margin: 0; font-size: 13px; line-height: 1.5; }
+.hra-match-assessment { margin: 0; font-size: 12px; color: #4a6050; }
+.hra-no-prediction { margin: 0; font-size: 12px; color: #8a9e90; font-style: italic; }
+
+/* 着順バッジ */
+.hra-finish { display: inline-block; min-width: 32px; padding: 2px 5px; border-radius: 5px; font-size: 12px; font-weight: 700; text-align: center; }
+.hra-finish-1 { background: #ffd700; color: #3d2900; }
+.hra-finish-2 { background: #c0c0c0; color: #2a2a2a; }
+.hra-finish-3 { background: #c88040; color: #fff; }
+.hra-finish-other { background: #e8eceb; color: #4a5a50; }
+.hra-finish-na { color: #9aada0; font-size: 12px; }
+
+/* 分類バッジ */
+.hra-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.hra-badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; font-weight: 600; white-space: nowrap; }
+.hra-expected { background: #d4edda; color: #1a5c2a; }
+.hra-mismatch { background: #fde8cc; color: #7a3c00; }
+.hra-pace { background: #d6eaff; color: #0a3d7a; }
+.hra-irregular { background: #fce4e4; color: #7a1a1a; }
+.hra-unknown { background: #e8e8e8; color: #4a4a4a; }
+
+/* 推測バッジ */
+.hra-unconfirmed-badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #fff3cc; color: #7a5a00; border: 1px solid #e8c840; font-weight: 600; }
+
+/* イレギュラー詳細 */
+.hra-irregular-detail { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.hra-cert { font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 600; }
+.hra-cert-confirmed { background: #c8e6c9; color: #1b5e20; }
+.hra-cert-probable { background: #fff9c4; color: #5a4a00; }
+.hra-cert-speculative { background: #ffe8cc; color: #6a3800; border: 1px dashed #e09040; }
+.hra-factor { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: #f0e8ff; color: #4a2080; }
+
+/* メタ */
+.hra-meta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.hra-lflag { font-size: 11px; padding: 2px 7px; border-radius: 4px; background: #e8f0ee; color: #2a5040; border: 1px solid #c0d8cc; }
+.hra-lflag-ability_model_candidate { background: #fde8cc; color: #7a3c00; border-color: #e0a060; }
+.hra-lflag-pace_model_candidate { background: #d6eaff; color: #0a3d7a; border-color: #80b8f0; }
+.hra-lflag-irregular_one_time { background: #fce4e4; color: #7a1a1a; border-color: #e08080; }
+.hra-lflag-horse_risk_accumulate { background: #3c0000; color: #ffcccc; border-color: #800000; }
+.hra-lflag-pending { background: #f0f0f0; color: #505050; }
+.hra-analyst { font-size: 11px; color: #6a8070; }
+.hra-times { display: flex; gap: 12px; font-size: 12px; color: #3a5048; }
+.hra-prediction-row { display: flex; gap: 12px; font-size: 12px; color: #3a5048; }
+.hra-sources { font-size: 12px; }
+.hra-sources ul { margin: 4px 0 0; padding-left: 18px; }
+
+/* 履歴リスト（馬詳細ページ） */
+.hra-history { margin-top: 8px; }
+.hra-history-list { display: flex; flex-direction: column; gap: 6px; padding: 8px 0; }
+.hra-history-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hra-history-summary { font-size: 12px; color: #5a7060; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

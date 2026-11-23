@@ -169,5 +169,56 @@ class Predict(unittest.TestCase):
             self.assertNotIn("odds", blob.replace('"odds_used"', ""))
 
 
+class LearningFlagFeedback(unittest.TestCase):
+    def test_flag_weights_and_as_of_risk_isolation(self):
+        from forecast_lab.analysis_feedback import AnalysisIndex, flag_weight, summarize_feedback
+        self.assertEqual(flag_weight("normal"), 1.0)
+        self.assertEqual(flag_weight("irregular_one_time"), 0.25)
+        self.assertEqual(flag_weight("horse_risk_accumulate"), 0.5)
+        self.assertEqual(flag_weight("pending"), 0.0)
+
+        analyses = [
+            {"race_date": "2026-10-01", "horse_name": "HorseA", "learning_flag": "horse_risk_accumulate", "race_id": "r1"},
+            {"race_date": "2026-10-15", "horse_name": "HorseA", "learning_flag": "horse_risk_accumulate", "race_id": "r2"},
+            {"race_date": "2026-10-20", "horse_name": "HorseA", "learning_flag": "normal", "race_id": "r3"},
+            {"race_date": "2026-10-15", "horse_name": "HorseB", "learning_flag": "pending", "race_id": "r2"},
+            {"race_date": "2026-10-15", "horse_name": "HorseC", "learning_flag": "ability_model_candidate", "race_id": "r2"},
+            {"race_date": "2026-10-15", "horse_name": "HorseD", "learning_flag": "pace_model_candidate", "race_id": "r2"},
+        ]
+        idx = AnalysisIndex(analyses)
+        # Strict < cutoff: 2026-10-15 itself is excluded when predicting 2026-10-15
+        self.assertEqual(idx.horse_risk_before("HorseA", "2026-10-01"), (0, 0))
+        self.assertEqual(idx.horse_risk_before("HorseA", "2026-10-15"), (1, 1))
+        self.assertEqual(idx.horse_risk_before("HorseA", "2026-10-20"), (2, 2))
+        self.assertEqual(idx.horse_risk_before("HorseA", "2026-10-21"), (2, 3))
+
+        w = idx.race_training_weight({"date": "2026-10-15"}, [{"horse_name": "HorseB"}])
+        self.assertEqual(w, 0.0)
+        summary = summarize_feedback(analyses)
+        self.assertEqual(summary["pending_excluded"], 1)
+        self.assertEqual(len(summary["ability_model_candidates"]), 1)
+        self.assertEqual(len(summary["pace_model_candidates"]), 1)
+        self.assertEqual(summary["horse_risk_horses"][0], {"horse": "HorseA", "count": 2})
+
+    def test_backtest_with_analyses_runs_and_reports_feedback(self):
+        runs = synthetic.generate(days=70, races_per_day=10, seed=7)
+        races = group_races(runs)
+        analyses = []
+        for i, r in enumerate(races[:30]):
+            flag = ["normal", "irregular_one_time", "pending", "ability_model_candidate", "pace_model_candidate"][i % 5]
+            analyses.append({
+                "race_date": r["date"],
+                "race_id": f"{r['track']}-{r['date']}-{r['race_no']}",
+                "horse_name": r["entries"][0]["horse_name"],
+                "learning_flag": flag,
+            })
+        with tempfile.TemporaryDirectory() as d:
+            rep = run_backtest(runs, {}, "dev", Path(d), analyses=analyses)
+        self.assertEqual(rep["status"], "ok")
+        self.assertIn("learning_flag_feedback", rep)
+        self.assertEqual(rep["learning_flag_feedback"]["total_analyses"], 30)
+        self.assertEqual(rep["learning_flag_feedback"]["pending_excluded"], 6)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,6 +27,12 @@ import { officialResearchUrl } from "../packages/shared/src/race-research";
 import { enrichedReference, historyPrompt } from "./local-history-research";
 import { loadNarCsvDir, mergeRuns, narStats, normGoing } from "./nar-csv-stats";
 import { importNarCsvInbox } from "./nar-csv-import";
+import { publishStatsDigest } from "./stats-digest";
+import {
+  buildOddsSummary, importNarOdds, ingestPreraceSnapshot, writeOddsSummary, type OddsImportStatus, type RaceRef,
+} from "./nar-odds-import";
+import { OddsStore } from "./nar-odds-store";
+import { oddsView } from "./odds-ev";
 import { completeEvaluations, evidenceCoverage, formalBlockers, provisionalRanking } from "./evidence-coverage";
 import {
   fitBlend, fitScale, fitWeights, labOutcome, latestPerRace, learningReport, MIN_TRAIN_RACES,
@@ -61,6 +67,9 @@ const blockedShape = `{blocked:true, reason:理由, missing:[{horse_number:整�
 const BIAS_PREFIX = "[当日傾向] ";
 /** Automatic selection per JST day (race-flow-v2: deeper research on fewer races). */
 export const MAX_AUTO_RACES = 3;
+/** Stage 4 runs once, starting 10 minutes before the start; the last tick that may start it is 5 minutes before. */
+export const PRERACE_START_MS = 600_000;
+export const PRERACE_LAST_START_MS = 300_000;
 /** Stage 2 gap-fill searches per race (race-flow-v2). */
 export const MAX_FILL_ROUNDS = 2;
 
@@ -304,6 +313,11 @@ export class LocalPredictionWorker {
   private stages = new Map<string, Row>();
   private cliCalls = 0;
   private csvImport: Row | null = null;
+  private statsDigest: Row | null = null;
+  private oddsImport: OddsImportStatus | null = null;
+  private oddsStore: OddsStore;
+  private raceRefCache = new Map<string, RaceRef | null>();
+  private preraceSeen = new Set<string>();
   private bridge: PredictionBridge;
   private exchange: string;
   constructor(
@@ -323,6 +337,7 @@ export class LocalPredictionWorker {
     private strategyRulesPath?: string,
   ) {
     this.exchange = path.join(home, "exchange");
+    this.oddsStore = new OddsStore(home);
     this.bridge = new PredictionBridge(
       path.join(home, "bridge"),
       { repository: "local/codex", branch: "local", interval_seconds: 300 },
@@ -534,10 +549,24 @@ export class LocalPredictionWorker {
     const hour = new Date(now.getTime() + 9 * 3600000).getUTCHours();
     try {
       await this.drainUploadedNarCsvs();
+      // Odds files first: they are consumed here so the table importer below never sees them.
+      // A failure is recorded as odds status; it must not block predictions.
+      this.oddsImport = await importNarOdds(this.home, now).catch((error) => ({
+        files_imported: 0, files_duplicate: 0, files_rejected: 0, observations_added: 0, observations_duplicate: 0,
+        rows_skipped: 0, rejected: {}, errors: [error instanceof Error ? error.message.slice(0, 200) : "odds import failed"],
+      }));
       this.csvImport = await importNarCsvInbox(this.home, now);
     } catch (error) {
       this.failedJob("nar-csv-import", error);
     }
+    // Aggregate tables for the stats page (all results ∪ NAR CSV). Rebuilt only
+    // when inputs change; a failure never blocks predictions.
+    if (process.env.TURFLAB_STATS_DIGEST !== "off")
+      this.statsDigest = await publishStatsDigest(this.home, this.api, now).catch((error) => ({
+        status: "failed",
+        error: error instanceof Error ? error.message.slice(0, 200) : "stats digest failed",
+        at: now.toISOString(),
+      }));
     if (!targetUrl) await this.reviewRecent(now, day, hour);
     const state = await this.api("/daily-state");
     const today = rows(state.races).filter(
@@ -573,7 +602,7 @@ JSONは {races:[],limitations:[]}。各raceは track, jurisdiction:"JRA"また�
 research:{source_url:公式出馬表の完全URL,headcount:掲載全頭数,weather:nullまたは観測値,going:nullまたは観測値,selection_reason,limitations:[]}。
 horseは horse_number,horse_name,jockey,draw_number,weight_kg,status:"active"|"scratched"|"cancelled",jockey_observation:nullまたは出馬表で確認した組合せ実績の短い要約,
 recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは着順,corners:[通過順位の整数],field_size:nullまたは頭数, carried_weight_kg:nullまたは斤量}]。
-近走は公式出馬表の掲載から各馬最大3走。読めない値はnull、通過順不明は[]。公式個体ID・未知値を創作しない。予想や展開はこの段階で行わない。採点材料が一部欠けても全頭出馬表を保存できる。出馬表を確保できない場合はraces空とlimitationsに理由。`,
+近走は公式出馬表の掲載から各馬最大5走（直近を優先）。読めない値はnull、通過順不明は[]。公式個体ID・未知値を創作しない。予想や展開はこの段階で行わない。採点材料が一部欠けても全頭出馬表を保存できる。出馬表を確保できない場合はraces空とlimitationsに理由。`,
         );
         if (document && !document.blocked) {
           const races = rows(document.races);
@@ -674,7 +703,7 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
         ) {
           this.mark(race, 4, prechecked
             ? "予想確定済み。発走前の再調査を実施"
-            : "予想確定済み。発走60〜10分前の再調査待ち");
+            : "予想確定済み。発走10分前の再調査待ち");
           continue;
         }
         const predictionPath = str(output, "prediction_path");
@@ -882,6 +911,10 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
     await this.bridge.sync(true);
     const currentRaces = rows((await this.api("/daily-state")).races);
     const currentToday = currentRaces.filter((entry) => obj(entry.race).race_date_jst === day);
+    await this.recordPreraceOdds(currentRaces).catch((error) => {
+      this.oddsImport = { ...(this.oddsImport ?? { files_imported: 0, files_duplicate: 0, files_rejected: 0, observations_added: 0, observations_duplicate: 0, rows_skipped: 0, rejected: {}, errors: [] }),
+        errors: [`prerace: ${error instanceof Error ? error.message.slice(0, 160) : "failed"}`] };
+    });
     await this.fixPlans(day, currentToday);
     for (const entry of currentToday) {
       const race = obj(entry.race);
@@ -943,6 +976,8 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       }),
       ...(ledger ? { ledger } : {}),
       nar_csv_import: this.csvImport,
+      stats_digest: this.statsDigest,
+      odds: { import: this.oddsImport, ...(await this.oddsStore.lastFetch()), corrupt_lines: this.oddsStore.corruptLines },
       learning,
       model: this.model,
       checked_at: new Date().toISOString(),
@@ -951,15 +986,52 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
 
   /** Recompute capital & P&L ledger deterministically via Python and push immediately. */
   private async refreshLedger(day: string): Promise<Row | null> {
+    // The user's own bets share the same 100,000-yen bankroll; Core holds them.
+    const user = await this.api("/user-bankroll").catch(() => null);
     const ledger = await runPythonLedger({
       exchangeDir: this.exchange,
       targetDate: day,
+      userOpenStakeYen: Number(user?.open_stake_yen ?? 0),
+      userSettledNetYen: Number(user?.settled_net_yen ?? 0),
     });
     if (ledger) {
+      const cash = Number(ledger.cash_balance_yen);
+      this.ledgerCash = Number.isFinite(cash) ? cash : null;
+      this.stakedSinceLedger = 0;
       await this.api("/local-predictions/ledger", { ledger }).catch(() => {});
     }
     return ledger;
   }
+  /** AI-side cash from the last ledger run, and what the AI has staked since then. Reused so the
+   * gate does not start Python for every plan (slow on Windows); each refreshLedger resets it. */
+  private ledgerCash: number | null = null;
+  private stakedSinceLedger = 0;
+
+  /** One bankroll for the AI plans and the user's bets: a plan whose stake exceeds what is left is skipped, not shrunk.
+   * If the ledger cannot be computed (no Python), nothing is blocked — the cash is unknown, not zero. */
+  private async withinBankroll(plan: Row, day: string): Promise<Row> {
+    const stake = rows(plan.picks ?? []).reduce((s, x) => s + Number(x.amount_yen ?? 0), 0);
+    if (stake <= 0) return plan;
+    if (this.ledgerCash === null) await this.refreshLedger(day).catch(() => null);
+    if (this.ledgerCash === null) return plan;
+    // The user's side is read fresh (a cheap Core call): their bets can change between ticks.
+    const user = await this.api("/user-bankroll").catch(() => null);
+    const available = this.ledgerCash - this.stakedSinceLedger
+      - Number(user?.open_stake_yen ?? 0) + Number(user?.settled_net_yen ?? 0);
+    if (stake <= available) {
+      this.stakedSinceLedger += stake;
+      return plan;
+    }
+    return {
+      ...plan,
+      picks: [],
+      skip_reason: `出資金の残高不足のため見送り（残高${Math.max(0, available)}円・必要${stake}円）`,
+      skipped_by_bankroll: true,
+      skipped_stake_yen: stake,
+      bankroll_available_yen: available,
+    };
+  }
+
   /** Latest stage of a race in this tick, for the Web status. */
   private mark(race: Row, stage: RaceStage, detail: string) {
     const id = String(race.race_id);
@@ -1287,7 +1359,9 @@ JSON: {track_notes:[{source_url,note}], limitations:[文字列], horses:[{horse_
     const research = obj(pack.research);
     const start = Date.parse(str(race, "scheduled_start_at"));
     const left = start - Date.now();
-    if (left > 3600_000 || left < 600_000) return null;
+    // The 400-yen EV lane is decided once, at 10 minutes before the start (no 60-minute pass).
+    // Ticks run every 5 minutes, so the first tick inside 10..5 minutes starts the job.
+    if (left > PRERACE_START_MS || left < PRERACE_LAST_START_MS) return null;
     const key = raceKey(str(race, "race_id"));
     const jobKey = `${day}-prerace-${key}`;
     // Stage 4 reads odds only for the combinations the model already ranks highest.
@@ -1522,14 +1596,14 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
               (sum, pick) => sum + Number(pick.amount_yen ?? 0), 0);
           }
           await immutableLocalFile(this.exchange, aiName, JSON.stringify(
-            aiDiscretionaryPlan(record, new Date().toISOString(),
-              Math.max(0, AI_DAY_CAP_YEN - spentAiToday))));
+            await this.withinBankroll(aiDiscretionaryPlan(record, new Date().toISOString(),
+              Math.max(0, AI_DAY_CAP_YEN - spentAiToday)), day)));
         }
         // Stage 3 lane: 600 yen, fixed with the prediction, never reads odds.
         const hitName = `plans/${day}/${key}-hit.json`;
         if (!(await exists(hitName))) {
           await immutableLocalFile(this.exchange, hitName, JSON.stringify(
-            hitPlan(record, weights, calibrated, new Date().toISOString())));
+            await this.withinBankroll(hitPlan(record, weights, calibrated, new Date().toISOString()), day)));
           await this.refreshLedger(day).catch(() => {});
         }
         // Stage 4 lane: 400 yen from the time-stamped pre-race odds.
@@ -1556,7 +1630,7 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
           continue;
         }
         await immutableLocalFile(this.exchange, name, JSON.stringify(
-          evPlan(record, odds, weights, calibrated, new Date().toISOString())));
+          await this.withinBankroll(evPlan(record, odds, weights, calibrated, new Date().toISOString()), day)));
         // Selective lane: 0-3 picks, flexible ticket type, active skip, daily 5,000 yen cap.
         const selectiveName = `plans/${day}/${key}-selective.json`;
         if (!(await exists(selectiveName))) {
@@ -1571,15 +1645,61 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
             }
           }
           await immutableLocalFile(this.exchange, selectiveName, JSON.stringify(
-            selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
+            await this.withinBankroll(selectivePlan(record, odds, weights, calibrated, new Date().toISOString(), {
               remainingDailyBudgetYen: Math.max(0, SELECTIVE_DAILY_BUDGET_YEN - spentToday),
-            })));
+            }), day)));
         }
         await this.refreshLedger(day).catch(() => {});
         this.mark(race, 4, "的中狙い600円・期待値買い400円・新方式を固定済み");
       } catch (error) {
         this.failedJob(String(obj(entry.race).race_id), error);
       }
+    }
+  }
+
+  /** race -> (date, track, no, start) from the fixed packs. Packs are immutable, so each file is read once. */
+  private async raceRef(day: string, key: string): Promise<RaceRef | null> {
+    const dir = path.join(this.exchange, "packs", day);
+    for (const file of (await readdir(dir).catch(() => [])).filter((f) => f.startsWith(key + "-")).sort().reverse()) {
+      const name = `${day}/${file}`;
+      if (!this.raceRefCache.has(name)) {
+        this.raceRefCache.set(name, await readFile(path.join(dir, file), "utf8").then((text) => {
+          const pack = obj(obj(JSON.parse(text)).pack), race = obj(pack.race), track = obj(pack.track);
+          if (typeof race.race_id !== "string" || typeof track.name !== "string" || !race.race_number) return null;
+          return {
+            race_id: race.race_id, date: day, track: track.name.replace(/競馬場$/u, ""), race_no: Number(race.race_number),
+            start_at: String(race.scheduled_start_at),
+            jurisdiction: race.jurisdiction === "JRA" ? "JRA" : "NAR",
+          } as RaceRef;
+        }).catch(() => null));
+      }
+      const ref = this.raceRefCache.get(name);
+      if (ref) return ref;
+    }
+    return null;
+  }
+
+  /** Copies each saved pre-race snapshot into the odds store (append-only, start-guarded) and writes day summaries. */
+  private async recordPreraceOdds(races: Row[]) {
+    const days = new Set<string>();
+    for (const entry of races) {
+      const race = obj(entry.race);
+      const day = String(race.race_date_jst ?? "");
+      const raceId = String(race.race_id ?? "");
+      if (!day || !raceId) continue;
+      const key = raceKey(raceId);
+      const file = path.join(this.exchange, "prerace", day, `${key}.json`);
+      const text = await readFile(file, "utf8").catch(() => null);
+      if (!text || this.preraceSeen.has(`${file}|${text.length}`)) continue;
+      const ref = await this.raceRef(day, key);
+      if (!ref) continue;
+      await ingestPreraceSnapshot(this.oddsStore, ref, obj(JSON.parse(text)), new Date());
+      this.preraceSeen.add(`${file}|${text.length}`);
+      days.add(`${day}|${ref.jurisdiction}`);
+    }
+    for (const entry of days) {
+      const [day, jurisdiction] = entry.split("|") as [string, "NAR" | "JRA"];
+      await writeOddsSummary(this.home, await buildOddsSummary(this.oddsStore, day, jurisdiction, new Date().toISOString()));
     }
   }
 
@@ -1609,8 +1729,13 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       const isFinal = result.official_status === "official" || result.official_status === "cancelled";
       const closed = Date.parse(String(race.scheduled_start_at)) <= Date.now() ||
         isFinal || race.status === "cancelled";
+      const ref = await this.raceRef(raceDay, key);
+      const view = ref
+        ? await oddsView(this.oddsStore, ref, ev ?? market ?? null).catch(() => null)
+        : null;
       return {
         race_id: raceId,
+        ...(view ? { odds_view: view } : {}),
         missing_ev_reason: odds && odds.odds_complete === false
           ? "単勝オッズが全頭分そろわず未作成"
           : closed ? "発走前の保存記録なし" : "発走前のオッズ確認待ち",

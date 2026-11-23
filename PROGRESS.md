@@ -1,5 +1,29 @@
 # PROGRESS.md
 
+## 2026-11-23 競馬AIフロー見直し
+
+- [見直し方針](docs/ai-prediction-flow-review.md)。同じChatGPTログインで、デスクトップ版同梱CLIから `gpt-6.2-sol` の構造化JSONと既存アダプターのreceiptを取得。次はジョブ種別・モデル・呼出し枠を統一し、対応CLIを使った固定pack予想・発走後レビュー・定期起動を検証する。
+
+## 2026-11-23 競艇モード v1（Issue #102）
+
+- 次は開催中に競艇の「公式収集を開始」から、同じ実レースの締切前オッズ・展示・買い目凍結と、公式結果後の両方式の精算を照合する。以降は100・500・1000レースで展示F補正を比較する。
+- [設計・起動と検証](docs/boatrace-v1.md)。右上の競技切替、競艇専用の SQLite 台帳、公式番組からの自動収集、3連単2点の凍結・精算と訂正履歴、比較統計を追加した。競馬は従来のURLで使用する。
+- 11/23公式番組13場156Rを隔離Workerで保存し、390px Edgeの鳴門1R詳細と再起動後の出典を照合した。公式の住之江11Rで級別・展示・オッズ・払戻、戸田7Rで不成立と返還、若松1Rで中止を解析確認した。実開催の締切前凍結から精算までの通し確認と、iPhone実機は未確認。日別JSONは本人用APIから取得でき、TurfLab-dataへの常時転送は利用条件の確認が残る。
+
+## 2026-11-22 統計ページ（馬・騎手・馬場・オッズ）と全頭集計DB
+
+- 設計は [docs/stats-page.md](docs/stats-page.md)。独立ページ（ドック「統計」、レース詳細の「統計」ボタン）。全数値にサンプル数・信頼度（Wilson区間）・推定/欠測を表示。
+- Phase 1: `packages/shared/src/stats/`（率・縮小推定、全頭コーパス、コース/騎手集計、データスコア＝既存6項目ウェイト）、API `/race-stats*`、`track_observations` テーブル。
+- Phase 2: 過去走を1頭5走に拡張（予想は直近重視）。人気・単勝オッズ・馬体重増減・クラスを過去走項目に追加（NAR CSV任意列・公式結果の任意 `runners`）。`scripts/stats-digest.ts` で NAR CSV∪Core から集計DBを作り、Worker周期でAPIへ保存（入力変化時のみ）。確定オッズ由来の人気・3連複払戻は推定として区別。
+- Phase 3: TL指数（基準タイム＋当日馬場差＋斤量。西田式・RH SPEEDER・Beyer系を比較して設計）、坂プロファイル、当日の内外/脚質傾向、含水率・クッション値の手入力、公式ラップからの前後半3F導出とラップ形状。
+- **未確認**: 実データでの集計DB作成（合成CSV・合成オッズでのテストと、合成データを使った390px画面確認のみ）。阪神・新潟などの坂は公式コース紹介との照合待ち（画面に「要確認」）。
+
+## 2026-11-22 NARオッズの取り込み・時点別蓄積・期待値表示
+
+- 設計は [docs/odds-store.md](docs/odds-store.md)。自動ダウンロードは robots.txt 上不許可のため実装せず、本人保存の当日・月次ZIP/CSVを検出して解析・検証・追記までを自動化。発走前（Workerの時刻付きスナップショット）と確定を `phase` で分離し、確定オッズは購入判断に渡らない。
+- 追加: `odds-contract.ts`、`nar-odds-store.ts`（追記のみNDJSON・重複排除・欠測検出・取得ログ）、`nar-odds-import.ts`、`odds-ev.ts`、`odds:import`/`odds:report`。Workerに統合し、レース詳細に単勝の変動と固定確率×オッズの期待値を表示。日別の集約だけ TurfLab-data `odds-summary/` へwrite-onceで同期。購入ルールは変更なし。
+- **未確認**: 実NAR公式オッズCSVでの取込（この環境から keiba.go.jp に到達できず、列名は見出し名の対応のみ。合成CSVでの保存・再読込・重複・欠測・発走後拒否はテスト済み）。
+
 ## 2026-11-22 Track Day Profile v1
 
 - 次は全Rを対象に公式結果・取得時刻・公開時刻を供給する経路を接続し、Windowsの別プロセスで1開催日を照合する。[運用](docs/experiments/track-day-persistence.md) と [Issue #1](https://github.com/Soso2e/TurfLab/issues/1) を参照。

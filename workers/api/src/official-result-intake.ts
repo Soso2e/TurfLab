@@ -99,8 +99,13 @@ export async function importOfficialResult(
   const statuses = obj(result.entry_status_json ?? {});
   const started = raceEntries.filter((e) =>
     !["scratched", "cancelled", "excluded"].includes(String(statuses[String(e.horse_number)] ?? "")));
+  // Optional per-runner values from the same official page (人気・単勝・時計…).
+  const details = new Map<number, Row>();
+  for (const d of Array.isArray(doc.runners) ? rows(doc.runners) : [])
+    if (typeof d.horse_number === "number") details.set(d.horse_number, d);
   await saveResultRuns(repo, race, started, positionMap, cornersByHorse(pace.corners ?? []),
-    cleanPace({ laps_s: pace.laps_s ?? [] }), sourceUrl, checked, now);
+    cleanPace({ laps_s: pace.laps_s ?? [], first_3f_s: pace.first_3f_s, race_last_3f_s: pace.race_last_3f_s }),
+    sourceUrl, checked, now, details);
 
   const entries = await settle(repo, str(saved, "result_id"), now);
   return {

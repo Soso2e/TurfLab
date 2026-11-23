@@ -179,7 +179,8 @@ it("rebuilds the real Kawasaki 1R pack with only going changed (skipped without 
 
 it("fixes odds and a virtual plan before the start, keeping odds out of the pack", async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
-  const now = "2026-11-10T05:30:00.000Z";
+  // 発走10分前（06:00発走・05:52は8分前）に一度だけ実行する。
+  const now = "2026-11-10T05:52:00.000Z";
   vi.setSystemTime(now);
   const race = { race_id: "r1", race_date_jst: "2026-11-10", race_number: 1, jurisdiction: "NAR", scheduled_start_at: "2026-11-10T06:00:00.000Z" };
   const pack: Row = {

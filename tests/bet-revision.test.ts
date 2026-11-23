@@ -61,7 +61,7 @@ describe("本人Bet変更", () => {
     expect(await repo.list("simulation_runs")).toEqual(simulations);
   });
   it.each([
-    { amount_yen: 1100 },
+    { amount_yen: 150 },
     { amount_yen: 0 },
     { selections: [99] },
     { selections: [1, 1] },

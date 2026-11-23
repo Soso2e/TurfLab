@@ -32,6 +32,10 @@ export type NarRun = {
   weather?: string | null;
   /** Horses that started in the race (rows of the race minus 取消・除外). */
   field_size?: number | null;
+  body_weight_change_kg?: number | null;
+  popularity?: number | null;
+  win_odds?: number | null;
+  race_class?: string | null;
 };
 
 /** "1:25.3" / "85.3" / "1.25.3" → seconds; anything else → null. */
@@ -68,6 +72,10 @@ export const OPTIONAL_CSV_COLUMNS = {
   margin: ["着差"],
   race_name: ["レース名", "競走名"],
   weather: ["天候"],
+  popularity: ["人気", "単勝人気"],
+  win_odds: ["単勝オッズ", "単勝", "オッズ"],
+  body_weight_change_kg: ["増減", "馬体重増減"],
+  race_class: ["クラス", "競走条件", "格付"],
 } as const;
 
 export type NarTarget = {
@@ -170,9 +178,10 @@ export function buildRuns(
         col(t, "距離"),
         col(t, "馬場"),
       ];
-      const [rn, wt] = [
+      const [rn, wt, cl] = [
         col(t, ...OPTIONAL_CSV_COLUMNS.race_name),
         col(t, ...OPTIONAL_CSV_COLUMNS.weather),
+        col(t, ...OPTIONAL_CSV_COLUMNS.race_class),
       ];
       for (const r of t.rows) {
         const date = normDate(r[dt]);
@@ -183,6 +192,7 @@ export function buildRuns(
           going: normGoing(r[gg]),
           race_name: rn >= 0 ? textCell(r[rn], 60) : null,
           weather: wt >= 0 ? textCell(r[wt], 8) : null,
+          race_class: cl >= 0 ? textCell(r[cl], 24) : null,
         });
       }
     }
@@ -206,6 +216,10 @@ export function buildRuns(
       carried_weight_kg: col(t, ...OPTIONAL_CSV_COLUMNS.carried_weight_kg),
       body_weight_kg: col(t, ...OPTIONAL_CSV_COLUMNS.body_weight_kg),
       margin: col(t, ...OPTIONAL_CSV_COLUMNS.margin),
+      popularity: col(t, ...OPTIONAL_CSV_COLUMNS.popularity),
+      win_odds: col(t, ...OPTIONAL_CSV_COLUMNS.win_odds),
+      body_weight_change_kg: col(t, ...OPTIONAL_CSV_COLUMNS.body_weight_change_kg),
+      race_class: col(t, ...OPTIONAL_CSV_COLUMNS.race_class),
     };
     const cell = (r: string[], i: number) => (i >= 0 ? r[i] : undefined);
     for (const r of t.rows) {
@@ -249,6 +263,22 @@ export function buildRuns(
         margin: finish == null && raw === marginStatus ? null : textCell(margin, 24),
         race_name: (race?.race_name as string | null) ?? null,
         weather: (race?.weather as string | null) ?? null,
+        popularity: (() => {
+          const v = int(cell(r, opt.popularity));
+          return v != null && v >= 1 && v <= 18 ? v : null;
+        })(),
+        win_odds: (() => {
+          const v = decimal(normName(cell(r, opt.win_odds)));
+          return v != null && v >= 1 && v < 10000 ? v : null;
+        })(),
+        // 「480(+4)」の括弧内、または独立した増減列。
+        body_weight_change_kg: (() => {
+          const own = opt.body_weight_change_kg >= 0 ? normName(cell(r, opt.body_weight_change_kg)) : "";
+          const inBody = opt.body_weight_kg >= 0 ? normName(r[opt.body_weight_kg]).match(/[(（]([+\-−±]?\d+)[)）]/u)?.[1] ?? "" : "";
+          const raw = (own || inBody).replace("−", "-").replace("±", "");
+          return /^[+-]?\d+$/u.test(raw) && Math.abs(Number(raw)) <= 60 ? Number(raw) : null;
+        })(),
+        race_class: (opt.race_class >= 0 ? textCell(cell(r, opt.race_class), 24) : null) ?? (race?.race_class as string | null) ?? null,
       });
     }
   }

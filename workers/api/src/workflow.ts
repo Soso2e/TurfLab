@@ -346,6 +346,9 @@ export async function detail(repo: Repository, raceId: string): Promise<Row> {
     pipeline_runs: await select("race_pipeline_runs"),
     reference_plans: await select("reference_plans"),
     reference_adoptions: await select("reference_adoptions"),
+    horse_result_analyses: (await repo.list("horse_result_analyses")).filter(
+      (a) => a.race_id === raceId,
+    ),
   };
 }
 export async function dashboard(repo: Repository, date: string): Promise<Row> {

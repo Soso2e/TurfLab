@@ -14,7 +14,7 @@
 
 | # | ステップ | 区分 | 状態 | 既存の実装・文書 | 担当Issue |
 |---|---|---|---|---|---|
-| 1 | レース特定 | 必須 | ✅ | CLIが JST 09〜21時・3時間ごとに当日最大5Rを選定（`scripts/local-prediction-worker.ts`、[local-cli-operation](local-cli-operation.md)） | #61 |
+| 1 | レース特定 | 必須 | ✅ | CLIが JST 09〜21時・3時間ごとに当日最大3Rを選定（2026-11-11に5Rから変更）（`scripts/local-prediction-worker.ts`、[local-cli-operation](local-cli-operation.md)） | #61 |
 | 2 | 出走馬スナップショット | 必須 | ✅ | 固定snapshot `entries_state_json`、pack/hash固定（[core-pipeline](core-pipeline.md)） | #30 |
 | 3 | 全馬の近走収集 | 必須（3走） | 🟡 | `scripts/local-history-research.ts`：直近1走を優先し最大3走。`recent-form-position-v1`。**保存済みの近走を再検索しない処理は未実装**（今は毎回全頭を調べる） | #61 / #59 |
 | 4 | 当日馬場傾向 | 深掘り（将来は必須） | 🟡 | 馬場・天候の観測値だけ。**発走済みRの結果から脚質・枠の傾向を集計する処理はない** | 新規候補 |
