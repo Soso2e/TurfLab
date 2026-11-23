@@ -1,4 +1,4 @@
-import { StatsPage } from "./StatsPage";
+import { RaceStatsView, StatsPage } from "./StatsPage";
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -1964,6 +1964,7 @@ function App() {
                 <div className="race-tabs" role="tablist" aria-label="レース詳細">
                   <button type="button" role="tab" id="rt-overview" aria-selected={raceTab === "overview"} aria-controls="rp-overview" className={"race-tab" + (raceTab === "overview" ? " active" : "")} onClick={() => setRaceTab("overview")}>概要</button>
                   <button type="button" role="tab" id="rt-horses" aria-selected={raceTab === "horses"} aria-controls="rp-horses" className={"race-tab" + (raceTab === "horses" ? " active" : "")} onClick={() => setRaceTab("horses")}>出走馬</button>
+                  <button type="button" role="tab" id="rt-stats" aria-selected={raceTab === "stats"} aria-controls="rp-stats" className={"race-tab" + (raceTab === "stats" ? " active" : "")} onClick={() => setRaceTab("stats")}>統計</button>
                   <button type="button" role="tab" id="rt-forecast" aria-selected={raceTab === "forecast"} aria-controls="rp-forecast" className={"race-tab" + (raceTab === "forecast" ? " active" : "")} onClick={() => setRaceTab("forecast")}>予想・展開</button>
                   <button type="button" role="tab" id="rt-bets" aria-selected={raceTab === "bets"} aria-controls="rp-bets" className={"race-tab" + (raceTab === "bets" ? " active" : "")} onClick={() => setRaceTab("bets")}>購入</button>
                   <button type="button" role="tab" id="rt-result" aria-selected={raceTab === "result"} aria-controls="rp-result" className={"race-tab" + (raceTab === "result" ? " active" : "")} onClick={() => setRaceTab("result")}>結果</button>
@@ -2290,6 +2291,18 @@ function App() {
                     </table>
                   </div>
                 </section>
+                </div>
+                <div className="race-tab-panel" role="tabpanel" id="rp-stats" aria-labelledby="rt-stats" hidden={raceTab !== "stats"}>
+                  <RaceStatsView
+                    api={api}
+                    raceId={String(race.race_id)}
+                    active={raceTab === "stats"}
+                    embedded
+                    onOpenFullStats={(id) => {
+                      setStatsRaceId(id);
+                      setTab("racestats");
+                    }}
+                  />
                 </div>
                 <div className="race-tab-panel" role="tabpanel" id="rp-forecast" aria-labelledby="rt-forecast" hidden={raceTab !== "forecast"}>
                 <section className="panel">

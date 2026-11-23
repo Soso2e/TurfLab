@@ -3590,6 +3590,11 @@ img, svg, video { max-width: 100%; }
 .detail-stats-btn { flex-shrink: 0; white-space: nowrap; padding: 7px 12px; font-size: 13px; font-weight: 600; }
 .st-page { min-width: 0; }
 .st-page .race-tabs { top: 0; }
+.st-embedded { min-width: 0; display: grid; gap: 10px; }
+.st-embedded-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; }
+.st-embedded-bar .st-sub { margin: 0; }
+.st-embedded .race-tabs.st-subtabs { position: static; top: auto; z-index: auto; margin: 0; padding: 2px 0 8px; background: transparent; backdrop-filter: none; border-bottom: 1px solid #dce1d7; }
+.st-embedded .race-tabs.st-subtabs .race-tab { min-height: 36px; min-width: 64px; padding: 0 12px; font-size: 13px; }
 .st-picker { display: grid; gap: 8px; margin-bottom: 12px; min-width: 0; }
 .st-picker select { justify-self: start; min-height: 40px; }
 .st-races { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: thin; }

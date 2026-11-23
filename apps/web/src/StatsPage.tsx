@@ -436,6 +436,110 @@ const TABS = [
   ["coverage", "網羅"],
 ] as const;
 
+export function RaceStatsView({
+  api,
+  raceId,
+  active = true,
+  embedded = false,
+  onOpenRace,
+  onOpenFullStats,
+  onSheetLoaded,
+}: {
+  api: Api;
+  raceId: string;
+  active?: boolean;
+  embedded?: boolean;
+  onOpenRace?: (id: string) => void;
+  onOpenFullStats?: (id: string) => void;
+  onSheetLoaded?: (sheet: Row) => void;
+}) {
+  const [sheet, setSheet] = useState<Row | null>(null);
+  const [tab, setTab] = useState<(typeof TABS)[number][0]>("horses");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [activatedRaceId, setActivatedRaceId] = useState<string | null>(active ? raceId : null);
+  // The parent recreates `api` and callbacks every render; keep the latest in refs so the
+  // effects below depend only on what is shown.
+  const apiRef = useRef(api);
+  apiRef.current = api;
+  const onSheetLoadedRef = useRef(onSheetLoaded);
+  onSheetLoadedRef.current = onSheetLoaded;
+
+  useEffect(() => {
+    if (active) setActivatedRaceId(raceId);
+  }, [active, raceId]);
+
+  const shouldLoad = active || activatedRaceId === raceId;
+
+  useEffect(() => {
+    if (!shouldLoad) {
+      setSheet(null);
+      setError("");
+      setLoading(false);
+      return;
+    }
+    let live = true;
+    setSheet(null);
+    setLoading(true);
+    setError("");
+    apiRef.current(`/race-stats/races/${encodeURIComponent(raceId)}`)
+      .then((s) => {
+        if (live) {
+          setSheet(s);
+          onSheetLoadedRef.current?.(s);
+        }
+      })
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "読み込めません"))
+      .finally(() => live && setLoading(false));
+    return () => { live = false; };
+  }, [raceId, reloadKey, shouldLoad]);
+
+  const race = o(sheet?.race);
+  return (
+    <div className={embedded ? "st-embedded" : undefined}>
+      {embedded && (
+        <div className="st-embedded-bar">
+          <p className="st-sub">
+            数値にはサンプル数と信頼度、<span className="st-est">推</span>＝推定値、—＝欠測。
+          </p>
+          {onOpenFullStats && (
+            <button type="button" className="link-button" onClick={() => onOpenFullStats(raceId)}>
+              全レース統計ページへ
+            </button>
+          )}
+        </div>
+      )}
+      {error && <div className="alert">{error}</div>}
+      {loading && !sheet && <p className="st-sub">読み込み中…</p>}
+      {sheet && (
+        <>
+          {!embedded && (
+            <div className="st-race-head">
+              <b>{String(race.track)} {String(race.race_no)}R</b> {String(race.name ?? "")}
+              <span className="st-chip">{String(race.surface ?? "")}{String(race.distance_m ?? "")}m</span>
+              <span className="st-chip">{a(sheet.horses).length}頭</span>
+              {onOpenRace && <button type="button" className="link-button" onClick={() => onOpenRace(raceId)}>レース詳細へ</button>}
+            </div>
+          )}
+          <div className={embedded ? "race-tabs st-subtabs" : "race-tabs"} role="tablist" aria-label="統計">
+            {TABS.map(([id, label]) => (
+              <button key={id} type="button" role="tab" aria-selected={tab === id} className={"race-tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)}>{label}</button>
+            ))}
+          </div>
+          <div className="st-body">
+            {tab === "horses" && <HorsesTab sheet={sheet} />}
+            {tab === "jockeys" && <JockeysTab sheet={sheet} />}
+            {tab === "track" && <TrackTab sheet={sheet} api={api} reload={() => setReloadKey((k) => k + 1)} />}
+            {tab === "score" && <ScoreTab sheet={sheet} />}
+            {tab === "coverage" && <CoverageTab sheet={sheet} />}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function StatsPage({ api, raceId, onRaceChange, onOpenRace }: {
   api: Api;
   raceId: string | null;
@@ -444,37 +548,19 @@ export function StatsPage({ api, raceId, onRaceChange, onOpenRace }: {
 }) {
   const [day, setDay] = useState<Row | null>(null);
   const [date, setDate] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<Row | null>(null);
-  const [tab, setTab] = useState<(typeof TABS)[number][0]>("horses");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
-  // The parent recreates `api` every render; keep the latest in a ref so the
-  // effects below depend only on what is shown.
   const apiRef = useRef(api);
   apiRef.current = api;
 
   useEffect(() => {
     let live = true;
-    apiRef.current(`/race-stats${date ? `?date=${date}` : ""}`).then((d) => live && setDay(d)).catch((e: unknown) => live && setError(e instanceof Error ? e.message : "読み込めません"));
+    apiRef.current(`/race-stats${date ? `?date=${date}` : ""}`)
+      .then((d) => { if (live) { setDay(d); setError(""); } })
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "読み込めません"));
     return () => { live = false; };
   }, [date]);
 
-  useEffect(() => {
-    if (!raceId) { setSheet(null); return; }
-    let live = true;
-    setLoading(true);
-    setError("");
-    apiRef.current(`/race-stats/races/${encodeURIComponent(raceId)}`)
-      .then((s) => { if (live) { setSheet(s); if (!date) setDate(String(o(s.race).date)); } })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : "読み込めません"))
-      .finally(() => live && setLoading(false));
-    return () => { live = false; };
-    // `date` is only filled in from the first sheet, never a trigger.
-  }, [raceId, reloadKey]);
-
   const races = useMemo(() => a(day?.races), [day]);
-  const race = o(sheet?.race);
   return (
     <div className="st-page">
       <div className="page-heading">
@@ -499,28 +585,15 @@ export function StatsPage({ api, raceId, onRaceChange, onOpenRace }: {
       </div>
       {error && <div className="alert">{error}</div>}
       {!raceId && <p className="st-missing-line">レースを選ぶと統計を表示します。</p>}
-      {raceId && loading && !sheet && <p className="st-sub">読み込み中…</p>}
-      {sheet && raceId && (
-        <>
-          <div className="st-race-head">
-            <b>{String(race.track)} {String(race.race_no)}R</b> {String(race.name ?? "")}
-            <span className="st-chip">{String(race.surface ?? "")}{String(race.distance_m ?? "")}m</span>
-            <span className="st-chip">{a(sheet.horses).length}頭</span>
-            {onOpenRace && <button type="button" className="link-button" onClick={() => onOpenRace(raceId)}>レース詳細へ</button>}
-          </div>
-          <div className="race-tabs" role="tablist" aria-label="統計">
-            {TABS.map(([id, label]) => (
-              <button key={id} type="button" role="tab" aria-selected={tab === id} className={"race-tab" + (tab === id ? " active" : "")} onClick={() => setTab(id)}>{label}</button>
-            ))}
-          </div>
-          <div className="st-body">
-            {tab === "horses" && <HorsesTab sheet={sheet} />}
-            {tab === "jockeys" && <JockeysTab sheet={sheet} />}
-            {tab === "track" && <TrackTab sheet={sheet} api={api} reload={() => setReloadKey((k) => k + 1)} />}
-            {tab === "score" && <ScoreTab sheet={sheet} />}
-            {tab === "coverage" && <CoverageTab sheet={sheet} />}
-          </div>
-        </>
+      {raceId && (
+        <RaceStatsView
+          api={api}
+          raceId={raceId}
+          onOpenRace={onOpenRace}
+          onSheetLoaded={(s) => {
+            if (!date) setDate(String(o(s.race).date));
+          }}
+        />
       )}
     </div>
   );
