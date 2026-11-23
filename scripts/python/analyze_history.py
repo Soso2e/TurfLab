@@ -86,6 +86,14 @@ def parse_seconds(val: Any) -> float | None:
     return round(sec, 1) if 0 < sec < 600 else None
 
 
+def parse_nar_archive_seconds(value: Any) -> float | None:
+    text = norm_text(value)
+    match = re.fullmatch(r"(\d{0,2})([0-5]\d)(\d)", text)
+    if match:
+        return parse_seconds(f"{match[1] or 0}:{match[2]}.{match[3]}")
+    return parse_seconds(value)
+
+
 def parse_corners(val: Any) -> list[int]:
     if isinstance(val, list):
         out = []
@@ -118,7 +126,7 @@ def find_col(header_norm: list[str], candidates: tuple[str, ...]) -> int:
     return -1
 
 
-def load_nar_csv_dir(csv_dir: Path, before_date: str | None = None) -> dict[str, Any]:
+def load_nar_csv_dir(csv_dir: Path, before_date: str | None = None, *, preserve_status: bool = False) -> dict[str, Any]:
     if not csv_dir.exists() or not csv_dir.is_dir():
         return {"files": 0, "runs": [], "date_range": None, "tracks": []}
 
@@ -187,6 +195,7 @@ def load_nar_csv_dir(csv_dir: Path, before_date: str | None = None) -> dict[str,
         idx_jk = find_col(header, ("騎手名", "騎手"))
         idx_fin = find_col(header, ("着順",))
         idx_nm = find_col(header, ("馬名",))
+        idx_margin = find_col(header, ("着差",))
         idx_tm = find_col(header, ("タイム", "走破タイム"))
         idx_3f = find_col(header, ("上り", "上がり", "上り3F", "上がり3F", "推定上り"))
         idx_cor = find_col(header, ("通過順", "コーナー通過順", "通過"))
@@ -201,15 +210,19 @@ def load_nar_csv_dir(csv_dir: Path, before_date: str | None = None) -> dict[str,
             if before_date and dt >= before_date:
                 continue
             raw_fin = norm_text(r[idx_fin])
-            if not raw_fin or re.search(r"[取除欠]", raw_fin):
+            if not preserve_status and (not raw_fin or re.search(r"[取除欠]", raw_fin)):
                 continue
             if re.match(r"^\d+$", raw_fin):
                 finish: int | None = int(raw_fin)
-            elif re.search(r"[中止失降]", raw_fin):
+            elif preserve_status or re.search(r"[中止失降]", raw_fin):
                 finish = None
             else:
                 continue
 
+            status_text = raw_fin + (norm_text(r[idx_margin]) if 0 <= idx_margin < len(r) else "")
+            status = next((value for label, value in (("取消", "scratched"), ("除外", "excluded"),
+                           ("中止", "dnf"), ("失格", "disqualified")) if label in status_text),
+                          "finished" if finish is not None else "unknown")
             tr = norm_track(r[idx_tr])
             no = parse_int(r[idx_no])
             if no is None:
@@ -229,7 +242,8 @@ def load_nar_csv_dir(csv_dir: Path, before_date: str | None = None) -> dict[str,
                     "jockey": norm_text(r[idx_jk]),
                     "horse_name": norm_text(r[idx_nm]) if idx_nm >= 0 and idx_nm < len(r) else "",
                     "finish": finish,
-                    "finish_time_s": parse_seconds(r[idx_tm]) if idx_tm >= 0 and idx_tm < len(r) else None,
+                    **({"status": status} if preserve_status else {}),
+                    "finish_time_s": (parse_nar_archive_seconds if preserve_status else parse_seconds)(r[idx_tm]) if idx_tm >= 0 and idx_tm < len(r) else None,
                     "last_3f_s": parse_float(r[idx_3f]) if idx_3f >= 0 and idx_3f < len(r) else None,
                     "corners": parse_corners(r[idx_cor]) if idx_cor >= 0 and idx_cor < len(r) else [],
                     "carried_weight_kg": parse_float(r[idx_wt]) if idx_wt >= 0 and idx_wt < len(r) else None,

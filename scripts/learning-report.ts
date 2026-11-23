@@ -14,6 +14,7 @@ import {
 } from "./lab-learning";
 import { SELECTIVE_DAILY_BUDGET_YEN, selectivePlan } from "./bet-plans";
 import { evaluateTrackBias } from "./track-bias-evaluation";
+import { trackDayReport } from "./track-day-report";
 
 export async function exchangeFiles(exchange: string, kind: string): Promise<Row[]> {
   const output: Row[] = [];
@@ -83,6 +84,7 @@ export async function offlineLearningReport(exchange: string, now: string): Prom
   const currentSaved = plans.filter((p) => p.plan_lane !== "selective" && p.plan_lane !== "evm");
   return {
     ...report,
+    ...(await trackDayReport(exchange)),
     track_bias_evaluation: evaluateTrackBias(
       [...latestLabs.values()], [...results.values()],
     ),
