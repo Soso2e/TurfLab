@@ -995,18 +995,33 @@ recent_runs:[{date_jst:"YYYY-MM-DD",track,distance_m,going,finish:nullまたは�
       userSettledNetYen: Number(user?.settled_net_yen ?? 0),
     });
     if (ledger) {
+      const cash = Number(ledger.cash_balance_yen);
+      this.ledgerCash = Number.isFinite(cash) ? cash : null;
+      this.stakedSinceLedger = 0;
       await this.api("/local-predictions/ledger", { ledger }).catch(() => {});
     }
     return ledger;
   }
+  /** AI-side cash from the last ledger run, and what the AI has staked since then. Reused so the
+   * gate does not start Python for every plan (slow on Windows); each refreshLedger resets it. */
+  private ledgerCash: number | null = null;
+  private stakedSinceLedger = 0;
+
   /** One bankroll for the AI plans and the user's bets: a plan whose stake exceeds what is left is skipped, not shrunk.
    * If the ledger cannot be computed (no Python), nothing is blocked — the cash is unknown, not zero. */
   private async withinBankroll(plan: Row, day: string): Promise<Row> {
     const stake = rows(plan.picks ?? []).reduce((s, x) => s + Number(x.amount_yen ?? 0), 0);
     if (stake <= 0) return plan;
-    const ledger = await this.refreshLedger(day).catch(() => null);
-    const available = Number(ledger?.available_cash_yen);
-    if (!Number.isFinite(available) || stake <= available) return plan;
+    if (this.ledgerCash === null) await this.refreshLedger(day).catch(() => null);
+    if (this.ledgerCash === null) return plan;
+    // The user's side is read fresh (a cheap Core call): their bets can change between ticks.
+    const user = await this.api("/user-bankroll").catch(() => null);
+    const available = this.ledgerCash - this.stakedSinceLedger
+      - Number(user?.open_stake_yen ?? 0) + Number(user?.settled_net_yen ?? 0);
+    if (stake <= available) {
+      this.stakedSinceLedger += stake;
+      return plan;
+    }
     return {
       ...plan,
       picks: [],
