@@ -282,7 +282,9 @@
 - 最新Issue #41コメントの明示方針に従い、公式IDを必須にしないname-only登録を実装。strict Wizardは維持。名前由来ID・同名混同リスク・公式未確認来歴を保存し、source SHA単位でカタログ/参考全文をprivate GitHubへ追記する。
 - 発走前は既存pack/Bridge/Coreを再利用。完全な全馬6評価・3展開/answerだけ正式化し、欠測は補完しない。過去分はカタログだけ。結果精算・本人Betは別経路。
 - ローカル全170テスト・型・lint・build成功。11/3実参考JSONを隔離MemoryRepositoryへ取り込み、4R/47馬/34騎手/47出走馬、snapshot/予想/結果/精算/本人Bet各0、再送hash一致を確認。同じ実JSONを隔離Durable Objectへ実POSTし、再送・プロセス再起動後のCoreバックアップhash一致も確認。隔離DOでは架空の発走前JSON→Worker（GitHub輸送のみメモリ代替）→pack→Core locked→再起動hash一致も成功。本番の発走前正式予想受入ではない。
-- 作業中: PR #52のLinux/Windows CIは初回実装commitで成功。11/4実参考JSONのrace_no/R表記・名簿0件にも対応し、最終HEAD CI、main、Windows既存stateバックアップ・反映・実読返しへ進む。実タスク本文/定時実行、発走前実1R、公式結果、OS再起動/iPhoneは未確認。元worktreeの未コミット変更を保持。
+- 完了: PR #52最終HEADのLinux/Windows CI全成功、main 7af2754へマージ、Windowsログオン参照worktreeへ反映。停止/ポート解放後state 24ファイルをコピー・SHA-256照合。既存認証とローカル進捗を保持。Web/API/HTTPS認証と新build配信hash一致。
+- 実受入: 本番Workerが11/2〜11/4参考JSONを自動処理し、59馬/34騎手/4R/47出走馬を登録。private GitHub catalogにsource SHA別3件追記し来歴/参考全文を読返し確認。11/2の騎手欠測と11/4の名簿0件は補完せず参考保存。発走後snapshot/pack/Morning/結果/精算/本人Betは各0、同期失敗0。
+- 次/未確認: 発走前実1Rの実ChatGPT定時JSON→Core locked、公式結果の独立取得、OS再起動/iPhone。プロンプトファイルを更新したが実タスク本文は変更していない。元worktreeの未コミット4ファイルを保持。
 
 
 ## 2026-11-03 Core state versioned exports
@@ -422,6 +424,24 @@
 
 | 2026-11-04-02 | NAR形式CSVをWizard draftへ変換し未確認ID/状態を空欄で保持。架空CSVからCore lockedまで隔離検証。PID再利用時の旧Worker記録退避を実装・隔離確認 | 実装済み・未確認 | `packages/shared/src/race-wizard.ts`, `apps/web/src/RaceImportWizard.tsx`, `scripts/windows/Start-GitHubSync.ps1`, `tests/race-wizard.test.ts`, `PROGRESS.md` | 実CSV・個体照合・発走前実1Rと実運用適用 |
 
+
+## 2026-11-04 PR #50 実機反映
+
+- PR #50はLinux/Windows CI成功後、main `336fa10` へマージ。ログオンタスク参照worktreeを更新し、Web buildの配信、Web/API、Tailscale認証と新Workerプロセスを確認。
+- 更新前に論理バックアップを取得し、state 24ファイルもコピーしてSHA-256一致を確認。ただし停止後に別の既存Wranglerが応答したため、物理コピーを完全停止状態のスナップショットとは断定しない。同期Workerの新規起動後の実同期は継続確認。OS再起動と実レースは未検証。
+
+| 2026-11-04-03 | PR #50のCIとmainマージ、実機worktree更新、論理/物理バックアップとWeb/API/Tailscale/Worker起動を確認 | 動作確認済み | PROGRESS.md、実機worktree | 新Worker同期読返し、実CSV・個体照合・実1R |
+
+## 2026-11-04 同期・バックアップと個体候補確認
+
+- GitHub Workerは02:30起動後、02:32 JSTに同期・参考/結果確認を記録し失敗0。8787はログオン起動されたTurfLab Wrangler PID 4592→13632→workerd 36904と確認。別サービスではない。停止時に異なるプロセスが残った経緯そのものは未解明。
+- 更新前の論理バックアップは現行Core 29テーブルとhash/件数一致し、隔離MemoryRepository復元後もhash一致。稼働中コピーのSQLite 8件を別コピーでintegrity_check成功。ただし物理コピーの全ファイル時点整合・実DO復元は未検証。
+- Coreはraces/horses/jockeys/snapshots/predictions各0件。ユーザーより許諾済み実NAR CSV・公式ID資料はPC内にないと回答。実CSV解析、発走前実1R、正式予想lockedは未実施。
+- PR #51: 既存DB同名候補の出典・ID・生年月日等を読み取り表示。候補が一意でも自動確定・自動入力せず公式資料で確認待ち。162テストと隔離既存Wizard成功。公式情報との実照合は未検証。
+
+| 2026-11-04-04 | 同期成功、Wranglerプロセス系統、論理バックアップ29テーブルのhash/隔離復元、物理コピーSQLite検査を確認。同名候補の読み取り表示を実装 | 動作確認済み | PROGRESS.md、PR #51 | CIと実機反映、許諾済み実CSVと公式ID、実1R |
+- 追記: PR #51はLinux/Windows CI全成功後、main `1c5165d` にマージし実機参照worktreeをfast-forward。更新前論理バックアップを取得、実機APIの架空名照会でreview_required/候補0、照会前後のCore hash一致、新Web配信、tailnet認証を確認。実NAR CSV・実馬の照合ではない。
+
 | 2026-11-04-05 | Issue #41の名前登録方針を実装。source SHA別カタログ・soft pack・完全回答の既存Core連携、strict/履歴保全、発走後拒否。170テストと11/3実参考JSONの隔離カタログ確認 | 実装済み・未確認 | name-reference-intake、reference-answer、Bridge/Core/Web/日次出力/テスト/文書 | PR/CI/main・Windows反映、発走前実1R/実定時受入 |
 
 | 2026-11-05-01 | 本番DO破損/500とWorker無記録、復元413を再現。原本保全しBlob検証済みcatalogから復旧、再起動後もbackup hash一致。health/checkpoint・復元上限・朝JSON契約を修正。174テストとPush/PR双方のLinux/Windows CI成功、PR #53をmainへ反映 | 動作確認済み | Worker/Status/API、worker-health、回帰テスト、朝タスク置換案/名前登録手順/PROGRESS | 本番2R/21頭catalog保存済み、距離未観測でpack0。実タスク本文更新と発走前実pack→locked、物理破損原因は未確認 |
@@ -435,3 +455,12 @@
 
 | 2026-11-13-03 | CLI調査パックのCore照合・GitHub転送・blob確認と、Core公式結果を使う比較の再処理を実装。264テストと型・lint・ビルド成功 | 実装済み・未確認 | GitHub同期、予想Worker、API、Web、運用手順 | 実レースでの本番周期を確認 |
 | 2026-11-14-01 | 自動ベットの買い目・照合額・未作成理由をレース詳細に追加。高知4R・10Rで本番表示を確認。単勝ページの指定と全頭照合を修正し、314テスト成功 | 動作確認済み | Web、予想Worker、API、回帰テスト | 次の発走前調査で期待値枠を確認。既存過去走の通過順検証エラーは要調査 |
+
+## 2026-11-04 PR #52 名前登録のWindows反映
+
+- main `7af2754`へ更新し、本番Workerの自動取込とprivate GitHub catalog3件の追記/読返しを確認。更新直後は旧Core hashと一致し、その後の名前登録で59馬/34騎手/4R/47出走馬へ増加。未確認結果や本人Betを作らず、過去Morningは0。
+- 更新前の論理バックアップ、停止とポート解放後state24ファイルのSHA-256照合コピー、既存進捗の原本/保全stashを保持。既存進捗03/04を含めて復元済み。証跡はローカルDataHomeのbackups/name-intake-20261104-213458。旧443を維持し、8443のHTTPS/認証、配信JSのhash一致を確認。
+- 本番の発走前正式予想、公式結果の独立取得・精算、OS再起動・iPhoneは未確認。実装/隔離受入と区別する。
+
+| 2026-11-04-06 | PR #52の170テスト/Linux・Windows CI全成功、mainマージ、state保全/実機反映、本番Workerの59馬/34騎手/4R/47出走馬登録とprivate GitHub履歴3件の読返し | 動作確認済み | PROGRESS.md（実機ローカル記録）、PR #52、Windows/DataHome/非公開catalog | 発走前実1R/実定時→locked、公式結果、OS再起動/iPhone |
+
