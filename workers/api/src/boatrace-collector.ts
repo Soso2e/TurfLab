@@ -2,6 +2,9 @@ import {
   BOAT_STAKE, BoatDataMissing, freezeBoatRace, settleBoatRace, summarizeBoatRaces, type BoatRecord,
 } from "../../../packages/shared/src/boatrace";
 import {
+  freezeB11, reconstructB11, summarizeB11, type B11ResearchItem, type B11ResearchRecord,
+} from "../../../packages/shared/src/boatrace-b11";
+import {
   BoatOfficialSource, japanDate, officialUrl, parseExhibition, parseExhibitionTimes, parseOdds,
   parseProgram, parseResult, parseVenues,
 } from "./boatrace-official";
@@ -72,6 +75,28 @@ export class BoatCollector {
       race_id TEXT PRIMARY KEY, hour INTEGER NOT NULL UNIQUE, stake INTEGER NOT NULL,
       payout INTEGER, refund INTEGER
     )`);
+    // 研究用（B11×級別σ）。実購入台帳とは別表。発走前に凍結した行は追記のみ。
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_research (
+      race_id TEXT PRIMARY KEY, date TEXT NOT NULL, frozen_at TEXT NOT NULL, body TEXT NOT NULL
+    )`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS boat_research_day ON boat_research(date)");
+  }
+
+  /** 発走前の番組から事前特徴量・B11出力・各閾値判定を1回だけ凍結する。級別欠損の行のみ、締切前なら更新可。 */
+  private freezeResearch(race: BoatRecord, now: Date) {
+    const record = freezeB11(race, now);
+    if (!record) return;
+    const prev = this.sql.exec<{ body: string }>("SELECT body FROM boat_research WHERE race_id = ?", race.id).toArray()[0];
+    if (prev) {
+      const old = JSON.parse(prev.body) as B11ResearchRecord;
+      const replaceable = old.evaluation.b11.status === "unjudged" && record.evaluation.b11.status !== "unjudged";
+      if (!replaceable) return;
+      this.sql.exec("UPDATE boat_research SET frozen_at = ?, body = ? WHERE race_id = ?",
+        record.frozenAt, JSON.stringify(record), race.id);
+      return;
+    }
+    this.sql.exec("INSERT INTO boat_research (race_id, date, frozen_at, body) VALUES (?, ?, ?, ?)",
+      race.id, race.date, record.frozenAt, JSON.stringify(record));
   }
 
   private bankroll() {
@@ -120,6 +145,7 @@ export class BoatCollector {
         for (const race of parseProgram(page, name)) {
           const prev = this.row(race.id);
           const existing = prev ? JSON.parse(prev.body) as BoatRecord : null;
+          try { this.freezeResearch(race, new Date(now)); } catch { /* 研究凍結の失敗で収集を止めない */ }
           if (existing?.freeze || existing?.result) continue;
           const cutoff = race.cutoff ? Date.parse(race.cutoff) : 0;
           const issue = cutoff ? (cutoff === prev?.cutoff ? existing?.issue : undefined) : "公式の締切予定時刻が未取得";
@@ -297,6 +323,30 @@ export class BoatCollector {
       }
       return json({ from: date, ...summarizeBoatRaces(records()) });
     }
+    if (path === "research") {
+      const date = url.searchParams.get("date") ?? japanDate();
+      if (!DATE_PATTERN.test(date)) return json({ error: "開催日が不正です" }, 400);
+      const from = japanDate(Date.now() - 90 * DAY);
+      const frozen = new Map(this.sql.exec<{ race_id: string; body: string }>(
+        "SELECT race_id, body FROM boat_research WHERE date >= ?", from)
+        .toArray().map((r) => [r.race_id, JSON.parse(r.body) as B11ResearchRecord]));
+      const forward: B11ResearchItem[] = [], rebuilt: B11ResearchItem[] = [];
+      const day: unknown[] = [];
+      for (const row of this.sql.exec<{ body: string }>("SELECT body FROM boat_races WHERE date >= ? ORDER BY cutoff, id", from)) {
+        const race = JSON.parse(row.body) as BoatRecord;
+        const base = { cutoff: race.freeze?.cutoff ?? race.cutoff, venueName: race.venueName, result: race.result };
+        rebuilt.push({ ...base, record: reconstructB11(race) });
+        const record = frozen.get(race.id);
+        if (record) forward.push({ ...base, record });
+        if (race.date === date) day.push({
+          id: race.id, venueName: race.venueName, number: race.number, cutoff: base.cutoff,
+          evaluation: (record ?? reconstructB11(race)).evaluation, kind: record ? "forward" : "reconstructed",
+          resulted: Boolean(race.result),
+        });
+      }
+      return json({ date, from, forward: summarizeB11(forward, "forward"),
+        reconstructed: summarizeB11(rebuilt, "reconstructed"), races: day });
+    }
     if (path === "history") {
       return json({ days: this.sql.exec(`SELECT date, COUNT(*) AS races,
         SUM(json_type(body, '$.freeze') IS NOT NULL) AS purchased,
@@ -315,7 +365,10 @@ export class BoatCollector {
           WHERE d.date = ? ORDER BY r.id, r.fetched_at`, date);
         const autoBets = this.sql.exec(`SELECT b.* FROM boat_auto_bets AS b
           JOIN boat_races AS r ON r.id = b.race_id WHERE r.date = ? ORDER BY b.hour`, date).toArray();
+        const research = this.sql.exec<{ body: string }>(
+          "SELECT body FROM boat_research WHERE date = ? ORDER BY race_id", date);
         return json({ version: "boatrace-archive-v1", date, records, autoBets,
+          research: Array.from(research, (r) => JSON.parse(r.body)),
           revisions: Array.from(revisions, (r) => ({ raceId: r.id, result: JSON.parse(r.body) })) });
       }
       const now = Date.now();
@@ -329,7 +382,10 @@ export class BoatCollector {
         const exhibitionFlying = race.freeze
           ? race.freeze.entries.filter((entry) => entry.exhibitionF === true).map((entry) => entry.boat)
           : race.exhibition?.entries.filter((entry) => entry.flying === true).map((entry) => entry.boat);
+        const research = reconstructB11(race).evaluation;
         return {
+          research: { sigma: research.features.sigma, mean: research.features.mean, sigmaClass: research.sigmaClass,
+            missingBoats: research.features.missingBoats, b11: research.b11.status === "bet" ? research.b11.tickets : research.b11.status },
           id: race.id, venue: race.venue, venueName: race.venueName, number: race.number,
           cutoff: race.freeze?.cutoff ?? race.cutoff, issue: race.issue ?? null,
           state: race.result?.status === "void" ? "void" : race.freeze ?
@@ -347,10 +403,13 @@ export class BoatCollector {
       const row = this.row(id);
       if (!row) return json({ error: "レース記録が見つかりません" }, 404);
       const race = JSON.parse(row.body) as BoatRecord;
+      const stored = this.sql.exec<{ body: string }>("SELECT body FROM boat_research WHERE race_id = ?", id).toArray()[0];
+      const frozenResearch = stored ? JSON.parse(stored.body) as B11ResearchRecord : null;
       const revisions = this.sql.exec<{ body: string }>("SELECT body FROM boat_result_revisions WHERE id = ? ORDER BY fetched_at", id);
       return json({
         race, funded: this.sql.exec("SELECT 1 FROM boat_auto_bets WHERE race_id = ?", id).toArray().length > 0,
         settlements: { adjusted: settleBoatRace(race, "adjusted"), control: settleBoatRace(race, "control") },
+        research: (frozenResearch ?? reconstructB11(race)),
         revisions: Array.from(revisions, (item) => JSON.parse(item.body)),
       });
     }

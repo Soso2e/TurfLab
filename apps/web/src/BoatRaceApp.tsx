@@ -2,6 +2,9 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import {
   type BoatRecord, type Lane, type Ticket, type settleBoatRace, type summarizeBoatRaces,
 } from "../../../packages/shared/src/boatrace";
+import {
+  SIGMA_CLASS_LABEL, type B11Summary, type B11ResearchRecord, type SigmaClass,
+} from "../../../packages/shared/src/boatrace-b11";
 import { IconCalendar, IconChart, IconRace, IconTable } from "./Icons";
 import { RubberDock, type RubberDockItem } from "./RubberDock";
 import { SportSwitch, TurfLink, navigateTo } from "./SportNavigation";
@@ -18,7 +21,25 @@ const jst = (value: string | null) => value ? new Date(value).toLocaleTimeString
 }) : "時刻未取得";
 const labels = { adjusted: "展示F補正あり", control: "展示F補正なし" };
 
+interface ResearchBrief {
+  sigma: number | null;
+  mean: number | null;
+  sigmaClass: SigmaClass | null;
+  missingBoats: number[];
+  b11: string[] | string;
+}
+const sigmaText = (sigma: number | null) => sigma === null ? "未判定" : sigma.toFixed(2);
+function ResearchLine({ research }: { research: ResearchBrief }) {
+  return <p className="boat-muted boat-research-line">
+    研究用 σ {research.sigma === null ? `未判定（${research.missingBoats.map((b) => b + "号艇").join("・")}の級別欠損）` : sigmaText(research.sigma)}
+    {research.mean !== null && <> ／ 級別平均 {research.mean.toFixed(2)}</>}
+    {research.sigmaClass && <> ／ {SIGMA_CLASS_LABEL[research.sigmaClass]}</>}
+    <small>（購入推奨ではありません）</small>
+  </p>;
+}
+
 interface RaceSummary {
+  research?: ResearchBrief;
   id: string;
   venueName: string;
   number: number;
@@ -31,6 +52,7 @@ interface RaceSummary {
   exhibitionFlying?: number[];
 }
 type RaceDetail = {
+  research?: B11ResearchRecord;
   race: BoatRecord;
   funded: boolean;
   settlements: Record<Lane, ReturnType<typeof settleBoatRace>>;
@@ -43,7 +65,12 @@ type CollectorStatus = {
   bankroll: { initial: number; balance: number; stake: number; payout: number; refund: number; pending: number };
 };
 type Day = { date: string; races: number; purchased: number; settled: number; results?: number };
-type Data = { races: RaceSummary[] } | RaceDetail |
+type ResearchPage = {
+  date: string; from: string; forward: B11Summary; reconstructed: B11Summary;
+  races: { id: string; venueName: string; number: number; cutoff: string | null; kind: string; resulted: boolean;
+    evaluation: B11ResearchRecord["evaluation"] }[];
+};
+type Data = { races: RaceSummary[] } | RaceDetail | ResearchPage |
   (ReturnType<typeof summarizeBoatRaces> & { from: string }) | { days: Day[] };
 
 class SessionExpired extends Error {}
@@ -82,6 +109,7 @@ function RaceCard({ race }: { race: RaceSummary }) {
         </TurfLink>
         <span className="boat-state" data-state={race.state}>{state}</span>
       </div>
+      {race.research && <ResearchLine research={race.research} />}
       {race.tickets.length > 0 && <TicketList tickets={race.tickets} />}
       {(race.net !== null || race.top3?.length || race.exhibitionFlying?.length || race.issue) && (
         <p className="boat-muted">
@@ -140,6 +168,18 @@ function RacePage({ detail }: { detail: RaceDetail }) {
       </table></div>
       {freeze?.entries.some((entry) => entry.exhibitionF === null) && <p className="boat-muted boat-note">展示F未取得の艇は級別補正なし。</p>}
     </section>
+    {detail.research && <section className="panel">
+      <div className="section-heading">
+        <h2>級別ばらつき（研究用）</h2>
+        <span>{detail.research.kind === "forward" ? "発走前に凍結" : "再構成（事後計算）"}</span>
+      </div>
+      <ResearchLine research={{ ...detail.research.evaluation.features, sigmaClass: detail.research.evaluation.sigmaClass,
+        b11: "" }} />
+      <p className="boat-muted">B11（研究モデル・正式予想ではない）：{(() => {
+        const b11 = detail.research.evaluation.b11;
+        return b11.status === "bet" ? `仮想 ${b11.tickets.join("・")}` : b11.status === "skip" ? `見送り（${b11.reason}）` : "未判定（級別欠損）";
+      })()}</p>
+    </section>}
     {freeze ? <>
       <section className="panel">
         <div className="section-heading">
@@ -277,8 +317,112 @@ function StatsPage({ stats }: { stats: Stats }) {
         </li>
       ))}</ul>
     </section>
+    <p className="boat-muted"><TurfLink to={`${BASE}/research`}>B11×級別ばらつきの研究画面（仮想評価）→</TurfLink></p>
     <Compare title="場別" rows={stats.venues} />
     <Compare title="日別推移" rows={[...stats.days].reverse()} />
+  </>;
+}
+
+const CAP_LABEL: Record<string, string> = {
+  "le0.2": "σ≦0.2", "le0.3": "σ≦0.3", "le0.4": "σ≦0.4", "le0.5": "σ≦0.5", "le0.6": "σ≦0.6", control: "制限なし(control)",
+};
+type B11Stats = B11Summary["byCap"][number]["stats"];
+function StatsRows({ rows }: { rows: { label: string; stats: B11Stats }[] }) {
+  return <div className="boat-table"><table>
+    <thead><tr><th scope="col">条件</th><th scope="col">対象</th><th scope="col">適用/見送り/閾値外/欠損</th>
+      <th scope="col">精算/未確定/除外</th><th scope="col">的中</th><th scope="col">投入・払戻・返還</th>
+      <th scope="col">純損益・回収率</th><th scope="col">最大連敗</th></tr></thead>
+    <tbody>{rows.map(({ label, stats: s }) => <tr key={label}>
+      <th scope="row">{label}</th><td className="num">{s.targets}</td>
+      <td className="num">{s.applied}/{s.modelSkip}/{s.outside}/{s.unjudged}</td>
+      <td className="num">{s.settled}/{s.pending}/{s.excluded}</td>
+      <td className="num">{s.hits}/{s.settled}（{percent(s.hitRate)}）</td>
+      <td className="num">{money(s.stake)}・{money(s.payout)}・{money(s.refund)}</td>
+      <td className="num"><span className={netClass(s.net)}>{signedMoney(s.net)}</span>・{percent(s.roi)}</td>
+      <td className="num">{s.maxLosingStreak}</td>
+    </tr>)}</tbody>
+  </table></div>;
+}
+
+function ResearchView({ data }: { data: ResearchPage }) {
+  const [classFilter, setClassFilter] = useState("all");
+  const [order, setOrder] = useState("sigma");
+  const [count, setCount] = useState(24);
+  const [mode, setMode] = useState<"forward" | "reconstructed">("forward");
+  const summary = data[mode];
+  const control = summary.byCap.find((c) => c.key === "control")!.stats;
+  const reasons = Object.entries(summary.byCap.reduce<Record<string, number>>((acc, c) => {
+    for (const [k, v] of Object.entries(c.stats.excludedReasons)) acc[k] = Math.max(acc[k] ?? 0, v);
+    return acc;
+  }, {}));
+  const races = data.races.filter((race) => classFilter === "all" ? true :
+    classFilter === "missing" ? race.evaluation.sigmaClass === null : race.evaluation.sigmaClass === classFilter)
+    .sort((a, b) => {
+      const sa = a.evaluation.features.sigma, sb = b.evaluation.features.sigma;
+      const bySigma = sa === null || sb === null ? Number(sa === null) - Number(sb === null) : sa - sb;
+      return order === "sigma" ? bySigma || a.id.localeCompare(b.id) : (a.cutoff ?? "").localeCompare(b.cutoff ?? "") || a.id.localeCompare(b.id);
+    });
+  return <>
+    <div className="page-heading">
+      <div>
+        <p className="eyebrow">RESEARCH ONLY</p>
+        <h1>B11×級別ばらつき（研究）</h1>
+        <p>実購入ではなく、各100円相当の仮想評価。購入推奨ではありません。v1・既存の仮想購入台帳とは別集計です。</p>
+      </div>
+    </div>
+    <section className="panel">
+      <div className="section-heading"><h2>研究統計</h2><span>{summary.total}R（{data.from}以降）</span></div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+        <label className="boat-venue-filter"><span>区分</span>
+          <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
+            <option value="forward">前向き（発走前に凍結）</option><option value="reconstructed">過去再構成（事後計算）</option>
+          </select>
+        </label>
+      </div>
+      <p className="boat-muted">
+        {mode === "forward" ? "次回稼働以降に発走前へ凍結した特徴量・判定を、公式結果確定後に評価。" : "保存済み番組から後で計算した再構成。発走前凍結ではないため、前向き評価と混ぜません。"}
+        分母は「対象」。閾値間は同一レースを含む重複標本で独立ではありません。
+        {control.smallSample && "精算件数が少なく、結果は偶然に左右されます。"}
+        {control.topPayoutShare !== null && control.topPayoutShare >= 0.5 && ` 制限なしでは最大払戻が総払戻の${percent(control.topPayoutShare)}を占めます。`}
+        {reasons.length > 0 && ` 除外理由：${reasons.map(([k, v]) => `${k} ${v}件`).join("、")}。`}
+      </p>
+      <h3>標準偏差の上限別</h3>
+      <StatsRows rows={summary.byCap.map((c) => ({ label: CAP_LABEL[c.key], stats: c.stats }))} />
+      <h3>分類別（小 σ≦0.5 ／ 普通 0.5＜σ＜1 ／ 大 σ≧1）</h3>
+      <StatsRows rows={summary.byClass.map((c) => ({ label: SIGMA_CLASS_LABEL[c.sigmaClass], stats: c.stats }))} />
+      <details className="boat-details"><summary>日別内訳（制限なし）</summary>
+        <ul className="boat-plain-list">{control.days.map((day) => <li key={day.date}>
+          {day.date} ／ 適用 {day.applied}・精算 {day.settled}・的中 {day.hits} ／ 純損益 <span className={netClass(day.net)}>{signedMoney(day.net)}</span>
+        </li>)}</ul>
+      </details>
+    </section>
+    <section className="panel">
+      <div className="section-heading"><h2>{data.date} のレース</h2><span>{races.length}R</span></div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
+        <label className="boat-venue-filter"><span>分類</span>
+          <select value={classFilter} onChange={(event) => { setClassFilter(event.target.value); setCount(24); }}>
+            <option value="all">すべて</option><option value="small">小</option><option value="normal">普通</option>
+            <option value="large">大</option><option value="missing">未判定（欠損）</option>
+          </select>
+        </label>
+        <label className="boat-venue-filter"><span>並び順</span>
+          <select value={order} onChange={(event) => setOrder(event.target.value)}>
+            <option value="sigma">σ昇順</option><option value="time">締切順</option>
+          </select>
+        </label>
+      </div>
+      <div className="boat-race-list">{races.slice(0, count).map((race) => <article className="boat-race-row" key={race.id}>
+        <div className="boat-race-time"><span>{jst(race.cutoff)}</span><small>締切</small></div>
+        <div className="boat-race-main">
+          <div className="boat-race-head">
+            <TurfLink to={`${BASE}/races/${race.id}`} className="boat-race-link"><strong>{race.venueName} {race.number}R</strong></TurfLink>
+            <span className="boat-state" data-state="scheduled">{race.kind === "forward" ? "凍結済" : "再構成"}</span>
+          </div>
+          <ResearchLine research={{ ...race.evaluation.features, sigmaClass: race.evaluation.sigmaClass, b11: "" }} />
+        </div>
+      </article>)}</div>
+      {races.length > count && <button type="button" className="secondary" onClick={() => setCount((n) => n + 24)}>さらに表示（残り {races.length - count}R）</button>}
+    </section>
   </>;
 }
 
@@ -292,12 +436,13 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
   const [venue, setVenue] = useState("");
   const [raceFilter, setRaceFilter] = useState("all");
   const [raceSort, setRaceSort] = useState("time");
+  const [sigmaFilter, setSigmaFilter] = useState("all");
   const [visibleCount, setVisibleCount] = useState(24);
   const [refresh, setRefresh] = useState(0);
   const [loaded, setLoaded] = useState<{ key: string; data?: Data; error?: string }>();
   const path = pathname.slice(BASE.length).replace(/\/$/, "") || "/";
   const day = path.match(/^\/races\/(\d{4}-\d{2}-\d{2})$/)?.[1] ?? today();
-  const endpoint = path === "/" || path === "/races" || /^\/races\/\d{4}-\d{2}-\d{2}$/.test(path)
+  const endpoint = path === "/research" ? `/research?date=${day}` : path === "/" || path === "/races" || /^\/races\/\d{4}-\d{2}-\d{2}$/.test(path)
     ? `/races?date=${day}` : path;
   const dataKey = `${path}:${endpoint}`;
   const data = loaded?.key === dataKey ? loaded.data : undefined;
@@ -360,6 +505,7 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
   if (loadError) content = <p className="alert" role="alert">{loadError}</p>;
   else if (!data) content = <section className="panel boat-loading" role="status"><p className="boat-muted">競艇データを取得中…</p></section>;
   else if ("race" in data) content = <RacePage detail={data} />;
+  else if ("forward" in data) content = <ResearchView data={data} />;
   else if ("totals" in data) content = <StatsPage stats={data} />;
   else if ("days" in data) content = <>
     <div className="page-heading">
@@ -383,11 +529,16 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
   else {
     const venues = [...new Set(data.races.map((race) => race.venueName))];
     const filtered = data.races.filter((race) => (!venues.includes(venue) || race.venueName === venue) &&
+      (sigmaFilter === "all" || (sigmaFilter === "missing" ? race.research?.sigmaClass === null : race.research?.sigmaClass === sigmaFilter)) &&
       (raceFilter === "all" || (raceFilter === "predicted" ? race.tickets.length > 0 :
         raceFilter === "results" ? Boolean(race.top3?.length) || race.state === "void" :
         raceFilter === "waiting" ? race.state === "pending" : race.state === raceFilter)))
       .sort((a, b) => {
         const time = (a.cutoff ?? "\uffff").localeCompare(b.cutoff ?? "\uffff");
+        if (raceSort === "sigma") {
+          const sa = a.research?.sigma ?? null, sb = b.research?.sigma ?? null;
+          return (sa === null || sb === null ? Number(sa === null) - Number(sb === null) : sa - sb) || time || a.id.localeCompare(b.id);
+        }
         if (raceSort === "venue") return a.venueName.localeCompare(b.venueName, "ja") || a.number - b.number || a.id.localeCompare(b.id);
         if (raceSort === "latest") return a.cutoff && b.cutoff ? -time || a.id.localeCompare(b.id) : a.cutoff ? -1 : b.cutoff ? 1 : a.id.localeCompare(b.id);
         return time || a.id.localeCompare(b.id);
@@ -459,7 +610,13 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
           </label>
           <label className="boat-venue-filter"><span>並び順</span>
             <select value={raceSort} onChange={(event) => { setRaceSort(event.target.value); setVisibleCount(24); }}>
-              <option value="time">締切が早い順</option><option value="latest">締切が遅い順</option><option value="venue">開催場・R順</option>
+              <option value="time">締切が早い順</option><option value="latest">締切が遅い順</option><option value="venue">開催場・R順</option><option value="sigma">級別σ昇順（研究）</option>
+            </select>
+          </label>
+          <label className="boat-venue-filter"><span>級別ばらつき（研究）</span>
+            <select value={sigmaFilter} onChange={(event) => { setSigmaFilter(event.target.value); setVisibleCount(24); }}>
+              <option value="all">すべて</option><option value="small">小</option><option value="normal">普通</option>
+              <option value="large">大</option><option value="missing">未判定（欠損）</option>
             </select>
           </label>
         </div>

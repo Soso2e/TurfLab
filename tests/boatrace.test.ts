@@ -216,6 +216,15 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
     expect((await collector.route(request("collect", "POST"))).ok).toBe(true);
     expect(await bankroll()).toMatchObject({ initial: 100_000, balance: 100_000, stake: 0 });
     await collector.alarm();
+    // 研究用B11×級別σ: 番組取得時点（締切前）に4R分を凍結し、購入台帳とは別表。
+    const researchRows = database.prepare("SELECT race_id, frozen_at, body FROM boat_research ORDER BY race_id").all() as
+      { race_id: string; frozen_at: string; body: string }[];
+    expect(researchRows.map((row) => row.race_id)).toEqual([1, 2, 3, 4].map((n) => `${date}-12-${n}`));
+    expect(researchRows[0].frozen_at).toBe(new Date(`${date}T15:20:00+09:00`).toISOString());
+    expect(JSON.parse(researchRows[0].body)).toMatchObject({
+      kind: "forward", evaluation: { b11: { status: "bet", branch: "inner-outer", tickets: ["1-2-3", "1-3-2"] }, sigmaClass: "large" },
+    });
+    expect(await bankroll()).toMatchObject({ stake: 0 });
     expect(new Date(alarmTime).toISOString()).toBe(new Date(Date.parse(cutoff) - 145_000).toISOString());
     vi.setSystemTime(freezeTime);
     await collector.alarm();
@@ -276,6 +285,20 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
         { raceId: `${date}-12-2` },
         { raceId: `${date}-12-3` },
       ],
+    });
+    // 研究凍結は後続の再取得・結果取得で書き換わらず、アーカイブと研究画面APIに出る。
+    const archive = await (await collector.route(request("archive?date=" + date))).json() as { research: { raceId: string; frozenAt: string; kind: string }[] };
+    expect(archive.research.map((item) => item.raceId)).toEqual(researchRows.map((row) => row.race_id));
+    expect(archive.research[0]).toMatchObject({ kind: "forward", frozenAt: researchRows[0].frozen_at });
+    const research = await (await collector.route(request("research?date=" + date))).json() as {
+      forward: { total: number }; reconstructed: { total: number }; races: { kind: string }[];
+    };
+    expect(research.forward.total).toBe(4);
+    expect(research.reconstructed.total).toBe(4);
+    expect(research.races.every((item) => item.kind === "forward")).toBe(true);
+    expect(await (await collector.route(request(`races/${date}-12-1`))).json()).toMatchObject({ research: { kind: "forward" } });
+    expect(await (await collector.route(request("races?date=" + date))).json()).toMatchObject({
+      races: [{ research: { sigmaClass: "large", missingBoats: [] } }, {}, {}, {}],
     });
   } finally {
     database.close();
