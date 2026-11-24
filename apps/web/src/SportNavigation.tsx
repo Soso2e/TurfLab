@@ -14,6 +14,13 @@ function subscribe(update: () => void) {
 export const useSportPath = () => useSyncExternalStore(subscribe, locationPath);
 export const isBoatPath = (path: string) => /^\/boatrace(?:\/|$)/.test(path);
 
+export function navigateTo(to: string) {
+  if (window.location.pathname === to) return;
+  window.history.pushState(null, "", to);
+  window.dispatchEvent(new Event(event));
+  window.scrollTo(0, 0);
+}
+
 export function TurfLink({ to, children, ...props }: {
   to: string;
   children: ReactNode;
@@ -23,10 +30,7 @@ export function TurfLink({ to, children, ...props }: {
   function follow(e: MouseEvent<HTMLAnchorElement>) {
     if (e.defaultPrevented || e.button !== 0 || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
     e.preventDefault();
-    if (window.location.pathname === to) return;
-    window.history.pushState(null, "", to);
-    window.dispatchEvent(new Event(event));
-    window.scrollTo(0, 0);
+    navigateTo(to);
   }
   return <a href={to} onClick={follow} {...props}>{children}</a>;
 }
