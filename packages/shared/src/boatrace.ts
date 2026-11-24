@@ -37,10 +37,16 @@ export interface BoatOdds {
   prices: Record<string, number>;
 }
 
+export interface BoatExhibition {
+  evidence: Evidence | null;
+  entries: Exhibition[];
+  times?: Partial<Record<number, number>>;
+}
+
 export interface BoatCapture {
   exacta: BoatOdds;
   trifecta: BoatOdds;
-  exhibition: { evidence: Evidence | null; entries: Exhibition[]; times?: Partial<Record<number, number>> };
+  exhibition: BoatExhibition;
 }
 
 export interface Ticket {
@@ -85,6 +91,7 @@ export interface BoatResult {
 
 export interface BoatRecord extends BoatRace {
   freeze?: BoatFreeze;
+  exhibition?: BoatExhibition;
   result?: BoatResult;
   issue?: string;
 }

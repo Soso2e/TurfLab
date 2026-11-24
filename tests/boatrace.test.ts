@@ -261,10 +261,21 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
     expect(await bankroll()).toMatchObject({ balance: 200, payout: 900, refund: 300, pending: 0 });
     expect(await (await collector.route(request("stats"))).json()).toMatchObject({ settled: 2 });
     expect(await (await collector.route(request("archive?date=" + date))).json()).toMatchObject({
-      date, records: [{ freeze: saved }, { id: `${date}-12-2` }, { id: `${date}-12-3` }, { id: `${date}-12-4` }],
+      date, records: [
+        { freeze: saved },
+        { id: `${date}-12-2`, exhibition: { entries: [{ boat: 2, st: "F.03", flying: true }] }, result: { payouts: { "1-2-4": 900 } } },
+        { id: `${date}-12-3` },
+        { id: `${date}-12-4` },
+      ],
       autoBets: [{ race_id: race.id, stake: 200, payout: 900, refund: 100 },
         { race_id: `${date}-12-3`, stake: 200, payout: 0, refund: 200 }],
-      revisions: [{ raceId: race.id }, { raceId: race.id }, { raceId: `${date}-12-3` }],
+      revisions: [
+        { raceId: race.id },
+        { raceId: race.id },
+        { raceId: `${date}-12-2` },
+        { raceId: `${date}-12-2` },
+        { raceId: `${date}-12-3` },
+      ],
     });
   } finally {
     database.close();

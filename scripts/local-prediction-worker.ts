@@ -52,6 +52,8 @@ import { jockeyEvidenceSnapshot } from "./jockey-evidence-snapshot";
 import { applySameDayPaceAdjustment } from "../packages/shared/src/track-bias";
 import { aiDiscretionaryPlan, AI_DAY_CAP_YEN } from "./ai-discretionary-plan";
 import { evaluateTrackBias } from "./track-bias-evaluation";
+import { NAR_BABA_CODES } from "../packages/shared/src/course-catalog";
+import { fetchNarOfficialResultDocument, saveNarAllResults, scrapeAllNarResultsForDate } from "./keiba-results-scraper";
 
 // What counts as evidence for each of the six factors. Missing evidence is
 // never filled with a guess; "no experience" is a fact, not missing data.
@@ -2154,7 +2156,17 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
         if (!entry.official_result) {
           // A complete answer that Core rejected (e.g. before a validator fix)
           // is re-submitted from disk instead of spending another CLI call.
-          const document = (await this.savedResult(key)) ?? await this.generate(
+          let document = await this.savedResult(key);
+          if (!document && !process.env.VITEST && race.jurisdiction === "NAR") {
+            const trackName = String(race.track_name ?? race.track ?? "").replace(/競馬場$/, "");
+            const babaCode = NAR_BABA_CODES[trackName];
+            const raceNo = Number(race.race_number ?? 0);
+            if (babaCode && raceNo >= 1) {
+              const registered = rows(entry.entries).map((e) => Number(e.horse_number)).filter((n) => n > 0);
+              document = await fetchNarOfficialResultDocument(raceId, babaCode, raceDay, raceNo, registered).catch(() => null);
+            }
+          }
+          document ??= await this.generate(
             `${day}-result-${key}-${Math.floor(hour / 6)}`,
             rules +
               `現在UTC ${new Date().toISOString()}。以下の登録レースの完全な公式結果・全券種払戻・取消返還と公表時刻を公式サイトで実際に確認する。取得不能は {blocked:true,reason:理由}。公表時刻はページに表示がある場合だけ published_at に入れ published_at_basis:"official"。表示が無ければ published_at:null、published_at_basis:"retrieved_upper_bound"（Coreが取得時刻を上限として記録する）。公表時刻を推測しない。JSON契約は ` +
@@ -2284,6 +2296,12 @@ ${candidates.length ? `4. 次の組合せのオッズ（公式オッズページ
       } catch (error) {
         this.failedJob(String(obj(entry.race).race_id), error);
       }
+    }
+
+    if (!process.env.VITEST) {
+      await scrapeAllNarResultsForDate(day, { exchangeDir: this.exchange })
+        .then((archive) => saveNarAllResults(this.exchange, day, archive))
+        .catch((error) => this.failedJob(`nar-all-results:${day}`, error));
     }
   }
 

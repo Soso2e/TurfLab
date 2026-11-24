@@ -28,6 +28,7 @@
     "nar:check": "node scripts/run-tool.mjs tsx scripts/nar-csv-check.ts",
     "python:analyze": "python scripts/python/analyze_history.py",
     "results:import": "tsx scripts/import-all-missing-results.ts",
+    "keiba:results": "node scripts/run-tool.mjs tsx scripts/keiba-results-cli.ts",
     "learning:report": "node scripts/run-tool.mjs tsx scripts/learning-report.ts",
     "generate:d1": "tsx scripts/generate-d1.ts",
     "forecast:lock": "node scripts/run-tool.mjs tsx scripts/forecast-eval-cli.ts lock",
