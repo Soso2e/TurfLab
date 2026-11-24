@@ -45,106 +45,368 @@
 @keyframes sport-enter { from { opacity: .75; } to { opacity: 1; } }
 .horse-sport main, .boat-app main { animation: sport-enter 180ms ease-out; }
 
+/* 競艇モード全体（競馬UIのレイアウト・余白・カード質感を踏襲し、マリンブルー基調に調和） */
 .boat-app {
   min-height: 100dvh;
-  background: #eef5f8;
-  color: #102f43;
+  background: #f0f5f7;
+  color: #16303d;
+  --ink: #16303d;
+  --ink-sub: #4c6878;
+  --ink-mute: #6b8494;
+  --line: #d4e1e8;
+  --pos: #157347;
+  --neg: #b42318;
 }
-.boat-app main { max-width: 1080px; }
-.boat-app header { border-color: #c9dce7; margin-bottom: 18px; }
-.boat-app .header-brand { color: #103e58; }
-.boat-app .brand-mark { background: #115778; }
-.boat-app h1 { font-size: clamp(1.55rem, 5vw, 2.35rem); margin: .55em 0 .35em; }
-.boat-app h2 { font-size: 1rem; margin: 0 0 .6em; }
-.boat-app h3 { font-size: .88rem; margin: .8em 0 .4em; }
-.boat-app p { margin: .5em 0; line-height: 1.55; }
-.boat-app a { color: #075c85; }
-.boat-app .sport-switch a[aria-current] { color: white; }
+.boat-app header {
+  border-color: #d3e1e8;
+}
+.boat-app .header-brand { color: #103b52; }
+.boat-app .header-brand .brand-mark {
+  background: #115778;
+  border-color: #115778;
+  color: #d7eef8;
+}
+.boat-app .header-brand small { color: #5f7d8f; }
+.boat-app .breadcrumb { color: #5f7d8f; }
+.boat-app .connection {
+  border-color: #c8dce6;
+  background: #e6f0f5;
+  color: #245873;
+}
+.boat-app .eyebrow { color: #2b6b8a; }
+.boat-app a { color: #0c5f87; }
+.boat-app .sport-switch a[aria-current] { color: #fff; }
 .boat-app .sport-switch a { text-decoration: none; }
-.boat-app :where(button, select, summary) { min-height: 44px; }
-.boat-navigation {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 4px;
-  margin-bottom: 12px;
-  max-width: 480px;
+
+.boat-app .panel {
+  border-color: #d4e1e8;
+  box-shadow: 0 3px 8px rgba(16, 47, 67, 0.03);
 }
-.boat-navigation a {
-  display: grid;
-  min-height: 44px;
-  place-items: center;
-  border-radius: 8px;
+.boat-app .section-heading {
+  border-bottom-color: #e4edf2;
+}
+.boat-app .section-heading > span {
+  color: #5f7d8f;
+}
+.boat-app .day-summary {
+  border-color: #d4e1e8;
+}
+.boat-app .primary {
+  background: #115778;
+  border-color: #115778;
+  color: #fff;
+}
+.boat-app .primary:hover:not(:disabled) {
+  background: #0d4560;
+}
+.boat-app .secondary {
+  background: #fff;
+  border-color: #c7d9e3;
+  color: #16445b;
+}
+.boat-app .secondary:hover:not(:disabled) {
+  background: #edf5f8;
+}
+.boat-app .detail-sticky-bar {
+  background: rgba(240, 245, 247, 0.92);
+  border-bottom-color: #d3e1e8;
+}
+.boat-back-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid #c7d9e3;
+  border-radius: 6px;
+  background: #fff;
+  color: #16445b;
+  font-size: 13px;
+  font-weight: 500;
   text-decoration: none;
-  font-weight: 700;
+  white-space: nowrap;
 }
-.boat-navigation [aria-current] { background: #d8eaf3; color: #123c52; }
+.boat-back-link:hover {
+  background: #edf5f8;
+}
+
+/* 収集ステータスバー */
 .boat-collection {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 10px 14px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
-  font-size: .82rem;
-}
-.boat-collection p { flex: 1 0 100%; }
-.boat-collection button { margin: 0; padding: 5px 12px; }
-.boat-card, .boat-hero {
   background: #fff;
-  border: 1px solid #ccdfe9;
-  border-radius: 14px;
-  padding: 14px 16px;
-  min-width: 0;
-  margin: 0 0 12px;
+  border: 1px solid #d4e1e8;
+  border-radius: 8px;
+  padding: 10px 16px;
+  margin-bottom: 20px;
+  font-size: 12px;
 }
-.boat-hero { background: #e1eff6; padding: clamp(14px, 4vw, 28px); }
-.boat-hero h1 { margin-top: 0; }
-.boat-grid {
+.boat-collection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #365566;
+}
+.boat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9eb3bf;
+  flex-shrink: 0;
+}
+.boat-dot.is-live {
+  background: #15803d;
+  box-shadow: 0 0 0 3px rgba(21, 128, 61, 0.16);
+}
+.boat-collection button {
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.boat-collection-msg {
+  flex: 1 0 100%;
+  font-size: 12px;
+  color: #4c6878;
+}
+
+/* レース一覧（競馬の .race-card と同等のリスト構造） */
+.boat-race-list {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 12px;
 }
-.boat-grid .boat-card { margin: 0; }
-.boat-card-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.boat-card-line a { display: inline-flex; align-items: center; min-height: 44px; }
+.boat-race-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 16px 4px;
+  border-bottom: 1px solid #e4edf2;
+}
+.boat-race-row:last-child {
+  border-bottom: 0;
+  padding-bottom: 4px;
+}
+.boat-race-time {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 58px;
+  line-height: 1.2;
+}
+.boat-race-time small {
+  display: block;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+  color: #6b8494;
+}
+.boat-race-main {
+  flex: 1;
+  min-width: 0;
+}
+.boat-race-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.boat-race-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 15px;
+  text-decoration: none;
+  color: #103b52;
+}
+.boat-race-link:hover {
+  text-decoration: underline;
+}
 .boat-state {
-  background: #e5eff5;
-  border-radius: 999px;
-  padding: 4px 8px;
+  background: #e8f1f5;
+  border-radius: 4px;
+  padding: 4px 9px;
   color: #244c65;
-  font-size: .75rem;
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
-.boat-state[data-state="settled"] { background: #d9efe7; color: #1b533f; }
-.boat-state[data-state="missing"], .boat-state[data-state="void"] { background: #f9e8d5; color: #643606; }
-.boat-muted { font-size: .83rem; color: #496275; }
+.boat-state[data-state="settled"] { background: #dcfce7; color: #166534; }
+.boat-state[data-state="missing"], .boat-state[data-state="void"] { background: #fef3c7; color: #92400e; }
+
+.boat-venue-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #4c6878;
+}
+.boat-venue-filter select {
+  margin: 0;
+  width: auto;
+  padding: 6px 10px;
+  border-color: #c7d9e3;
+  color: #16303d;
+}
+
 .boat-tickets {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin: 8px 0;
+  margin: 8px 0 4px;
   padding: 0;
   list-style: none;
 }
-.boat-tickets li { display: grid; gap: 2px; background: #e9f3f8; padding: 6px 10px; border-radius: 8px; font-size: .86rem; }
-.boat-tickets li span { color: #415e72; }
-.boat-table { overflow-x: auto; }
-.boat-table table { width: 100%; font-size: .83rem; margin: 0; }
-.boat-table :is(th, td) { padding: 7px 6px; text-align: left; }
-.boat-table th { color: #173c54; }
+.boat-tickets li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #edf5f8;
+  border: 1px solid #d4e4ec;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.boat-tickets li span { color: #4c6878; }
+
+/* 2カラムグリッド（比較・詳細用） */
+.boat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 22px;
+}
+.boat-grid .panel { margin-bottom: 0; }
+
+/* 競艇 6艇枠色バッジ */
+.boat-entry-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.boat-no {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.boat-1 { background: #ffffff; color: #16303d; border: 1px solid #b8c9d4; }
+.boat-2 { background: #1e293b; color: #ffffff; }
+.boat-3 { background: #dc2626; color: #ffffff; }
+.boat-4 { background: #2563eb; color: #ffffff; }
+.boat-5 { background: #eab308; color: #1f2937; }
+.boat-6 { background: #16a34a; color: #ffffff; }
+
+.boat-table { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.boat-table table { width: 100%; font-size: 12px; margin: 0; }
+.boat-table th {
+  color: #4c6878;
+  background: #f3f8fa;
+  padding: 10px 8px;
+}
+.boat-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid #e7eff4;
+}
+.boat-table td.num { font-variant-numeric: tabular-nums; }
 .boat-table thead th { white-space: normal; }
-.boat-metrics { display: flex; flex-wrap: wrap; gap: 12px 20px; margin: 12px 0 0; }
-.boat-metrics dt { font-size: .8rem; color: #496275; }
-.boat-metrics dd { margin: 2px 0 0; font-weight: 700; }
-.boat-history { list-style: none; margin: 0; padding: 0; }
-.boat-history li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
-.boat-history a { display: inline-flex; align-items: center; min-height: 44px; }
+
+.boat-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+  margin: 0;
+}
+.boat-metrics dt { font-size: 11px; color: #5f7d8f; }
+.boat-metrics dd {
+  margin: 3px 0 0;
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.boat-metrics dd.pos { color: var(--pos); }
+.boat-metrics dd.neg { color: var(--neg); }
+
+.boat-muted { font-size: 12px; color: #5f7d8f; }
+.boat-note { margin-top: 10px; }
+.boat-status-note { color: #365566; }
+.boat-details { margin: 10px 0; }
+.boat-details summary { cursor: pointer; font-size: 12px; color: #245873; font-weight: 600; }
+.boat-settlement { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e4edf2; }
+.boat-settlement .pos { color: var(--pos); }
+.boat-settlement .neg { color: var(--neg); }
+
+.boat-plain-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.boat-history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.boat-history li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 4px;
+  border-bottom: 1px solid #e4edf2;
+}
+.boat-history li:last-child { border-bottom: 0; }
+.boat-history-date {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 競艇モードの RubberDock カラー */
+.boat-app .rubber-dock {
+  background: #102b3a;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.12) inset,
+    0 20px 44px -16px rgba(10, 32, 46, 0.55);
+}
+.boat-app .rubber-dock-icons.base a {
+  color: rgba(226, 239, 246, 0.62);
+  text-decoration: none;
+  border-radius: 27px;
+  outline: none;
+  cursor: inherit;
+}
+.boat-app .rubber-dock-icons.base a:focus-visible {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45) inset;
+}
+.boat-app .rubber-dock-icons.top {
+  color: #115778;
+}
+.boat-app footer {
+  color: #6b8494;
+}
 
 @media (max-width: 640px) {
-  .horse-sport .header-right .connection { display: none; }
+  .horse-sport .header-right .connection,
+  .boat-app .header-right .connection { display: none; }
   .boat-grid { grid-template-columns: minmax(0, 1fr); }
-  .boat-table :is(th, td) { padding-inline: 4px; }
+  .boat-metrics { grid-template-columns: minmax(0, 1fr); }
+  .boat-race-row { gap: 12px; }
+  .boat-table :is(th, td) { padding: 8px 4px; }
+  .boat-app :where(button, select, summary) { min-height: 44px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .sport-switch[data-sport]::before, .horse-sport main, .boat-app main { animation: none; }

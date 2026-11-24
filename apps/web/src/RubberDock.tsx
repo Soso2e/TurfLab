@@ -4,6 +4,7 @@ export interface RubberDockItem {
   id: string;
   title: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
+  href?: string;
 }
 
 interface SpringState {
@@ -37,17 +38,19 @@ export function RubberDock({
   items,
   activeId,
   onSelect,
+  navLabel,
 }: {
   items: RubberDockItem[];
   activeId: string;
   onSelect: (id: string) => void;
+  navLabel?: string;
 }) {
   const dockRef = useRef<HTMLDivElement | null>(null);
   const groundRef = useRef<HTMLDivElement | null>(null);
   const tabsRef = useRef<HTMLDivElement | null>(null);
   const indRef = useRef<HTMLDivElement | null>(null);
   const topIconsRef = useRef<HTMLDivElement | null>(null);
-  const baseBtnRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const baseBtnRefs = useRef<(HTMLElement | null)[]>([]);
   const topItemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const onSelectRef = useRef(onSelect);
@@ -304,9 +307,11 @@ export function RubberDock({
   }, [activeIdx]);
 
   const tw = items.length * TAB_W + Math.max(0, items.length - 1) * GAP;
+  const WrapTag = navLabel ? "nav" : "div";
+  const isLinkDock = items.some((item) => Boolean(item.href));
 
   return (
-    <div className="rubber-dock-wrap" aria-label="メインナビゲーション">
+    <WrapTag className="rubber-dock-wrap" aria-label={navLabel ?? "メインナビゲーション"}>
       <div className="rubber-dock-ground" ref={groundRef} aria-hidden="true" />
       <div className="rubber-dock" ref={dockRef}>
         <div
@@ -314,10 +319,52 @@ export function RubberDock({
           ref={tabsRef}
           style={{ width: `${tw}px`, height: `${TAB_H}px` }}
         >
-          <div className="rubber-dock-icons base" role="tablist" aria-label="タブ">
+          <div
+            className="rubber-dock-icons base"
+            role={isLinkDock ? undefined : "tablist"}
+            aria-label={isLinkDock ? undefined : "タブ"}
+          >
             {items.map((item, i) => {
               const IconComp = item.icon;
               const isSelected = item.id === activeId;
+              const handleKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
+                if (e.key === "ArrowRight") {
+                  e.preventDefault();
+                  const next = Math.min(items.length - 1, i + 1);
+                  engineRef.current?.setActive(next, 1, true);
+                  baseBtnRefs.current[next]?.focus();
+                } else if (e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  const prev = Math.max(0, i - 1);
+                  engineRef.current?.setActive(prev, -1, true);
+                  baseBtnRefs.current[prev]?.focus();
+                }
+              };
+              const inner = (
+                <span className="rubber-dock-item-inner">
+                  <IconComp size={20} className="rubber-dock-svg" />
+                  <span className="rubber-dock-label">{item.title}</span>
+                </span>
+              );
+              if (item.href) {
+                return (
+                  <a
+                    key={item.id}
+                    ref={(el) => {
+                      baseBtnRefs.current[i] = el;
+                    }}
+                    href={item.href}
+                    aria-label={item.title}
+                    aria-current={isSelected ? "page" : undefined}
+                    title={item.title}
+                    style={{ width: `${TAB_W}px`, height: `${TAB_H}px` }}
+                    onClick={(e) => e.preventDefault()}
+                    onKeyDown={handleKeyDown}
+                  >
+                    {inner}
+                  </a>
+                );
+              }
               return (
                 <button
                   key={item.id}
@@ -331,24 +378,9 @@ export function RubberDock({
                   tabIndex={isSelected ? 0 : -1}
                   title={item.title}
                   style={{ width: `${TAB_W}px`, height: `${TAB_H}px` }}
-                  onKeyDown={(e) => {
-                    if (e.key === "ArrowRight") {
-                      e.preventDefault();
-                      const next = Math.min(items.length - 1, i + 1);
-                      engineRef.current?.setActive(next, 1, true);
-                      baseBtnRefs.current[next]?.focus();
-                    } else if (e.key === "ArrowLeft") {
-                      e.preventDefault();
-                      const prev = Math.max(0, i - 1);
-                      engineRef.current?.setActive(prev, -1, true);
-                      baseBtnRefs.current[prev]?.focus();
-                    }
-                  }}
+                  onKeyDown={handleKeyDown}
                 >
-                  <span className="rubber-dock-item-inner">
-                    <IconComp size={20} className="rubber-dock-svg" />
-                    <span className="rubber-dock-label">{item.title}</span>
-                  </span>
+                  {inner}
                 </button>
               );
             })}
@@ -375,6 +407,6 @@ export function RubberDock({
           </div>
         </div>
       </div>
-    </div>
+    </WrapTag>
   );
 }
