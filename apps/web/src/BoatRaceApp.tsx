@@ -290,6 +290,9 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
   const [controlError, setControlError] = useState("");
   const [busy, setBusy] = useState(false);
   const [venue, setVenue] = useState("");
+  const [raceFilter, setRaceFilter] = useState("all");
+  const [raceSort, setRaceSort] = useState("time");
+  const [visibleCount, setVisibleCount] = useState(24);
   const [refresh, setRefresh] = useState(0);
   const [loaded, setLoaded] = useState<{ key: string; data?: Data; error?: string }>();
   const path = pathname.slice(BASE.length).replace(/\/$/, "") || "/";
@@ -379,7 +382,16 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
   </>;
   else {
     const venues = [...new Set(data.races.map((race) => race.venueName))];
-    const filtered = data.races.filter((race) => !venues.includes(venue) || race.venueName === venue);
+    const filtered = data.races.filter((race) => (!venues.includes(venue) || race.venueName === venue) &&
+      (raceFilter === "all" || (raceFilter === "predicted" ? race.tickets.length > 0 :
+        raceFilter === "results" ? Boolean(race.top3?.length) || race.state === "void" :
+        raceFilter === "waiting" ? race.state === "pending" : race.state === raceFilter)))
+      .sort((a, b) => {
+        const time = (a.cutoff ?? "\uffff").localeCompare(b.cutoff ?? "\uffff");
+        if (raceSort === "venue") return a.venueName.localeCompare(b.venueName, "ja") || a.number - b.number || a.id.localeCompare(b.id);
+        if (raceSort === "latest") return a.cutoff && b.cutoff ? -time || a.id.localeCompare(b.id) : a.cutoff ? -1 : b.cutoff ? 1 : a.id.localeCompare(b.id);
+        return time || a.id.localeCompare(b.id);
+      });
     const frozenCount = data.races.filter((race) => race.tickets.length).length;
     const settledCount = data.races.filter((race) => race.net !== null).length;
     content = <>
@@ -431,14 +443,30 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
           {venues.length > 1 ? (
             <label className="boat-venue-filter">
               <span>場</span>
-              <select value={venues.includes(venue) ? venue : ""} onChange={(event) => setVenue(event.target.value)}>
+              <select value={venues.includes(venue) ? venue : ""} onChange={(event) => { setVenue(event.target.value); setVisibleCount(24); }}>
                 <option value="">全場</option>{venues.map((name) => <option key={name}>{name}</option>)}
               </select>
             </label>
           ) : <span>{filtered.length}レース</span>}
         </div>
-        {filtered.length ? <div className="boat-race-list">{filtered.map((race) => <RaceCard key={race.id} race={race} />)}</div>
-          : <p className="boat-muted">この日の公式番組はまだ保存されていません。</p>}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
+          <label className="boat-venue-filter"><span>表示</span>
+            <select value={raceFilter} onChange={(event) => { setRaceFilter(event.target.value); setVisibleCount(24); }}>
+              <option value="all">全レース</option><option value="predicted">予想記録あり</option>
+              <option value="waiting">未精算</option><option value="results">結果取得済</option>
+              <option value="scheduled">締切前</option><option value="settled">精算済</option>
+            </select>
+          </label>
+          <label className="boat-venue-filter"><span>並び順</span>
+            <select value={raceSort} onChange={(event) => { setRaceSort(event.target.value); setVisibleCount(24); }}>
+              <option value="time">締切が早い順</option><option value="latest">締切が遅い順</option><option value="venue">開催場・R順</option>
+            </select>
+          </label>
+        </div>
+        <p className="boat-muted" role="status">{data.races.length}R中 {filtered.length}R該当 ／ {Math.min(visibleCount, filtered.length)}R表示</p>
+        {filtered.length ? <div className="boat-race-list">{filtered.slice(0, visibleCount).map((race) => <RaceCard key={race.id} race={race} />)}</div>
+          : <p className="boat-muted">{data.races.length ? "条件に一致するレースはありません。" : "この日の公式番組はまだ保存されていません。"}</p>}
+        {filtered.length > visibleCount && <button type="button" className="secondary" onClick={() => setVisibleCount((n) => n + 24)}>さらに表示（残り {filtered.length - visibleCount}R）</button>}
       </section>
     </>;
   }
