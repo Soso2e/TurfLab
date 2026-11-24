@@ -8,6 +8,7 @@ import {
   type BridgeConfig,
 } from "./github-bridge";
 import { obj, rows, str, type Row } from "../packages/shared/src/domain";
+import { exportBoatArchives } from "./boatrace-github-export";
 import { checkpointCore, writeWorkerHealth } from "./worker-health";
 
 const arg = (name: string) => process.argv[process.argv.indexOf(name) + 1];
@@ -101,6 +102,8 @@ try {
   });
   await bridge.init();
   let nextCheckpoint = 0;
+  let nextBoatExport = 0;
+  let boatExport: Row | null = null;
   let nextResearchSync = 0;
   const exchange = path.join(home, "local-predictions", "exchange");
   do {
@@ -161,9 +164,19 @@ try {
       } catch {
         // Export is independent of prediction ingestion; next attempt is rate-limited.
       }
+      if (Date.now() >= nextBoatExport) {
+        nextBoatExport = Date.now() + (config.interval_seconds ?? 300) * 1000;
+        try {
+          await gh.verify();
+          boatExport = await exportBoatArchives({ ...gh, api, now: () => new Date() });
+        } catch {
+          boatExport = { status: "failed", at: new Date().toISOString(), reason: "競艇アーカイブ同期失敗" };
+        }
+      }
       await api("/github-bridge/report", {
         status: {
           ...bridge.status(),
+          boat_archive_sync: boatExport,
           ...(commandError ? { last_error: commandError } : {}),
         },
         ack,
