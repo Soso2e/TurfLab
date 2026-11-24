@@ -167,7 +167,7 @@ async function executeCodex(
   prompt: string,
   model: string,
   webSearch = true,
-  reasoningEffort = "low",
+  reasoningEffort = "medium",
 ): Promise<Row> {
   await mkdir(directory, { recursive: true });
   const schema = path.join(directory, "schema.json");
@@ -292,7 +292,7 @@ export async function predictWithCodex(
   prompt: string,
   model: string,
   webSearch = true,
-  reasoningEffort = "low",
+  reasoningEffort = "medium",
 ): Promise<Row> {
   try {
     return await executeCodex(directory, prompt, model, webSearch, reasoningEffort);

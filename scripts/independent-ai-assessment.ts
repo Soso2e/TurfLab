@@ -10,31 +10,28 @@ const clean = (v: unknown) => typeof v === "string" ? v.slice(0, LIMIT) : "";
 const mark = (v: unknown) => typeof v === "string" && MARKS.has(v) ? v : "不明";
 
 export const INDEPENDENT_ASSESSMENT_PROMPT = `
-【独立評価とAI展開判断 v2】
-オッズ・人気・市場期待値を見る前に、次の順で全出走馬について考える。
-1) horse_marks: 今回の騎手の巧拙を混ぜず、能力・近走5走（直近を重視）・距離・馬場・脚質・コースから馬の印を決める。
-2) jockey_marks: 今回の馬の能力を混ぜず、騎手の同場・距離帯実績、位置取り、逃げ/先行/差し技術、近況を評価する。勝率には騎乗馬の質・標本数の偏りがあることに注意。各項目の根拠不足は不明とする。
-3) partnership_marks: 馬の脚質と騎手の戦術、人馬の実績、乗り替わりを独立評価し、適合・不適合の理由を書く。過去に組んだことがない場合は不明、相性が悪いと断定しない。
-4) scenario_decision: スロー/平均/ハイの3仮説を比較し、主展開の隊列・ペース・仕掛け・想定上位馬と、覆る条件を文章で書く。
-5) final_marks: 1-4を統合して最終印。元の印から変えた馬と理由を示す。数字の順位だけで最終印を決めない。
-6) ai_bet_decision: "bet" または "skip"。比較用の従来 hit_picks（600円枠）とは別に、ai_bet_picks を最大3点・合計1000円以下・100円単位で自由提案する。券種は win/place/wide/quinella/exacta/trio/trifecta の7種類。ai_bet_picks:[{ticket_type,selections_json:[馬番],amount_yen,rationale}]。券種を無理に埋めず、同一買い目の重複なし。見送りなら ai_bet_picks=[]。払戻の情報がない段階で利益があると断言しない。券種・馬番・金額はコード側で再検証して不備があれば見送る。
-出力フィールド（従来フィールドは残す）:
+【出力手順と必須JSON項目（independent-ai-v2 / forecast-v1）】
+オッズ・人気・市場期待値を使わず、python_analytics（当日傾向 same_day_analysis・数理事前予想 math_prediction）を土台に、以下の順で自由に再検討して出力する。
+1) horse_marks / jockey_marks / partnership_marks: 馬能力・騎手実績・人馬相性をそれぞれ独立評価。根拠不足は「不明」。
+2) scenario_decision: 主展開（slow/middle/high）・隊列・想定上位・覆る条件。
+3) final_marks: 1-2と数理予想を突き合わせて最終印を決定（数理順位と変えた馬は理由を明記）。
+4) ai_bet_decision / ai_bet_picks: "bet" または "skip"。買い目は適用ルール（3連複ベース1,000円・最大10点、自信時は馬連/馬単/3連単可）に従う。重複なし。見送りなら []。数理予想から変更・維持した理由を ai_bet_reason に書く。
+フィールド:
 horse_marks:[{horse_number,mark,reason,evidence_ids:[]}],
-jockey_marks:[{horse_number,mark,reason,evidence_ids:[],sample_size:nullまたは整数}],
+jockey_marks:[{horse_number,mark,reason,evidence_ids:[],sample_size:null|整数}],
 partnership_marks:[{horse_number,mark,reason,evidence_ids:[]}],
 final_marks:[{horse_number,mark,reason}],
 scenario_decision:{main_pace,pace_reason,expected_order:[馬番],counter_scenario},
-ai_bet_decision:"bet"|"skip",ai_bet_reason:文字列,ai_bet_picks:[{ticket_type,selections_json,amount_yen,rationale}]。
-【数値予測の提出（必須・forecast-v1）】印とは別に、検証可能な数値予測を forecast に必ず出す。オッズ・人気・外部予想・新聞印は一切参照しない（参照していないことが検証される）。
+ai_bet_decision:"bet"|"skip", ai_bet_reason:文字列, ai_bet_picks:[{ticket_type,selections_json,amount_yen,rationale}]
+印は ◎ ○ ▲ △ ☆ 無印 不明。
+【数値予測（forecast）】オッズ・人気・外部予想・新聞印は一切参照しない。
 forecast:{
- win_probabilities:[{horse_number,p}]  // 全出走馬。合計1。極端な値を恐れず、根拠が弱い馬も均等割りに逃げず差をつける
- top3_probabilities:[{horse_number,p}]  // 全出走馬。3着内確率。合計は約3
- corner_ranks:[{horse_number,first,last}]  // 全出走馬。最初と最後のコーナー通過順位の想定。1..頭数の順列（同順位なし）
- pace_class:"slow"|"middle"|"high", pace_z:数値または null  // 同コース・同距離の平常ペースとの相対
- reason_categories:[${REASON_CATEGORIES.map((c) => `"${c}"`).join(",")} から、この予測を市場でなく根拠として動かした要因を選ぶ]
+ win_probabilities:[{horse_number,p}], // 全馬・合計1
+ top3_probabilities:[{horse_number,p}], // 全馬・合計約3
+ corner_ranks:[{horse_number,first,last}], // 全馬・1..頭数の順列
+ pace_class:"slow"|"middle"|"high", pace_z:数値|null,
+ reason_categories:[${REASON_CATEGORIES.map((c) => `"${c}"`).join(",")}]
 }
-forecast が欠測・不正でも印と買い目は有効だが、その予想は精度検証の対象外として記録される。
-各印は ◎ ○ ▲ △ ☆ 無印 不明 から選ぶ。馬番は出馬表と一致。根拠がない項目に数値や事実を創作しない。6項目の定量評価やPython統計は補助材料として利用し、最終判断は整合する根拠に基づきAIが説明する。
 `;
 
 function normalizeMarks(raw: unknown, valid: Set<number>, withSample = false): Row[] | null {

@@ -1,10 +1,18 @@
-param([string]$DataHome, [string]$Model = 'gpt-6.1-sol', [string]$ReasoningEffort = 'low', [string]$HelperModel = 'gemini-4-hydrogen-medium')
+param([string]$DataHome, [string]$Model = 'gpt-6.2-sol', [string]$ReasoningEffort = 'medium', [string]$HelperModel = 'gemini-4-hydrogen-medium')
 . (Join-Path $PSScriptRoot 'Common.ps1')
 $runtimeHome = Get-TurfHome $DataHome
 $workerHome = Join-Path $runtimeHome 'local-predictions'
 $manifestHome = Join-Path $workerHome 'process'
 $runningWorker = Get-TurfProcess $manifestHome
 if ($runningWorker) { Write-Output 'Local prediction worker is running.'; Test-TurfCheckout $runningWorker 'Prediction worker'; return }
+# Prefer the Codex Desktop bundled CLI (supports gpt-6.2-sol) without hardcoding versioned WindowsApps paths.
+$codexPkg = Get-AppxPackage -Name 'OpenAI.Codex' -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($codexPkg -and $codexPkg.InstallLocation) {
+    $bundledDir = Join-Path $codexPkg.InstallLocation 'app\resources'
+    if (Test-Path -LiteralPath (Join-Path $bundledDir 'codex.exe')) {
+        $env:PATH = "$bundledDir;$env:PATH"
+    }
+}
 if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { throw 'Codex CLI is required.' }
 if ($Model -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Invalid model name.' }
 if ($ReasoningEffort -notmatch '^(low|medium|high)$') { throw 'Invalid reasoning effort.' }

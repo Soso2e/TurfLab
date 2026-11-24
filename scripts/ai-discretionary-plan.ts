@@ -9,7 +9,8 @@ import { ticketKey } from "./order-probabilities";
  */
 export const AI_RACE_CAP_YEN = 1000;
 export const AI_DAY_CAP_YEN = 5000;
-export const AI_MAX_PICKS = 3;
+export const AI_MAX_PICKS = 10;
+export const AI_ALLOWED_TICKET_TYPES = new Set(["trio", "quinella", "exacta", "trifecta"]);
 const UNIT = 100;
 const UNORDERED = new Set(["wide", "quinella", "trio"]);
 const TICKET_SIZES: Record<string, number> = {
@@ -25,12 +26,13 @@ export function aiDiscretionaryPlan(
   const budget = Math.min(AI_RACE_CAP_YEN,
     Math.max(0, Math.floor(remainingDailyBudgetYen / UNIT) * UNIT));
   const base = {
-    schema_version: "1", plan_version: "ai-discretionary-v1",
+    schema_version: "1", plan_version: "ai-discretionary-v2",
     plan_lane: "ai", lane: "lab", adopted: false, real_money: false,
     race_id: record.race_id ?? null, record_saved_at: record.saved_at ?? null,
     fixed_at: fixedAt, budget_yen: AI_RACE_CAP_YEN,
     remaining_daily_budget_yen: remainingDailyBudgetYen,
     max_picks: AI_MAX_PICKS, selection_source: "ai-independent-v2",
+    ticket_policy: "trio_base_1000_allow_quinella_exacta_trifecta",
     odds_used: false, probability_mode: "qualitative_no_ev",
     evidence_version: assessment.version ?? null,
     ai_bet_reason: assessment.ai_bet_reason ?? null,
@@ -47,7 +49,7 @@ export function aiDiscretionaryPlan(
 
   const numbers = new Set(rows(assessment.horse_marks).map(h => Number(h.horse_number)));
   const raw = Array.isArray(record.ai_bet_picks) ? rows(record.ai_bet_picks) : [];
-  if (!raw.length || raw.length > AI_MAX_PICKS) return skip("AIの買い目が空または3点超過");
+  if (!raw.length || raw.length > AI_MAX_PICKS) return skip("AIの買い目が空または10点超過");
   const picks: Row[] = [];
   const keys = new Set<string>();
   let total = 0;
@@ -57,11 +59,14 @@ export function aiDiscretionaryPlan(
       ? item.selections_json.map(Number) : [];
     const amount = Number(item.amount_yen);
     if (!Object.prototype.hasOwnProperty.call(TICKET_SIZES, type) ||
+      !AI_ALLOWED_TICKET_TYPES.has(type) ||
       selection.length !== TICKET_SIZES[type] ||
       selection.some(n => !Number.isInteger(n) || !numbers.has(n)) ||
       new Set(selection).size !== selection.length ||
       !Number.isSafeInteger(amount) || amount < UNIT || amount % UNIT !== 0) {
-      return skip("馬番・券種・金額に不整合があるため見送り");
+      return skip(!AI_ALLOWED_TICKET_TYPES.has(type) && Object.prototype.hasOwnProperty.call(TICKET_SIZES, type)
+        ? "単勝・複勝・ワイドは対象外（3連複ベース・馬連/馬単/3連単のみ許可）のため見送り"
+        : "馬番・券種・金額に不整合があるため見送り");
     }
     const ordered = UNORDERED.has(type) ? [...selection].sort((a, b) => a - b) : selection;
     const key = ticketKey(type, ordered);

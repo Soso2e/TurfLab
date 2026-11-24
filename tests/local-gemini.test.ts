@@ -49,7 +49,7 @@ describe("local-gemini and fallback", () => {
     expect(mockCodex).toHaveBeenCalledWith(
       "dummy-dir",
       "dummy-prompt",
-      "gpt-6.1-sol",
+      "gpt-6.2-sol",
       true,
     );
     expect(result).toEqual({ fallback: true, provider: "codex" });

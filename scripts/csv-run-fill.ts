@@ -6,6 +6,7 @@
 // and the page source).
 import type { Json, Row } from "../packages/shared/src/domain";
 import { normJockey, JOCKEY_MIN_SAMPLES, type StatRun } from "../packages/shared/src/jockey-stats";
+import { officialResearchUrl } from "../packages/shared/src/race-research";
 import { RUN_FIELDS, RUNS_PER_HORSE } from "../packages/shared/src/run-record";
 import { normName, type NarRun } from "./nar-csv-stats";
 
@@ -112,6 +113,8 @@ export function gapHints(horses: Row[], covered: Set<string>): Row[] {
     runs_to_find: h.runs_missing ?? RUNS_PER_HORSE,
     saved_runs: (Array.isArray(h.saved_runs) ? (h.saved_runs as Row[]) : []).map((r) => ({
       date_jst: r.date_jst!, track: r.track ?? null, race_no: r.race_no ?? null,
+      horse_number: r.horse_number ?? null,
+      source_url: officialResearchUrl(r.source_url)?.href ?? null,
     })),
     missing_fields: (Array.isArray(h.fields_missing) ? (h.fields_missing as Row[]) : []).map((g) => ({
       date_jst: g.date_jst!,
