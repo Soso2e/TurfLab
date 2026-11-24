@@ -242,10 +242,17 @@ describe("CSV first", () => {
     const covered = jockeysCoveredByCsv(csv, "名古屋", "2026-11-13", ["騎手一", "騎手二"]);
     expect([...covered]).toEqual(["騎手一"]);
     const hints = gapHints([
-      { horse_number: 1, jockey_name: "騎手一", runs_missing: 0, saved_runs: [{ date_jst: "2026-10-20" }], fields_missing: [{ date_jst: "2026-10-20", missing: ["finish_time_s", "corner_positions_json"] }], jockey_notes: [] },
+      { horse_number: 1, jockey_name: "騎手一", runs_missing: 0, saved_runs: [
+        { date_jst: "2026-10-20", horse_number: 3, source_url: url("2026-10-20", 5) },
+        { date_jst: "2026-09-01", horse_number: 7, source_url: "https://example.com/result" },
+      ], fields_missing: [{ date_jst: "2026-10-20", missing: ["finish_time_s", "corner_positions_json"] }], jockey_notes: [] },
       { horse_number: 2, jockey_name: "騎手二", runs_missing: 3, saved_runs: [], fields_missing: [], jockey_notes: [] },
     ], covered);
     expect(hints[0]).toMatchObject({ runs_to_find: 0, jockey_leaderboard_needed: false, missing_fields: [{ date_jst: "2026-10-20", fields: ["時計", "通過順"] }] });
+    expect(hints[0].saved_runs).toMatchObject([
+      { date_jst: "2026-10-20", horse_number: 3, source_url: url("2026-10-20", 5) },
+      { date_jst: "2026-09-01", horse_number: 7, source_url: null },
+    ]);
     expect(hints[1]).toMatchObject({ runs_to_find: 3, jockey_leaderboard_needed: true });
   });
   it("a search fills empty fields of a saved run and marks them as page values", () => {

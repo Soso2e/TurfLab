@@ -438,7 +438,7 @@ function AutomaticBetPlans({ api, race, fieldSize }: {
   }, []);
   const record = rows(status?.race_bet_plans ?? []).find((item) => item.race_id === race.race_id);
   const lanes = [
-    { lane: "ai", short: "AI", tone: "emerald" as const, label: "AI自由予想（最大1,000円）", missing: "AIの独立評価による買い目が未保存" },
+    { lane: "ai", short: "AI", tone: "emerald" as const, label: "AI予想（3連複ベース・最大1,000円）", missing: "AIの独立評価による買い目が未保存" },
     { lane: "hit", short: "的中", tone: "emerald" as const, label: "的中狙い（600円枠）", missing: record?.missing_hit_reason },
     { lane: "ev", short: "EV", tone: "amber" as const, label: "期待値（400円枠）", missing: record?.missing_ev_reason },
     { lane: "selective", short: "厳選", tone: "amber" as const, label: "期待値（厳選）", missing: record?.missing_ev_reason },

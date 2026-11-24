@@ -172,6 +172,6 @@ export async function predictWithHelper(
       to_provider: "codex-cli",
       error_code: /^[A-Z][A-Z0-9_]{0,79}$/.test(message) ? message : "AI_INVOKE_FAILED",
     });
-    return await codexRunner(directory, prompt, "gpt-6.1-sol", webSearch);
+    return await codexRunner(directory, prompt, "gpt-6.2-sol", webSearch);
   }
 }

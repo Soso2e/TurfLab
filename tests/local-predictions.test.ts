@@ -6,10 +6,13 @@ import {
   immutableLocalFile,
   callBucket,
   claimLocalWorker,
+  isAllowedAutoTrack,
   LocalPredictionWorker,
   MAX_AUTO_RACES,
+  mergeSameDayTrends,
   normalizeOfficialResultDocument,
   reviewNotes,
+  sanitizeSameDayPriorRaces,
 } from "../scripts/local-prediction-worker";
 import { localFiles } from "../scripts/github-bridge";
 import { MemoryRepository } from "../packages/shared/src/repository";
@@ -584,4 +587,142 @@ it("builds simulation-vs-actual comparison and publishes local race_reviews", as
     observations: ["1番が好位から抜け出した"],
     strategy_adjustment: ["三連複軸流しを継続"],
   });
+});
+
+it("restricts automatic selection to Kochi (NAR) and Tokyo (JRA) and filters out other tracks", async () => {
+  expect(isAllowedAutoTrack("高知", "NAR")).toBe(true);
+  expect(isAllowedAutoTrack("高知競馬場", "NAR")).toBe(true);
+  expect(isAllowedAutoTrack("東京", "JRA")).toBe(true);
+  expect(isAllowedAutoTrack("東京競馬場")).toBe(true);
+  expect(isAllowedAutoTrack("大井", "NAR")).toBe(false);
+  expect(isAllowedAutoTrack("中山", "JRA")).toBe(false);
+  expect(isAllowedAutoTrack("京都", "JRA")).toBe(false);
+  expect(isAllowedAutoTrack("阪神", "JRA")).toBe(false);
+  expect(isAllowedAutoTrack("高知", "JRA")).toBe(false);
+  expect(isAllowedAutoTrack("東京", "NAR")).toBe(false);
+
+  vi.useFakeTimers({ toFake: ["Date"] });
+  const now = new Date("2026-11-24T01:00:00Z");
+  vi.setSystemTime(now);
+  const home = await mkdtemp(path.join(tmpdir(), "turflab-track-filter-"));
+  const prompts: string[] = [];
+  const infer = vi.fn(async (_dir: string, prompt: string) => {
+    prompts.push(prompt);
+    return {
+      races: [
+        {
+          track: "大井", jurisdiction: "NAR", race_name: "他場1", race_no: 11,
+          race_key_human: "2026-11-24|大井|11R",
+          scheduled_start_at_jst: "2026-11-24T20:10:00+09:00",
+          distance_m: 1200, surface: "ダート",
+          horses: [{ horse_number: 1, horse_name: "テスト", jockey: "騎手", status: "active" }],
+          research: { source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_babaCode=20", headcount: 1 },
+        },
+        {
+          track: "高知", jurisdiction: "NAR", race_name: "高知ファイナル", race_no: 12,
+          race_key_human: "2026-11-24|高知|12R",
+          scheduled_start_at_jst: "2026-11-24T20:50:00+09:00",
+          distance_m: 1400, surface: "ダート",
+          horses: [{ horse_number: 1, horse_name: "コウチホース", jockey: "赤岡修次", status: "active" }],
+          research: { source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/DebaTable?k_babaCode=31", headcount: 1 },
+        },
+        {
+          track: "京都", jurisdiction: "JRA", race_name: "他場2", race_no: 11,
+          race_key_human: "2026-11-24|京都|11R",
+          scheduled_start_at_jst: "2026-11-24T15:35:00+09:00",
+          distance_m: 1600, surface: "芝",
+          horses: [{ horse_number: 1, horse_name: "キョウト", jockey: "騎手", status: "active" }],
+          research: { source_url: "https://www.jra.go.jp/JRADB/accessD.html", headcount: 1 },
+        },
+      ],
+      limitations: [],
+    };
+  });
+  const api = vi.fn(async (url: string): Promise<Row> =>
+    url === "/daily-state" ? { races: [] } : {});
+  const worker = new LocalPredictionWorker(home, api, "", "fixture", infer);
+  await worker.init();
+  await worker.tick(now);
+
+  const discoveryPrompt = prompts.find((p) => p.includes("対象競馬場は高知競馬"));
+  expect(discoveryPrompt).toBeDefined();
+  expect(discoveryPrompt).toContain("東京競馬場");
+
+  const dailyDir = path.join(home, "exchange", "daily", "2026-11-24");
+  const files = await readdir(dailyDir);
+  expect(files).toHaveLength(1);
+  const report = JSON.parse(await readFile(path.join(dailyDir, files[0]), "utf8"));
+  expect(report.races).toHaveLength(1);
+  expect(report.races[0].track).toBe("高知");
+  expect(report.limitations.join(" ")).toContain("対象外競馬場を除外");
+});
+
+it("sanitizes same-day prior races without future leaks and merges them into trends", () => {
+  const sanitized = sanitizeSameDayPriorRaces([
+    {
+      race_no: 2,
+      surface: "dirt",
+      distance_m: 1400,
+      field_size: 8,
+      source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/RaceMarkTable",
+      runners: [
+        { horse_number: 1, draw_number: 1, finish: 1, corners: [1, 1, 1, 1], last_3f_s: 39.2 },
+        { horse_number: 2, draw_number: 2, finish: 2, corners: [2, 2, 2, 2], last_3f_s: 39.5 },
+        { horse_number: 3, draw_number: 3, finish: 3, corners: [3, 3, 3, 3], last_3f_s: 39.7 },
+        { horse_number: 6, draw_number: 6, finish: 4, corners: [6, 6, 6, 6], last_3f_s: 40.2 },
+        { horse_number: 7, draw_number: 7, finish: 5, corners: [7, 7, 7, 7], last_3f_s: 40.5 },
+        { horse_number: 8, draw_number: 8, finish: 6, corners: [8, 8, 8, 8], last_3f_s: 40.9 },
+      ],
+    },
+    {
+      race_no: 5,
+      surface: "dirt",
+      distance_m: 1400,
+      source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/RaceMarkTable",
+      runners: [{ horse_number: 1, finish: 1, corners: [1] }],
+    },
+    {
+      race_no: 6,
+      surface: "dirt",
+      distance_m: 1400,
+      source_url: "https://www.keiba.go.jp/KeibaWeb/TodayRaceInfo/RaceMarkTable",
+      runners: [{ horse_number: 1, finish: 1, corners: [1] }],
+    },
+    {
+      race_no: 3,
+      surface: "dirt",
+      distance_m: 1400,
+      source_url: "https://unofficial.example.com/result",
+      runners: [{ horse_number: 1, finish: 1, corners: [1] }],
+    },
+  ], 5);
+
+  expect(sanitized).toHaveLength(1);
+  expect(sanitized[0].race_no).toBe(2);
+
+  const extraRaces = [1, 3, 4].map((race_no) => ({
+    ...sanitized[0],
+    race_no,
+  }));
+  const pack: Row = {
+    race: { race_id: "kochi-r5", scheduled_start_at: "2026-11-24T09:00:00Z" },
+    course: { surface: "dirt", distance_m: 1400 },
+  };
+  const coreTrends: Row = {
+    trends_version: "race-trends-v1",
+    race_id: "kochi-r5",
+    track_bias: { sampled_races: 0, eligible: false },
+    same_day: { races: 0, top3_inner_draw_share: null, winners_inner_draw: 0 },
+  };
+  const merged = mergeSameDayTrends(
+    coreTrends,
+    { observed_at: "2026-11-24T08:00:00Z", prior_races: [...sanitized, ...extraRaces] },
+    pack,
+    "2026-11-24T08:30:00Z",
+  );
+  expect(merged).not.toBeNull();
+  expect(obj(merged!.track_bias).sampled_races).toBe(4);
+  expect(obj(merged!.track_bias).eligible).toBe(true);
+  expect(obj(merged!.same_day).races).toBe(4);
+  expect(obj(merged!.same_day).top3_inner_draw_share).toBe(1);
 });

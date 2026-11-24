@@ -18,6 +18,7 @@ export async function runPythonAnalytics(
   pack: Row,
   options: PythonAnalyticsOptions,
   learningReport?: Row | null,
+  sameDayPrior?: Row | null,
 ): Promise<Row | null> {
   const race = obj(pack.race);
   const track = obj(pack.track);
@@ -27,6 +28,8 @@ export async function runPythonAnalytics(
   const payload = {
     track: str(track, "name"),
     race_date_jst: str(race, "race_date_jst"),
+    race_no: race.race_number ?? null,
+    jurisdiction: race.jurisdiction ?? null,
     surface: course.surface ?? null,
     distance_m: course.distance_m ?? null,
     going: research.going ?? null,
@@ -36,8 +39,12 @@ export async function runPythonAnalytics(
         horse_number: e.horse_number,
         horse_name: e.horse_name,
         jockey_name: e.jockey_name,
+        draw_number: e.draw_number ?? null,
+        carried_weight_kg: e.carried_weight_kg ?? null,
       })),
     research_horses: rows(research.horses ?? []),
+    jockey_stats: research.jockey_stats ?? null,
+    same_day_prior_races: Array.isArray(sameDayPrior?.prior_races) ? sameDayPrior.prior_races : [],
     learning_report: learningReport ?? null,
   };
 
