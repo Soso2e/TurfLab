@@ -31,6 +31,6 @@
 
 ## 保存と検証
 
-- 競艇データは競馬と別の Durable Object の SQLite に保存する。本人認証付き `GET /api/boatrace/archive?date=YYYY-MM-DD` で日別の凍結・公式結果と訂正履歴をJSONで取得できる。既存の競馬 `/api/backup` には含まれないため、サーバー移行時は停止後に DataHome の `state` を保全する。TurfLab-dataへの自動転送には公式データの保存・再配布条件の確認が必要。
+- 競艇データは競馬と別の Durable Object の SQLite に保存する。本人認証付き `GET /api/boatrace/archive?date=YYYY-MM-DD` で日別の凍結・公式結果と訂正履歴をJSONで取得できる。既存の競馬 `/api/backup` には含まれないため、サーバー移行時は停止後に DataHome の `state` を保全する。既存のGitHub同期Workerは、非公開リポジトリに限り、当日と過去3日間の本人用JSONアーカイブを `boatrace/YYYY-MM-DD/archive-<SHA256>.json` に追記する。公開・再配布は行わない。変更なし・空の日は書き込まず、訂正は別ファイルで保持する。
 - `npm run boatrace:verify -- 2026-11-22 12 11` は、公式ページを直接取得して解析結果と出典を出力する。締切時オッズは `closed` と表示し、検証コマンドから購入記録を作成する経路はない。
 - `npm run check` は戦略、先読み防止、欠測、同着、返還、精算、訂正・再読込を検証する。 `npm run test:wizard` は隔離Workerと390px Edge/Chromiumで、競技切替、URL、戻る・進む、再読み込み、連打、遅延レスポンス、アニメーション軽減と既存の競馬操作を検証する。PowerShellで `$env:TURFLAB_BOATRACE_LIVE_TEST='1'` を設定すると、同じ隔離Workerで当日の公式開催場・レース詳細・再起動後の読み返しも照合する。
