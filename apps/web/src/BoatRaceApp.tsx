@@ -24,9 +24,11 @@ interface RaceSummary {
   number: number;
   cutoff: string | null;
   issue: string | null;
-  state: "scheduled" | "pending" | "settled" | "missing" | "void";
+  state: "scheduled" | "pending" | "settled" | "result_only" | "missing" | "void";
   tickets: Ticket[];
   net: number | null;
+  top3?: number[];
+  exhibitionFlying?: number[];
 }
 type RaceDetail = {
   race: BoatRecord;
@@ -40,7 +42,7 @@ type CollectorStatus = {
   issue: string | null;
   bankroll: { initial: number; balance: number; stake: number; payout: number; refund: number; pending: number };
 };
-type Day = { date: string; races: number; purchased: number; settled: number };
+type Day = { date: string; races: number; purchased: number; settled: number; results?: number };
 type Data = { races: RaceSummary[] } | RaceDetail |
   (ReturnType<typeof summarizeBoatRaces> & { from: string }) | { days: Day[] };
 
@@ -67,7 +69,7 @@ function TicketList({ tickets }: { tickets: Ticket[] }) {
 }
 
 function RaceCard({ race }: { race: RaceSummary }) {
-  const state = { scheduled: "締切前", pending: "未精算", settled: "精算済", missing: "購入記録なし", void: "中止・不成立" }[race.state];
+  const state = { scheduled: "締切前", pending: "未精算", settled: "精算済", result_only: "結果済", missing: "購入記録なし", void: "中止・不成立" }[race.state];
   return <article className="boat-race-row">
     <div className="boat-race-time">
       <span>{jst(race.cutoff)}</span>
@@ -81,10 +83,12 @@ function RaceCard({ race }: { race: RaceSummary }) {
         <span className="boat-state" data-state={race.state}>{state}</span>
       </div>
       {race.tickets.length > 0 && <TicketList tickets={race.tickets} />}
-      {(race.net !== null || race.issue) && (
+      {(race.net !== null || race.top3?.length || race.exhibitionFlying?.length || race.issue) && (
         <p className="boat-muted">
           {race.net !== null && <>損益 <strong className={netClass(race.net)}>{signedMoney(race.net)}</strong></>}
-          {race.net !== null && race.issue && " ／ "}
+          {race.top3?.length ? <>{race.net !== null ? " ／ " : ""}着順 {race.top3.join("-")}</> : null}
+          {race.exhibitionFlying?.length ? <> ／ 展示F {race.exhibitionFlying.join("・")}</> : null}
+          {(race.net !== null || race.top3?.length) && race.issue && " ／ "}
           {race.issue}
         </p>
       )}
@@ -120,12 +124,16 @@ function RacePage({ detail }: { detail: RaceDetail }) {
         <thead><tr><th>艇・選手</th><th>級別</th><th>補正後</th><th>展示<br />進入・ST・タイム</th><th>本番<br />進入・着</th></tr></thead>
         <tbody>{entries.map((entry) => {
           const frozen = freeze?.entries.find((item) => item.boat === entry.boat);
+          const shown = race.exhibition?.entries.find((item) => item.boat === entry.boat);
+          const exCourse = frozen?.exhibitionCourse ?? shown?.course ?? null;
+          const exST = frozen?.exhibitionST ?? shown?.st ?? null;
+          const exSeconds = frozen?.exhibitionSeconds ?? race.exhibition?.times?.[entry.boat] ?? null;
           const actual = result?.courses.find((item) => item.boat === entry.boat);
           const finish = result?.finishes.find((item) => item.boat === entry.boat);
           return <tr key={entry.boat}>
             <th scope="row"><span className="boat-entry-name"><BoatNo n={entry.boat} /><span>{entry.name || "未取得"}</span></span></th>
             <td>{entry.grade_original ?? "—"}</td><td>{frozen?.grade_adjusted ?? "—"}</td>
-            <td className="num">{frozen?.exhibitionCourse ?? "—"} / {frozen?.exhibitionST || "—"} / {frozen?.exhibitionSeconds?.toFixed(2) ?? "—"}</td>
+            <td className="num">{exCourse ?? "—"} / {exST || "—"} / {exSeconds?.toFixed(2) ?? "—"}</td>
             <td className="num">{actual?.course ?? "—"} / {finish?.position ?? "—"}</td>
           </tr>;
         })}</tbody>
@@ -188,7 +196,7 @@ function RacePage({ detail }: { detail: RaceDetail }) {
       </div>
       <ul className="boat-plain-list">{([
         ["開催番組", freeze?.program ?? race.program], ["2連単", freeze?.evidence.exacta],
-        ["3連単", freeze?.evidence.trifecta], ["直前情報", freeze?.evidence.exhibition], ["結果", result?.evidence],
+        ["3連単", freeze?.evidence.trifecta], ["直前情報", freeze?.evidence.exhibition ?? race.exhibition?.evidence], ["結果", result?.evidence],
       ] as const).filter(([, evidence]) => evidence).map(([label, evidence]) => <li key={label}>
         <a href={evidence!.url} target="_blank" rel="noreferrer">{label}</a> ・ {jst(evidence!.fetchedAt)} JST取得
       </li>)}</ul>
@@ -365,7 +373,7 @@ export function BoatRaceApp({ pathname }: { pathname: string }) {
       </div>
       {data.days.length ? <ul className="boat-history">{data.days.map((item) => <li key={item.date}>
         <TurfLink to={`${BASE}/races/${item.date}`} className="boat-history-date">{item.date}</TurfLink>
-        <span className="boat-muted">対象 {item.races}R ／ 購入 {item.purchased}R ／ 精算 {item.settled}R</span>
+        <span className="boat-muted">対象 {item.races}R ／ 購入 {item.purchased}R ／ 精算 {item.settled}R ／ 結果 {item.results ?? item.settled}R</span>
       </li>)}</ul> : <p className="boat-muted">保存された開催日はありません。</p>}
     </section>
   </>;

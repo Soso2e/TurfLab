@@ -10,6 +10,7 @@ const MINUTE = 60_000;
 const CYCLE = 30 * MINUTE;
 const DAY = 1440 * MINUTE;
 const FIRST_CAPTURE = 145_000;
+const RESULT_DELAY = 15 * MINUTE;
 const INITIAL_BANKROLL = 100_000;
 const BET_COST = 2 * BOAT_STAKE;
 const cycleStart = (time: number) => time - time % CYCLE;
@@ -122,7 +123,11 @@ export class BoatCollector {
           if (existing?.freeze || existing?.result) continue;
           const cutoff = race.cutoff ? Date.parse(race.cutoff) : 0;
           const issue = cutoff ? (cutoff === prev?.cutoff ? existing?.issue : undefined) : "公式の締切予定時刻が未取得";
-          this.save({ ...race, issue }, cutoff === prev?.cutoff ? prev.capture_next : cutoff ? cutoff - FIRST_CAPTURE : 0, 0);
+          const captureNext = cutoff === prev?.cutoff ? prev.capture_next : cutoff ? cutoff - FIRST_CAPTURE : 0;
+          const resultNext = existing?.result ? 0
+            : cutoff === prev?.cutoff && prev.result_next > 0 ? prev.result_next
+            : cutoff ? cutoff + RESULT_DELAY : 0;
+          this.save({ ...race, issue }, captureNext, resultNext);
         }
         return null;
       } catch (err) {
@@ -170,8 +175,21 @@ export class BoatCollector {
   private async result(row: Row) {
     const race = JSON.parse(row.body) as BoatRecord;
     try {
-      const page = await this.source.page(officialUrl("raceresult", race.date, race.venue, race.number));
-      const result = parseResult(page);
+      const [resultPage, beforePage] = await Promise.allSettled([
+        this.source.page(officialUrl("raceresult", race.date, race.venue, race.number)),
+        !race.freeze && !race.exhibition?.evidence
+          ? this.source.page(officialUrl("beforeinfo", race.date, race.venue, race.number))
+          : Promise.resolve(null),
+      ]);
+      if (resultPage.status === "rejected") throw resultPage.reason;
+      if (beforePage.status === "fulfilled" && beforePage.value) {
+        race.exhibition = {
+          evidence: beforePage.value.evidence,
+          entries: parseExhibition(beforePage.value),
+          times: parseExhibitionTimes(beforePage.value),
+        };
+      }
+      const result = parseResult(resultPage.value);
       if (!result) throw new BoatDataMissing("公式3連単払戻・返還情報の確定待ち");
       const { status, payouts, special, refundBoats, courses, finishes } = result;
       const current = JSON.stringify({ status, payouts, special, refundBoats, courses, finishes });
@@ -186,20 +204,22 @@ export class BoatCollector {
       const now = Date.now();
       const next = !previous ? cycleStart(now) + CYCLE
         : japanDate(now) === race.date ? Date.parse(`${race.date}T00:00:00+09:00`) + DAY : 0;
-      const settlement = settleBoatRace(race, "adjusted");
-      if (!settlement) throw new BoatDataMissing("公式結果の精算待ち");
+      const settlement = race.freeze ? settleBoatRace(race, "adjusted") : null;
+      if (race.freeze && !settlement) throw new BoatDataMissing("公式結果の精算待ち");
       this.state.storage.transactionSync(() => {
         if (changed) this.sql.exec("INSERT OR IGNORE INTO boat_result_revisions VALUES (?, ?, ?)",
           race.id, result.evidence.fetchedAt, JSON.stringify(result));
-        this.sql.exec("UPDATE boat_auto_bets SET payout = ?, refund = ? WHERE race_id = ?",
-          settlement.payout, settlement.refund, race.id);
+        if (settlement) {
+          this.sql.exec("UPDATE boat_auto_bets SET payout = ?, refund = ? WHERE race_id = ?",
+            settlement.payout, settlement.refund, race.id);
+        }
         this.save(race, 0, next);
       });
     } catch (err) {
       const stored = JSON.parse(row.body) as BoatRecord;
       if (!stored.result) stored.issue = message(err);
       const now = Date.now();
-      this.save(stored, 0, now < row.cutoff + 3 * DAY ? cycleStart(now) + CYCLE : 0);
+      this.save(stored, 0, row.cutoff > 0 && now < row.cutoff + 3 * DAY ? cycleStart(now) + CYCLE : 0);
     }
   }
 
@@ -217,8 +237,8 @@ export class BoatCollector {
     let issue: string | null = null;
     try {
       const results = this.sql.exec<Row>(`SELECT * FROM boat_races WHERE result_next > 0
-        AND result_next <= ? AND json_type(body, '$.freeze') IS NOT NULL
-        ORDER BY result_next, id LIMIT 4`, now).toArray();
+        AND result_next <= ?
+        ORDER BY (json_type(body, '$.freeze') IS NOT NULL) DESC, result_next, id LIMIT 6`, now).toArray();
       await Promise.all(results.map((row) => this.result(row)));
       if (sync.next <= now) await this.program(now, sync);
       if (!this.boughtIn(cycle) && this.bankroll().balance >= BET_COST) {
@@ -241,7 +261,7 @@ export class BoatCollector {
         SELECT MIN(MAX(capture_next, cutoff - cutoff % ?)) AS due
           FROM boat_races WHERE capture_next > 0 AND cutoff >= ? AND ?
         UNION ALL SELECT MIN(result_next) FROM boat_races
-          WHERE result_next > 0 AND json_type(body, '$.freeze') IS NOT NULL
+          WHERE result_next > 0
       )`, CYCLE, earliestCutoff, this.bankroll().balance >= BET_COST ? 1 : 0).one().due;
     if (!(await this.status()).enabled) return;
     await this.state.storage.put({
@@ -280,7 +300,8 @@ export class BoatCollector {
     if (path === "history") {
       return json({ days: this.sql.exec(`SELECT date, COUNT(*) AS races,
         SUM(json_type(body, '$.freeze') IS NOT NULL) AS purchased,
-        SUM(json_type(body, '$.result') IS NOT NULL AND json_type(body, '$.freeze') IS NOT NULL) AS settled
+        SUM(json_type(body, '$.result') IS NOT NULL AND json_type(body, '$.freeze') IS NOT NULL) AS settled,
+        SUM(json_type(body, '$.result') IS NOT NULL) AS results
         FROM boat_races GROUP BY date ORDER BY date DESC LIMIT 90`).toArray() });
     }
     if (path === "races" || path === "archive") {
@@ -300,13 +321,24 @@ export class BoatCollector {
       const now = Date.now();
       return json({ date, races: Array.from(rows, (row) => {
         const race = JSON.parse(row.body) as BoatRecord;
+        const top3 = race.result?.finishes
+          .filter((item) => /^[123]$/.test(item.position))
+          .sort((a, b) => Number(a.position) - Number(b.position))
+          .slice(0, 3)
+          .map((item) => item.boat);
+        const exhibitionFlying = race.freeze
+          ? race.freeze.entries.filter((entry) => entry.exhibitionF === true).map((entry) => entry.boat)
+          : race.exhibition?.entries.filter((entry) => entry.flying === true).map((entry) => entry.boat);
         return {
           id: race.id, venue: race.venue, venueName: race.venueName, number: race.number,
           cutoff: race.freeze?.cutoff ?? race.cutoff, issue: race.issue ?? null,
           state: race.result?.status === "void" ? "void" : race.freeze ?
             (settleBoatRace(race, "adjusted") ? "settled" : "pending") :
+            race.result ? "result_only" :
             (!race.cutoff || Date.parse(race.cutoff) <= now ? "missing" : "scheduled"),
           tickets: race.freeze?.plans.adjusted.tickets ?? [], net: settleBoatRace(race, "adjusted")?.net ?? null,
+          ...(top3?.length ? { top3 } : {}),
+          ...(exhibitionFlying?.length ? { exhibitionFlying } : {}),
         };
       }) });
     }
