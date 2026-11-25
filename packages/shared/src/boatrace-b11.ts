@@ -39,8 +39,25 @@ export type B11Decision =
   | { status: "skip"; reason: B11SkipReason }
   | { status: "bet"; branch: B11Branch; tickets: string[] };
 
-export type ThresholdStatus = "applied" | "model-skip" | "outside-threshold" | "unjudged";
+export type ThresholdStatus = "applied" | "model-skip" | "outside-threshold" | "unjudged" | "gate-skip" | "gate-pending";
 export interface ThresholdJudgement { cap: SigmaCap; status: ThresholdStatus }
+
+export type CourseGateStatus = "allowed" | "skip" | "pending";
+export type CourseGateReason = "exhibition-123456" | "course-changed" | "missing" | "invalid";
+export type CourseTiming = "pre-cutoff" | "post-cutoff" | "unknown";
+
+export interface CourseGateEvaluation {
+  status: CourseGateStatus;
+  reason: CourseGateReason;
+  detail?: string;
+  exhibitionOrder: string | null;
+  exhibitionSource: "freeze" | "exhibition" | null;
+  exhibitionFetchedAt: string | null;
+  timing: CourseTiming;
+  actualOrder: string | null;
+  actualChanged: boolean | null;
+  exhibitionToActualChanged: boolean | null;
+}
 
 export interface B11Evaluation {
   version: typeof B11_VERSION;
@@ -48,6 +65,8 @@ export interface B11Evaluation {
   sigmaClass: SigmaClass | null;
   b11: B11Decision;
   thresholds: ThresholdJudgement[];
+  courseGate?: CourseGateEvaluation;
+  thresholdsWithGate?: ThresholdJudgement[];
 }
 
 export function gradePoint(grade: unknown): number | null {
@@ -106,7 +125,104 @@ export function decideB11(grades: readonly unknown[]): B11Decision {
   return { status: "bet", branch: "default", tickets: ["1-2-3", "1-2-4"] };
 }
 
-export function evaluateB11(grades: readonly unknown[]): B11Evaluation {
+function buildCourseOrder(pairs: { boat: number; course: number | null | undefined }[]): { order: string | null; reason?: "missing" | "invalid"; detail?: string } {
+  if (pairs.length !== 6) {
+    return { order: null, reason: pairs.length === 0 ? "missing" : "invalid", detail: `entries=${pairs.length}` };
+  }
+  const byCourse = new Array<number>(6).fill(0);
+  const seenBoats = new Set<number>();
+  for (const pair of pairs) {
+    if (pair.course === null || pair.course === undefined) {
+      return { order: null, reason: "missing", detail: `boat ${pair.boat} course missing` };
+    }
+    if (!Number.isInteger(pair.boat) || pair.boat < 1 || pair.boat > 6 || seenBoats.has(pair.boat)) {
+      return { order: null, reason: "invalid", detail: `invalid boat ${pair.boat}` };
+    }
+    if (!Number.isInteger(pair.course) || pair.course < 1 || pair.course > 6 || byCourse[pair.course - 1] !== 0) {
+      return { order: null, reason: "invalid", detail: `invalid course ${pair.course}` };
+    }
+    seenBoats.add(pair.boat);
+    byCourse[pair.course - 1] = pair.boat;
+  }
+  return { order: byCourse.join("") };
+}
+
+export function evaluateCourseGate(
+  race: Pick<BoatRecord, "cutoff" | "freeze" | "exhibition" | "result">,
+  options: { includeResult?: boolean; asOf?: Date } = {},
+): CourseGateEvaluation {
+  const includeResult = options.includeResult ?? true;
+  const cutoffIso = race.freeze?.cutoff ?? race.cutoff;
+  const cutoffMs = cutoffIso ? Date.parse(cutoffIso) : NaN;
+  const asOfMs = options.asOf ? options.asOf.getTime() : null;
+
+  let exhibitionSource: CourseGateEvaluation["exhibitionSource"] = null;
+  let exhibitionFetchedAt: string | null = null;
+  let parsedEx: ReturnType<typeof buildCourseOrder> = { order: null, reason: "missing", detail: "no exhibition" };
+
+  if (race.freeze?.entries?.length) {
+    const freezeFetched = race.freeze.evidence.exhibition?.fetchedAt ?? null;
+    const freezePairs = race.freeze.entries.map((e) => ({ boat: e.boat, course: e.exhibitionCourse }));
+    const attempt = buildCourseOrder(freezePairs);
+    if (attempt.order !== null || !race.exhibition?.entries?.length) {
+      exhibitionSource = attempt.reason === "missing" && !race.freeze.evidence.exhibition ? null : "freeze";
+      exhibitionFetchedAt = freezeFetched;
+      parsedEx = attempt;
+    }
+  }
+  if (parsedEx.order === null && race.exhibition?.entries?.length) {
+    const fetched = race.exhibition.evidence?.fetchedAt ?? null;
+    const fetchedMs = fetched ? Date.parse(fetched) : NaN;
+    // 時点固定モード(asOf)では、asOfより未来に取得された展示データは参照しない
+    if (asOfMs === null || (Number.isFinite(fetchedMs) && fetchedMs <= asOfMs)) {
+      exhibitionSource = "exhibition";
+      exhibitionFetchedAt = fetched;
+      parsedEx = buildCourseOrder(race.exhibition.entries.map((e) => ({ boat: e.boat, course: e.course })));
+    }
+  }
+
+  const fetchedMs = exhibitionFetchedAt ? Date.parse(exhibitionFetchedAt) : NaN;
+  const timing: CourseTiming = !Number.isFinite(fetchedMs) || !Number.isFinite(cutoffMs)
+    ? "unknown"
+    : fetchedMs < cutoffMs ? "pre-cutoff" : "post-cutoff";
+
+  const status: CourseGateStatus = parsedEx.order === null
+    ? "pending"
+    : parsedEx.order === "123456" ? "allowed" : "skip";
+  const reason: CourseGateReason = parsedEx.order === null
+    ? (parsedEx.reason ?? "missing")
+    : parsedEx.order === "123456" ? "exhibition-123456" : "course-changed";
+
+  let actualOrder: string | null = null;
+  if (includeResult && race.result?.courses?.length) {
+    actualOrder = buildCourseOrder(race.result.courses.map((c) => ({ boat: c.boat, course: c.course }))).order;
+  }
+  const actualChanged = actualOrder === null ? null : actualOrder !== "123456";
+  const exhibitionToActualChanged = parsedEx.order !== null && actualOrder !== null
+    ? parsedEx.order !== actualOrder
+    : null;
+
+  return {
+    status,
+    reason,
+    ...(parsedEx.detail ? { detail: parsedEx.detail } : {}),
+    exhibitionOrder: parsedEx.order,
+    exhibitionSource,
+    exhibitionFetchedAt,
+    timing,
+    actualOrder,
+    actualChanged,
+    exhibitionToActualChanged,
+  };
+}
+
+function gateThresholdStatus(base: ThresholdStatus, gate: CourseGateEvaluation): ThresholdStatus {
+  if (gate.status === "skip") return "gate-skip";
+  if (gate.status === "pending") return "gate-pending";
+  return base;
+}
+
+export function evaluateB11(grades: readonly unknown[], courseGate?: CourseGateEvaluation): B11Evaluation {
   const features = gradeFeatures(grades);
   const b11 = decideB11(grades);
   const thresholds = SIGMA_CAPS.map((cap): ThresholdJudgement => ({
@@ -115,7 +231,22 @@ export function evaluateB11(grades: readonly unknown[]): B11Evaluation {
       : !withinCap(features.variance36, cap) ? "outside-threshold"
       : b11.status === "bet" ? "applied" : "model-skip",
   }));
-  return { version: B11_VERSION, features, sigmaClass: classifySigma(features), b11, thresholds };
+  if (!courseGate) {
+    return { version: B11_VERSION, features, sigmaClass: classifySigma(features), b11, thresholds };
+  }
+  const thresholdsWithGate = thresholds.map((t): ThresholdJudgement => ({
+    cap: t.cap,
+    status: gateThresholdStatus(t.status, courseGate),
+  }));
+  return {
+    version: B11_VERSION,
+    features,
+    sigmaClass: classifySigma(features),
+    b11,
+    thresholds,
+    courseGate,
+    thresholdsWithGate,
+  };
 }
 
 /** 発走前に凍結して保存する研究レコード。 */
@@ -171,6 +302,9 @@ export interface B11Stats {
   modelSkip: number;
   outside: number;
   unjudged: number;
+  gateSkip: number;
+  gatePending: number;
+  actualChangedInApplied: number;
   settled: number;
   pending: number;
   excluded: number;
@@ -193,7 +327,8 @@ export const SMALL_SAMPLE = 30;
 
 function summarizeScope(items: { item: B11ResearchItem; status: ThresholdStatus; tickets: string[] }[]): B11Stats {
   const stats: B11Stats = {
-    targets: items.length, applied: 0, modelSkip: 0, outside: 0, unjudged: 0, settled: 0, pending: 0, excluded: 0,
+    targets: items.length, applied: 0, modelSkip: 0, outside: 0, unjudged: 0, gateSkip: 0, gatePending: 0,
+    actualChangedInApplied: 0, settled: 0, pending: 0, excluded: 0,
     excludedReasons: {}, hits: 0, hitRate: null, stake: 0, payout: 0, refund: 0, net: 0, roi: null,
     maxLosingStreak: 0, topPayoutShare: null, smallSample: true, days: [],
   };
@@ -205,7 +340,14 @@ function summarizeScope(items: { item: B11ResearchItem; status: ThresholdStatus;
     if (status === "unjudged") { stats.unjudged++; continue; }
     if (status === "outside-threshold") { stats.outside++; continue; }
     if (status === "model-skip") { stats.modelSkip++; continue; }
+    if (status === "gate-skip") { stats.gateSkip++; continue; }
+    if (status === "gate-pending") { stats.gatePending++; continue; }
     stats.applied++;
+    // 本番進入変化は事後分析用フラグとして計上するが、通常収支から除外しない
+    if (item.result?.courses?.length === 6) {
+      const actual = buildCourseOrder(item.result.courses.map((c) => ({ boat: c.boat, course: c.course }))).order;
+      if (actual !== null && actual !== "123456") stats.actualChangedInApplied++;
+    }
     const date = item.record.date;
     const day = days.get(date) ?? { date, applied: 0, settled: 0, hits: 0, stake: 0, payout: 0, refund: 0, net: 0 };
     day.applied++;
@@ -237,11 +379,15 @@ function summarizeScope(items: { item: B11ResearchItem; status: ThresholdStatus;
   return stats;
 }
 
-export interface B11Summary {
-  kind: B11ResearchRecord["kind"];
-  total: number;
+export interface B11SummaryGroup {
   byCap: { key: string; cap: SigmaCap; stats: B11Stats }[];
   byClass: { sigmaClass: SigmaClass; stats: B11Stats }[];
+}
+
+export interface B11Summary extends B11SummaryGroup {
+  kind: B11ResearchRecord["kind"];
+  total: number;
+  withCourseGate: B11SummaryGroup;
   note: string;
 }
 
@@ -252,33 +398,47 @@ export function summarizeB11(items: B11ResearchItem[], kind: B11ResearchRecord["
     const b11 = item.record.evaluation.b11;
     return b11.status === "bet" ? b11.tickets : [];
   };
-  const byCap = SIGMA_CAPS.map((cap) => ({
-    key: capKey(cap), cap,
-    stats: summarizeScope(own.map((item) => ({
-      item, tickets: tickets(item),
-      status: item.record.evaluation.thresholds.find((t) => t.cap === cap)?.status ?? "unjudged",
-    }))),
-  }));
-  const byClass = SIGMA_CLASSES.map((sigmaClass) => ({
-    sigmaClass,
-    stats: summarizeScope(own.map((item) => {
-      const evaluation = item.record.evaluation;
-      const status: ThresholdStatus = evaluation.sigmaClass === null ? "unjudged"
-        : evaluation.sigmaClass !== sigmaClass ? "outside-threshold"
-        : evaluation.b11.status === "bet" ? "applied" : "model-skip";
-      return { item, tickets: tickets(item), status };
-    })),
-  }));
+  const buildGroup = (useGate: boolean): B11SummaryGroup => {
+    const byCap = SIGMA_CAPS.map((cap) => ({
+      key: capKey(cap), cap,
+      stats: summarizeScope(own.map((item) => {
+        const evaluation = item.record.evaluation;
+        const baseStatus = evaluation.thresholds.find((t) => t.cap === cap)?.status ?? "unjudged";
+        const status = useGate
+          ? (evaluation.thresholdsWithGate?.find((t) => t.cap === cap)?.status
+            ?? (evaluation.courseGate ? gateThresholdStatus(baseStatus, evaluation.courseGate) : "gate-pending"))
+          : baseStatus;
+        return { item, tickets: tickets(item), status };
+      })),
+    }));
+    const byClass = SIGMA_CLASSES.map((sigmaClass) => ({
+      sigmaClass,
+      stats: summarizeScope(own.map((item) => {
+        const evaluation = item.record.evaluation;
+        const baseStatus: ThresholdStatus = evaluation.sigmaClass === null ? "unjudged"
+          : evaluation.sigmaClass !== sigmaClass ? "outside-threshold"
+          : evaluation.b11.status === "bet" ? "applied" : "model-skip";
+        const status = useGate
+          ? (evaluation.courseGate ? gateThresholdStatus(baseStatus, evaluation.courseGate) : "gate-pending")
+          : baseStatus;
+        return { item, tickets: tickets(item), status };
+      })),
+    }));
+    return { byCap, byClass };
+  };
+  const noGate = buildGroup(false);
+  const withCourseGate = buildGroup(true);
   return {
-    kind, total: own.length, byCap, byClass,
-    note: "閾値間は同一レースを含む重複標本で独立ではない。少数標本・高額払戻への依存に注意。実資金移動なし。",
+    kind, total: own.length, ...noGate, withCourseGate,
+    note: "閾値間は同一レースを含む重複標本で独立ではない。少数標本・高額払戻への依存に注意。本番進入変更は事後に除外しない。実資金移動なし。",
   };
 }
 
 export function reconstructB11(race: BoatRecord): B11ResearchRecord {
+  const courseGate = evaluateCourseGate(race, { includeResult: true });
   return {
     raceId: race.id, date: race.date, kind: "reconstructed", frozenAt: null, cutoff: race.cutoff,
-    source: race.program, evaluation: evaluateB11(gradesOf(race)),
+    source: race.program, evaluation: evaluateB11(gradesOf(race), courseGate),
   };
 }
 
@@ -286,8 +446,9 @@ export function freezeB11(race: BoatRecord, now: Date): B11ResearchRecord | null
   const cutoff = race.cutoff ? Date.parse(race.cutoff) : NaN;
   const fetched = Date.parse(race.program.fetchedAt);
   if (!Number.isFinite(cutoff) || now.getTime() >= cutoff || !Number.isFinite(fetched) || fetched > now.getTime()) return null;
+  const courseGate = evaluateCourseGate(race, { includeResult: false, asOf: now });
   return {
     raceId: race.id, date: race.date, kind: "forward", frozenAt: now.toISOString(), cutoff: race.cutoff,
-    source: race.program, evaluation: evaluateB11(gradesOf(race)),
+    source: race.program, evaluation: evaluateB11(gradesOf(race), courseGate),
   };
 }

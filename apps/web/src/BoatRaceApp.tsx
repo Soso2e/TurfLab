@@ -3,7 +3,7 @@ import {
   type BoatRecord, type Lane, type Ticket, type settleBoatRace, type summarizeBoatRaces,
 } from "../../../packages/shared/src/boatrace";
 import {
-  SIGMA_CLASS_LABEL, type B11Summary, type B11ResearchRecord, type SigmaClass,
+  SIGMA_CLASS_LABEL, type B11Summary, type B11ResearchRecord, type CourseGateEvaluation, type SigmaClass,
 } from "../../../packages/shared/src/boatrace-b11";
 import { IconCalendar, IconChart, IconRace, IconTable } from "./Icons";
 import { RubberDock, type RubberDockItem } from "./RubberDock";
@@ -27,13 +27,39 @@ interface ResearchBrief {
   sigmaClass: SigmaClass | null;
   missingBoats: number[];
   b11: string[] | string;
+  courseGate?: CourseGateEvaluation;
+  actualOrder?: string | null;
+  actualChanged?: boolean | null;
 }
 const sigmaText = (sigma: number | null) => sigma === null ? "未判定" : sigma.toFixed(2);
+function courseGateSummary(gate?: CourseGateEvaluation, actualOrder?: string | null, actualChanged?: boolean | null) {
+  if (!gate) return null;
+  const timingLabel = gate.timing === "pre-cutoff" ? "締切前" : gate.timing === "post-cutoff" ? "締切後" : "時点不明";
+  const exLabel = gate.status === "allowed"
+    ? `展示${gate.exhibitionOrder}（ゲート通過・${timingLabel}）`
+    : gate.status === "skip"
+      ? `展示${gate.exhibitionOrder}（進入変更見送り・${timingLabel}）`
+      : `展示進入${gate.reason === "invalid" ? "不正" : "未取得"}（保留）`;
+  const actual = actualOrder ?? gate.actualOrder;
+  const changed = actualChanged ?? gate.actualChanged;
+  if (!actual) return exLabel;
+  return `${exLabel} ／ 本番${actual}${changed ? "（進入差あり）" : ""}`;
+}
+function b11BriefText(b11: ResearchBrief["b11"]) {
+  if (Array.isArray(b11)) return b11.length ? `仮想 ${b11.join("・")}` : "";
+  if (b11 === "skip") return "B11見送り";
+  if (b11 === "unjudged") return "B11未判定";
+  return "";
+}
 function ResearchLine({ research }: { research: ResearchBrief }) {
+  const gateText = courseGateSummary(research.courseGate, research.actualOrder, research.actualChanged);
+  const modelText = b11BriefText(research.b11);
   return <p className="boat-muted boat-research-line">
     研究用 σ {research.sigma === null ? `未判定（${research.missingBoats.map((b) => b + "号艇").join("・")}の級別欠損）` : sigmaText(research.sigma)}
     {research.mean !== null && <> ／ 級別平均 {research.mean.toFixed(2)}</>}
     {research.sigmaClass && <> ／ {SIGMA_CLASS_LABEL[research.sigmaClass]}</>}
+    {gateText && <> ／ {gateText}</>}
+    {modelText && <> ／ {modelText}</>}
     <small>（購入推奨ではありません）</small>
   </p>;
 }
@@ -68,6 +94,7 @@ type Day = { date: string; races: number; purchased: number; settled: number; re
 type ResearchPage = {
   date: string; from: string; forward: B11Summary; reconstructed: B11Summary;
   races: { id: string; venueName: string; number: number; cutoff: string | null; kind: string; resulted: boolean;
+    actualOrder?: string | null; actualChanged?: boolean | null;
     evaluation: B11ResearchRecord["evaluation"] }[];
 };
 type Data = { races: RaceSummary[] } | RaceDetail | ResearchPage |
@@ -174,10 +201,14 @@ function RacePage({ detail }: { detail: RaceDetail }) {
         <span>{detail.research.kind === "forward" ? "発走前に凍結" : "再構成（事後計算）"}</span>
       </div>
       <ResearchLine research={{ ...detail.research.evaluation.features, sigmaClass: detail.research.evaluation.sigmaClass,
-        b11: "" }} />
+        b11: "", courseGate: detail.research.evaluation.courseGate }} />
       <p className="boat-muted">B11（研究モデル・正式予想ではない）：{(() => {
         const b11 = detail.research.evaluation.b11;
-        return b11.status === "bet" ? `仮想 ${b11.tickets.join("・")}` : b11.status === "skip" ? `見送り（${b11.reason}）` : "未判定（級別欠損）";
+        const gate = detail.research.evaluation.courseGate;
+        const base = b11.status === "bet" ? `仮想 ${b11.tickets.join("・")}` : b11.status === "skip" ? `見送り（${b11.reason}）` : "未判定（級別欠損）";
+        const gateNote = !gate ? "" : gate.status === "allowed" ? " ／ 進入ゲート通過（123456）"
+          : gate.status === "skip" ? ` ／ 進入ゲート見送り（${gate.exhibitionOrder}）` : " ／ 進入ゲート保留（欠損・不正）";
+        return base + gateNote;
       })()}</p>
     </section>}
     {freeze ? <>
@@ -329,12 +360,13 @@ const CAP_LABEL: Record<string, string> = {
 type B11Stats = B11Summary["byCap"][number]["stats"];
 function StatsRows({ rows }: { rows: { label: string; stats: B11Stats }[] }) {
   return <div className="boat-table"><table>
-    <thead><tr><th scope="col">条件</th><th scope="col">対象</th><th scope="col">適用/見送り/閾値外/欠損</th>
-      <th scope="col">精算/未確定/除外</th><th scope="col">的中</th><th scope="col">投入・払戻・返還</th>
+    <thead><tr><th scope="col">条件</th><th scope="col">対象</th><th scope="col">適用/モデル見送り/閾値外/欠損</th>
+      <th scope="col">進入見送り/保留</th><th scope="col">精算/未確定/除外</th><th scope="col">的中</th><th scope="col">投入・払戻・返還</th>
       <th scope="col">純損益・回収率</th><th scope="col">最大連敗</th></tr></thead>
     <tbody>{rows.map(({ label, stats: s }) => <tr key={label}>
       <th scope="row">{label}</th><td className="num">{s.targets}</td>
       <td className="num">{s.applied}/{s.modelSkip}/{s.outside}/{s.unjudged}</td>
+      <td className="num">{s.gateSkip ?? 0}/{s.gatePending ?? 0}</td>
       <td className="num">{s.settled}/{s.pending}/{s.excluded}</td>
       <td className="num">{s.hits}/{s.settled}（{percent(s.hitRate)}）</td>
       <td className="num">{money(s.stake)}・{money(s.payout)}・{money(s.refund)}</td>
@@ -346,17 +378,22 @@ function StatsRows({ rows }: { rows: { label: string; stats: B11Stats }[] }) {
 
 function ResearchView({ data }: { data: ResearchPage }) {
   const [classFilter, setClassFilter] = useState("all");
+  const [gateFilter, setGateFilter] = useState("all");
   const [order, setOrder] = useState("sigma");
   const [count, setCount] = useState(24);
   const [mode, setMode] = useState<"forward" | "reconstructed">("forward");
+  const [gateMode, setGateMode] = useState<"withCourseGate" | "noGate">("withCourseGate");
   const summary = data[mode];
-  const control = summary.byCap.find((c) => c.key === "control")!.stats;
-  const reasons = Object.entries(summary.byCap.reduce<Record<string, number>>((acc, c) => {
+  const group = gateMode === "withCourseGate" && summary.withCourseGate ? summary.withCourseGate : summary;
+  const control = group.byCap.find((c) => c.key === "control")!.stats;
+  const reasons = Object.entries(group.byCap.reduce<Record<string, number>>((acc, c) => {
     for (const [k, v] of Object.entries(c.stats.excludedReasons)) acc[k] = Math.max(acc[k] ?? 0, v);
     return acc;
   }, {}));
-  const races = data.races.filter((race) => classFilter === "all" ? true :
-    classFilter === "missing" ? race.evaluation.sigmaClass === null : race.evaluation.sigmaClass === classFilter)
+  const races = data.races
+    .filter((race) => classFilter === "all" ? true :
+      classFilter === "missing" ? race.evaluation.sigmaClass === null : race.evaluation.sigmaClass === classFilter)
+    .filter((race) => gateFilter === "all" ? true : (race.evaluation.courseGate?.status ?? "pending") === gateFilter)
     .sort((a, b) => {
       const sa = a.evaluation.features.sigma, sb = b.evaluation.features.sigma;
       const bySigma = sa === null || sb === null ? Number(sa === null) - Number(sb === null) : sa - sb;
@@ -366,30 +403,37 @@ function ResearchView({ data }: { data: ResearchPage }) {
     <div className="page-heading">
       <div>
         <p className="eyebrow">RESEARCH ONLY</p>
-        <h1>B11×級別ばらつき（研究）</h1>
+        <h1>B11×級別ばらつき×進入ゲート（研究）</h1>
         <p>実購入ではなく、各100円相当の仮想評価。購入推奨ではありません。v1・既存の仮想購入台帳とは別集計です。</p>
       </div>
     </div>
     <section className="panel">
       <div className="section-heading"><h2>研究統計</h2><span>{summary.total}R（{data.from}以降）</span></div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
         <label className="boat-venue-filter"><span>区分</span>
           <select value={mode} onChange={(event) => setMode(event.target.value as typeof mode)}>
             <option value="forward">前向き（発走前に凍結）</option><option value="reconstructed">過去再構成（事後計算）</option>
           </select>
         </label>
+        <label className="boat-venue-filter"><span>進入ゲート</span>
+          <select value={gateMode} onChange={(event) => setGateMode(event.target.value as typeof gateMode)}>
+            <option value="withCourseGate">展示123456のみ対象</option><option value="noGate">ゲートなし（対照）</option>
+          </select>
+        </label>
       </div>
       <p className="boat-muted">
-        {mode === "forward" ? "次回稼働以降に発走前へ凍結した特徴量・判定を、公式結果確定後に評価。" : "保存済み番組から後で計算した再構成。発走前凍結ではないため、前向き評価と混ぜません。"}
+        {mode === "forward" ? "次回稼働以降に発走前へ凍結した特徴量・判定を、公式結果確定後に評価。" : "保存済み番組・展示から後で計算した再構成。発走前凍結ではないため、前向き評価と混ぜません。"}
+        {gateMode === "withCourseGate" ? " 展示進入123456のみ対象（変更は見送り、欠損は保留）。本番進入変更は事後に通常収支から除外しません。" : " 進入順ゲートなしの対照集計。"}
         分母は「対象」。閾値間は同一レースを含む重複標本で独立ではありません。
-        {control.smallSample && "精算件数が少なく、結果は偶然に左右されます。"}
+        {control.actualChangedInApplied > 0 && ` 制限なし適用うち本番進入変化 ${control.actualChangedInApplied}件（除外せず集計）。`}
+        {control.smallSample && " 精算件数が少なく、結果は偶然に左右されます。"}
         {control.topPayoutShare !== null && control.topPayoutShare >= 0.5 && ` 制限なしでは最大払戻が総払戻の${percent(control.topPayoutShare)}を占めます。`}
         {reasons.length > 0 && ` 除外理由：${reasons.map(([k, v]) => `${k} ${v}件`).join("、")}。`}
       </p>
       <h3>標準偏差の上限別</h3>
-      <StatsRows rows={summary.byCap.map((c) => ({ label: CAP_LABEL[c.key], stats: c.stats }))} />
+      <StatsRows rows={group.byCap.map((c) => ({ label: CAP_LABEL[c.key], stats: c.stats }))} />
       <h3>分類別（小 σ≦0.5 ／ 普通 0.5＜σ＜1 ／ 大 σ≧1）</h3>
-      <StatsRows rows={summary.byClass.map((c) => ({ label: SIGMA_CLASS_LABEL[c.sigmaClass], stats: c.stats }))} />
+      <StatsRows rows={group.byClass.map((c) => ({ label: SIGMA_CLASS_LABEL[c.sigmaClass], stats: c.stats }))} />
       <details className="boat-details"><summary>日別内訳（制限なし）</summary>
         <ul className="boat-plain-list">{control.days.map((day) => <li key={day.date}>
           {day.date} ／ 適用 {day.applied}・精算 {day.settled}・的中 {day.hits} ／ 純損益 <span className={netClass(day.net)}>{signedMoney(day.net)}</span>
@@ -405,6 +449,12 @@ function ResearchView({ data }: { data: ResearchPage }) {
             <option value="large">大</option><option value="missing">未判定（欠損）</option>
           </select>
         </label>
+        <label className="boat-venue-filter"><span>進入ゲート</span>
+          <select value={gateFilter} onChange={(event) => { setGateFilter(event.target.value); setCount(24); }}>
+            <option value="all">すべて</option><option value="allowed">123456対象</option>
+            <option value="skip">進入変更見送り</option><option value="pending">欠損保留</option>
+          </select>
+        </label>
         <label className="boat-venue-filter"><span>並び順</span>
           <select value={order} onChange={(event) => setOrder(event.target.value)}>
             <option value="sigma">σ昇順</option><option value="time">締切順</option>
@@ -418,7 +468,11 @@ function ResearchView({ data }: { data: ResearchPage }) {
             <TurfLink to={`${BASE}/races/${race.id}`} className="boat-race-link"><strong>{race.venueName} {race.number}R</strong></TurfLink>
             <span className="boat-state" data-state="scheduled">{race.kind === "forward" ? "凍結済" : "再構成"}</span>
           </div>
-          <ResearchLine research={{ ...race.evaluation.features, sigmaClass: race.evaluation.sigmaClass, b11: "" }} />
+          <ResearchLine research={{
+            ...race.evaluation.features, sigmaClass: race.evaluation.sigmaClass,
+            b11: race.evaluation.b11.status === "bet" ? race.evaluation.b11.tickets : race.evaluation.b11.status,
+            courseGate: race.evaluation.courseGate, actualOrder: race.actualOrder, actualChanged: race.actualChanged,
+          }} />
         </div>
       </article>)}</div>
       {races.length > count && <button type="button" className="secondary" onClick={() => setCount((n) => n + 24)}>さらに表示（残り {races.length - count}R）</button>}

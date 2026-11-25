@@ -2,7 +2,7 @@ import {
   BOAT_STAKE, BoatDataMissing, freezeBoatRace, settleBoatRace, summarizeBoatRaces, type BoatRecord,
 } from "../../../packages/shared/src/boatrace";
 import {
-  freezeB11, reconstructB11, summarizeB11, type B11ResearchItem, type B11ResearchRecord,
+  freezeB11, reconstructB11, summarizeB11, evaluateCourseGate, type B11ResearchItem, type B11ResearchRecord,
 } from "../../../packages/shared/src/boatrace-b11";
 import {
   BoatOfficialSource, japanDate, officialUrl, parseExhibition, parseExhibitionTimes, parseOdds,
@@ -82,15 +82,17 @@ export class BoatCollector {
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_research_day ON boat_research(date)");
   }
 
-  /** 発走前の番組から事前特徴量・B11出力・各閾値判定を1回だけ凍結する。級別欠損の行のみ、締切前なら更新可。 */
+  /** 発走前の番組・展示から事前特徴量・B11出力・各閾値判定を凍結する。級別欠損または展示進入未凍結の行のみ、締切前なら更新可。 */
   private freezeResearch(race: BoatRecord, now: Date) {
     const record = freezeB11(race, now);
     if (!record) return;
     const prev = this.sql.exec<{ body: string }>("SELECT body FROM boat_research WHERE race_id = ?", race.id).toArray()[0];
     if (prev) {
       const old = JSON.parse(prev.body) as B11ResearchRecord;
-      const replaceable = old.evaluation.b11.status === "unjudged" && record.evaluation.b11.status !== "unjudged";
-      if (!replaceable) return;
+      const gradeUpgraded = old.evaluation.b11.status === "unjudged" && record.evaluation.b11.status !== "unjudged";
+      const gateUpgraded = (!old.evaluation.courseGate || old.evaluation.courseGate.status === "pending") &&
+        record.evaluation.courseGate?.status !== "pending" && record.evaluation.courseGate?.timing === "pre-cutoff";
+      if (!gradeUpgraded && !gateUpgraded) return;
       this.sql.exec("UPDATE boat_research SET frozen_at = ?, body = ? WHERE race_id = ?",
         record.frozenAt, JSON.stringify(record), race.id);
       return;
@@ -192,6 +194,7 @@ export class BoatCollector {
         this.sql.exec("INSERT INTO boat_auto_bets (race_id, hour, stake) VALUES (?, ?, ?)", race.id, cycle, BET_COST);
         this.save({ ...race, freeze }, 0, cycle + CYCLE);
       });
+      try { this.freezeResearch({ ...race, freeze }, now); } catch { /* 研究凍結の失敗で収集を止めない */ }
     } catch (err) {
       if (this.row(row.id)?.body !== row.body) return;
       this.save({ ...race, issue: message(err) }, Date.now() + 18_000, row.result_next);
@@ -338,11 +341,16 @@ export class BoatCollector {
         rebuilt.push({ ...base, record: reconstructB11(race) });
         const record = frozen.get(race.id);
         if (record) forward.push({ ...base, record });
-        if (race.date === date) day.push({
-          id: race.id, venueName: race.venueName, number: race.number, cutoff: base.cutoff,
-          evaluation: (record ?? reconstructB11(race)).evaluation, kind: record ? "forward" : "reconstructed",
-          resulted: Boolean(race.result),
-        });
+        if (race.date === date) {
+          const rebuiltItem = reconstructB11(race);
+          const actualGate = evaluateCourseGate(race, { includeResult: true });
+          day.push({
+            id: race.id, venueName: race.venueName, number: race.number, cutoff: base.cutoff,
+            evaluation: (record ?? rebuiltItem).evaluation, kind: record ? "forward" : "reconstructed",
+            actualOrder: actualGate.actualOrder, actualChanged: actualGate.actualChanged,
+            resulted: Boolean(race.result),
+          });
+        }
       }
       return json({ date, from, forward: summarizeB11(forward, "forward"),
         reconstructed: summarizeB11(rebuilt, "reconstructed"), races: day });
@@ -384,8 +392,11 @@ export class BoatCollector {
           : race.exhibition?.entries.filter((entry) => entry.flying === true).map((entry) => entry.boat);
         const research = reconstructB11(race).evaluation;
         return {
-          research: { sigma: research.features.sigma, mean: research.features.mean, sigmaClass: research.sigmaClass,
-            missingBoats: research.features.missingBoats, b11: research.b11.status === "bet" ? research.b11.tickets : research.b11.status },
+          research: {
+            sigma: research.features.sigma, mean: research.features.mean, sigmaClass: research.sigmaClass,
+            missingBoats: research.features.missingBoats, b11: research.b11.status === "bet" ? research.b11.tickets : research.b11.status,
+            courseGate: research.courseGate,
+          },
           id: race.id, venue: race.venue, venueName: race.venueName, number: race.number,
           cutoff: race.freeze?.cutoff ?? race.cutoff, issue: race.issue ?? null,
           state: race.result?.status === "void" ? "void" : race.freeze ?

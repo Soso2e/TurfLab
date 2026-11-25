@@ -24,4 +24,11 @@ v2の学習コード・予測器は未実装。下記B11研究（Issue #113）�
 - 凍結: Workerが番組取得時（締切前）に特徴量・B11出力・各閾値判定を別表 `boat_research` へ1回だけ保存（級別欠損の行のみ締切前に限り更新可）。実購入台帳・v1の購入経路とは独立。archive JSONの `research` に含まれTurfLab-dataへ追記のみで保存。
 - 評価: 公式結果確定後に仮想精算（返還・中止・同着・払戻未取得は区別、未確定は除外理由付き）。前向き(forward)と過去再構成(reconstructed)は混ぜない。閾値間は重複標本。UI: `/boatrace/research`、一覧のσ表示・フィルター・σ昇順。
 - 過去再構成CLI: `npx tsx scripts/boatrace-b11-research.ts <TurfLab-data> [--from --to --out]`（アーカイブは読取専用）。
+- 研究永続化パイプラインCLI（Issue #117）:
+  - 進入順ゲート: `freeze.entries.exhibitionCourse`（優先）または `exhibition.entries.course` から展示進入を復元し、`123456` のみ研究対象、変更は見送り、欠損/不正は保留。締切後取得は事前凍結と区別し、本番進入変更（`result.courses`）は事後フラグとして記録するが通常収支から除外しない。
+  - オフライン再現手順（ネットなし・Drive認証なし）:
+    1. `TurfLab` と `TurfLab-data` の対象コミットをチェックアウト（例: `git checkout <sha>`）。
+    2. 監査: `npm run boatrace:research -- audit <TurfLab-data> [--from YYYY-MM-DD --to YYYY-MM-DD]`
+    3. 派生データ生成・検証・永続化: `npm run boatrace:research -- run <TurfLab-data> [--from YYYY-MM-DD --to YYYY-MM-DD] [--data-sha <sha>] [--code-sha <sha>]`
+    4. 生成先: `<TurfLab-data>/boatrace-research/{normalized,features,forecasts,evaluations,manifests}/`。すべて content-addressed 追記専用で既存原本 `boatrace/` は一切変更しない。`manifests/*.json` の `deterministicHash` で環境非依存の一致を検証できる。
 - 昇格条件: 独立期間の前向き結果を確認するまで正式モデル・自動仮想購入へ接続しない。
