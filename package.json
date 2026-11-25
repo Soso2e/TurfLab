@@ -20,6 +20,7 @@
     "test:bridge": "node scripts/run-tool.mjs tsx scripts/bridge-smoke.ts",
     "test:hra": "node scripts/run-tool.mjs tsx scripts/horse-result-analysis-smoke.ts",
     "boatrace:verify": "node scripts/run-tool.mjs tsx scripts/boatrace-verify.ts",
+    "boatrace:research": "node scripts/run-tool.mjs tsx scripts/boatrace-research-cli.ts",
     "c2:status": "node scripts/run-tool.mjs tsx scripts/c2-status.ts",
     "predictions:local": "node scripts/run-tool.mjs tsx scripts/local-predictions.ts",
     "odds:import": "node scripts/run-tool.mjs tsx scripts/nar-odds-cli.ts import",
