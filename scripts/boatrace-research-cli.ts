@@ -17,6 +17,7 @@ import {
   type BoatResearchEvaluationReport,
 } from "../packages/shared/src/boatrace-research";
 import type { B11Stats, B11Summary } from "../packages/shared/src/boatrace-b11";
+import { summarizeGradeOrder } from "../packages/shared/src/boatrace-grade-order";
 
 export interface CliOptions {
   command: "audit" | "normalize" | "features" | "backtest" | "report" | "run";
@@ -93,6 +94,7 @@ export function runResearchPipeline(opts: CliOptions) {
     to: opts.to ?? (merged.races[merged.races.length - 1]?.date ?? null),
   };
   const report = buildEvaluationReport(merged, period);
+  const gradeOrder = summarizeGradeOrder(merged.races);
 
   const normalizedByDay = new Map<string, ReturnType<typeof normalizeBoatRace>[]>();
   const featuresByDay = new Map<string, ReturnType<typeof extractBoatFeatures>[]>();
@@ -136,12 +138,14 @@ export function runResearchPipeline(opts: CliOptions) {
     }
     const span = `${period.from ?? "none"}_${period.to ?? "none"}`;
     emit("evaluations", "evaluations", `b11-eval-${span}`, report);
+    emit("evaluations", "evaluations", `grade-order-${span}`, { period, ...gradeOrder });
   }
 
   const deterministicHash = sha256Hex(canonical({
     period,
     inputs: inputFiles.map((f) => ({ path: f.path, sha256: f.sha256 })),
     report,
+    gradeOrder,
     outputs: outputs.map((o) => ({ layer: o.layer, path: o.path, deterministicSha256: o.deterministicSha256 })),
   }));
 
@@ -180,7 +184,7 @@ export function runResearchPipeline(opts: CliOptions) {
     }
   }
 
-  return { report, manifest, outputs };
+  return { report, gradeOrder, manifest, outputs };
 }
 
 function pct(v: number | null) {
@@ -231,7 +235,7 @@ if (process.argv[1]?.endsWith("boatrace-research-cli.ts")) {
   const dataRoot = resolve(positional[0] ?? "../TurfLab-data");
   const outDir = resolve(opt("--out-dir") ?? join(dataRoot, "boatrace-research"));
   const write = args.includes("--write") || ["normalize", "features", "backtest", "run"].includes(cmd);
-  const { report, manifest, outputs } = runResearchPipeline({
+  const { report, gradeOrder, manifest, outputs } = runResearchPipeline({
     command: cmd,
     dataRoot,
     outDir,
@@ -245,6 +249,8 @@ if (process.argv[1]?.endsWith("boatrace-research-cli.ts")) {
 
   for (const line of formatReportText(report)) console.log(line);
   if (cmd === "report" || cmd === "backtest" || cmd === "run") {
+    const g = gradeOrder.overall;
+    console.log(`\n[級別順守率] 対象 ${g.eligible}/${g.total}R | 上位3着 ${pct(g.top3.rate)} (${g.top3.concordant}/${g.top3.comparable}組) | 全6着 ${pct(g.full6.rate)} (${g.full6.concordant}/${g.full6.comparable}組, ${g.full6.races}R) | 1号艇敗北時 ${pct(gradeOrder.boat1Lost.top3.rate)}`);
     printSummaryRows("reconstructed", report.reconstructed, false);
     printSummaryRows("reconstructed", report.reconstructed, true);
     if (report.forward.total > 0) {
