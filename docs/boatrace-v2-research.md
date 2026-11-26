@@ -32,3 +32,12 @@ v2の学習コード・予測器は未実装。下記B11研究（Issue #113）�
     3. 派生データ生成・検証・永続化: `npm run boatrace:research -- run <TurfLab-data> [--from YYYY-MM-DD --to YYYY-MM-DD] [--data-sha <sha>] [--code-sha <sha>]`
     4. 生成先: `<TurfLab-data>/boatrace-research/{normalized,features,forecasts,evaluations,manifests}/`。すべて content-addressed 追記専用で既存原本 `boatrace/` は一切変更しない。`manifests/*.json` の `deterministicHash` で環境非依存の一致を検証できる。
 - 昇格条件: 独立期間の前向き結果を確認するまで正式モデル・自動仮想購入へ接続しない。
+
+## B13 — 艇番 Plackett–Luce（Issue #125、shadow only）
+
+- 実装: `packages/shared/src/boatrace-b13.ts`、テスト: `tests/boatrace-b13.test.ts`。version: `b13-lane-pl-shadow-v1`。
+- 入力は艇番と公式上位3着のみ。6艇の潜在強度を上位3着の逐次尤度で学習（350反復、学習率0.2、L2=0.02、初期値0）。指数変換して120順列の確率を算出。級別・展示・オッズはB13の特徴量にしない。
+- JST日付単位の expanding window。評価日より前の日付で、番組表が締切前に取得され、公式結果が評価日午前0時より前に取得済みで、上位3着が一意の観測だけを学習。後日訂正された結果が当時の版に復元できない場合は学習から除外する。評価日当日の成績は学習に入れない。
+- 上位2組の仮想評価と固定B01(123/132)、B02(123/124)、B11（級別のみ・進入ゲートなし）の比較を同じB13適格母集団で実施。B11固有の見送りで適用分母は異なるので必ず表示する。未確定・払戻欠損・返還・不成立は区別。全日・日別の対象、適用、見送り、精算、払戻、返還、仮想損益、回収率、B13順位分布log lossを出力。
+- 既存CLI: `npm run boatrace:research -- report ../TurfLab-data` で表示、`npm run boatrace:research -- run ../TurfLab-data --data-sha <sha> --code-sha <sha>` で既存manifestと `evaluations/b13-*.json` を追記保存。入力アーカイブを上書きしない。最初の利用可能日には先行学習がないため未適用。期間指定時は指定期間の最初の日より前の学習データも含むようfromを設定すること。
+- 全アーカイブ統合と結果取得時刻チェックは、以前の各日最大アーカイブを用いたチャット検証より厳格であり、結果が一致するとは限らない。現時点では固定B01に対する優位性は未証明。前向きの凍結予測ではなく再構成研究であり、既存自動購入、実購入、UIは変更しない。
