@@ -220,12 +220,12 @@ export class BoatCollector {
       }
       const result = parseResult(resultPage.value);
       if (!result) throw new BoatDataMissing("公式3連単払戻・返還情報の確定待ち");
-      const { status, payouts, special, refundBoats, courses, finishes } = result;
-      const current = JSON.stringify({ status, payouts, special, refundBoats, courses, finishes });
+      const { status, payouts, special, refundBoats, courses, finishes, popularity } = result;
+      const current = JSON.stringify({ status, payouts, special, refundBoats, courses, finishes, popularity });
       const previous = race.result;
       const changed = !previous || JSON.stringify({
         status: previous.status, payouts: previous.payouts, special: previous.special, refundBoats: previous.refundBoats,
-        courses: previous.courses, finishes: previous.finishes,
+        courses: previous.courses, finishes: previous.finishes, popularity: previous.popularity,
       }) !== current;
       if (changed) race.result = result;
       delete race.issue;
