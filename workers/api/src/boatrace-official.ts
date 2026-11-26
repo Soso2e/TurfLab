@@ -161,6 +161,8 @@ export function parseResult(page: Page): BoatResult | null {
   const notes = text(exactHeading("備考").closest("table").find("tbody").text());
   if (!refundBoats.length && /返還艇あり/.test(notes)) return null;
   const payouts: Record<string, number> = {};
+  const popularity: Record<string, number> = {};
+  const hasPopularity = resultTable.find("thead th").toArray().some(node => text($(node).text()) === "人気");
   let special: number | undefined;
   const rows = triple.find("tr").toArray();
   for (const [index, row] of rows.entries()) {
@@ -182,6 +184,12 @@ export function parseResult(page: Page): BoatResult | null {
     if (!/^[1-6]-[1-6]-[1-6]$/.test(combination) || new Set(combination.split("-")).size !== 3 ||
       Object.hasOwn(payouts, combination) || combination.split("-").some((boat) => refundBoats.includes(Number(boat)))) return null;
     payouts[combination] = amount;
+    if (hasPopularity) {
+      const payoutCell = cells.filter((_, cell) => $(cell).find(".is-payout1").length > 0).first();
+      const rankText = text(payoutCell.next("td").text()).normalize("NFKC");
+      const rank = /^\d{1,3}$/.test(rankText) ? Number(rankText) : NaN;
+      if (Number.isInteger(rank) && rank >= 1 && rank <= 120) popularity[combination] = rank;
+    }
   }
   const top = finishes.filter((item) => /^[123]$/.test(item.position));
   const expected = top.flatMap((a) => top.flatMap((b) => top.flatMap((c) => {
@@ -197,7 +205,7 @@ export function parseResult(page: Page): BoatResult | null {
     return { ...base, status: "official", payouts, special: { per100: special, winning: expected }, refundBoats, finishes };
   if (!expected.length || expected.length !== Object.keys(payouts).length ||
     expected.some((key) => !Object.hasOwn(payouts, key))) return null;
-  return { ...base, status: "official", payouts, refundBoats, finishes };
+  return { ...base, status: "official", payouts, refundBoats, finishes, ...(Object.keys(popularity).length ? { popularity } : {}) };
 }
 
 export class BoatOfficialSource {

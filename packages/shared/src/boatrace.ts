@@ -83,6 +83,8 @@ export interface BoatResult {
   evidence: Evidence;
   status: "official" | "void";
   payouts: Record<string, number>;
+  /** Official result popularity by winning trifecta combination; absent for legacy/missing data. */
+  popularity?: Record<string, number>;
   special?: { per100: number; winning: string[] };
   refundBoats: number[];
   courses: Exhibition[];
