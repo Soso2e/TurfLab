@@ -238,6 +238,8 @@ describe("オフライン再現パイプライン (GitHub-only reproducibility)"
         actualChangedWhenEx123456Count: 1,
       });
       expect(first.outputs.every((o) => o.status === "written")).toBe(true);
+      expect(first.b13.totalRaces).toBe(2);
+      expect(first.outputs.some(o => o.layer === "evaluations" && o.path.startsWith("evaluations/b13-"))).toBe(true);
 
       // 時刻と環境を変えて再実行しても deterministicHash が完全一致し、出力はすべて skipped（冪等）
       const second = runResearchPipeline({
