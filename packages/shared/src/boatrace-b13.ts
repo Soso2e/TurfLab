@@ -79,7 +79,7 @@ function record(s: Stats, tickets: string[] | null, race: BoatRecord) {
   s.stake += outcome.stake;
   s.payout += outcome.payout;
   s.refund += outcome.refund;
-  s.hits += Number(tickets.some(t => !t.split("-").some(b => race.result!.refundBoats.includes(Number(b))) && (race.result!.payouts[t] ?? 0) > 0));
+  s.hits += Number(race.result!.status === "official" && tickets.some(t => !t.split("-").some(b => race.result!.refundBoats.includes(Number(b))) && (race.result!.payouts[t] ?? 0) > 0));
 }
 const ids: ModelId[] = ["B13", "B01", "B02", "B11"];
 const modelStats = () => Object.fromEntries(ids.map(id => [id, stats()])) as Record<ModelId, Stats>;
