@@ -87,6 +87,16 @@ describe("競艇の凍結・比較・精算", () => {
     expect(() => freezeBoatRace(ghost, capture(), freezeTime)).toThrow("6号艇");
   });
 
+  it("公式三連単人気を組番ごとに取得し、欠損・範囲外は補完しない", () => {
+    const html = payouts(["1-2-4/800", "1-2-5/900"], [[1, 1], [2, 2], [4, 3], [5, 3]])
+      .replace("<th>勝式</th>", "<th>勝式</th><th>組番</th><th>払戻金</th><th>人気</th>")
+      .replace("800</span></td>", "800</span></td><td>３</td>")
+      .replace("900</span></td>", "900</span></td><td>121</td>");
+    const result = parseResult({ html, evidence: evidence(resultUrl) });
+    expect(result?.popularity).toEqual({ "1-2-4": 3 });
+    expect(result?.payouts).toEqual({ "1-2-4": 800, "1-2-5": 900 });
+  });
+
   it("公式同着の組番がそろった時だけ精算し、購入組番の返還を別計上する", () => {
     const result = (rows: string[], ranks: [number, number][], refund?: number[]) =>
       parseResult({ html: payouts(rows, ranks, refund), evidence: evidence(resultUrl) });
