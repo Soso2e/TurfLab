@@ -104,6 +104,7 @@ try {
   let nextCheckpoint = 0;
   let nextBoatExport = 0;
   let boatExport: Row | null = null;
+  const boatHistoricalRevisions = new Map<string, string>();
   let nextResearchSync = 0;
   const exchange = path.join(home, "local-predictions", "exchange");
   do {
@@ -168,7 +169,7 @@ try {
         nextBoatExport = Date.now() + (config.interval_seconds ?? 300) * 1000;
         try {
           await gh.verify();
-          boatExport = await exportBoatArchives({ ...gh, api, now: () => new Date() });
+          boatExport = await exportBoatArchives({ ...gh, api, now: () => new Date() }, boatHistoricalRevisions);
         } catch {
           boatExport = { status: "failed", at: new Date().toISOString(), reason: "競艇アーカイブ同期失敗" };
         }
