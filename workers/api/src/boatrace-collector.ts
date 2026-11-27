@@ -1,5 +1,5 @@
 import {
-  BOAT_STAKE, BoatDataMissing, freezeBoatRace, settleBoatRace, summarizeBoatRaces, type BoatRecord,
+  BOAT_STAKE, BoatDataMissing, freezeBoatRace, settleBoatRace, summarizeBoatRaces, type BoatExhibition, type BoatRecord,
 } from "../../../packages/shared/src/boatrace";
 import {
   freezeB11, reconstructB11, summarizeB11, evaluateCourseGate, type B11ResearchItem, type B11ResearchRecord,
@@ -15,12 +15,12 @@ import {
   BoatOfficialSource, japanDate, officialUrl, parseExhibition, parseExhibitionTimes, parseOdds,
   parseProgram, parseResult, parseVenues,
 } from "./boatrace-official";
+import { BoatOfficialCollection, exhibitionSize, OFFICIAL_BATCH } from "./boatrace-official-collection";
 
 const MINUTE = 60_000;
 const CYCLE = 30 * MINUTE;
 const DAY = 1440 * MINUTE;
 const FIRST_CAPTURE = 145_000;
-const PRE_EXHIBITION_LEAD = 6 * MINUTE;
 const RESULT_DELAY = 15 * MINUTE;
 const INITIAL_BANKROLL = 100_000;
 const BET_COST = 2 * BOAT_STAKE;
@@ -84,14 +84,18 @@ type Row = {
   cutoff: number;
   capture_next: number;
   result_next: number;
-  exhibition_next?: number;
 };
 
 export class BoatCollector {
   constructor(
     private readonly state: DurableObjectState,
     private readonly source: Pick<BoatOfficialSource, "page"> = new BoatOfficialSource(),
-  ) {}
+  ) {
+    this.collection = new BoatOfficialCollection(state.storage.sql, source);
+  }
+
+  private readonly collection: BoatOfficialCollection;
+  private historicalSeedDate?: string;
 
   private get sql() {
     return this.state.storage.sql;
@@ -105,17 +109,12 @@ export class BoatCollector {
   private initialize() {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_races (
       id TEXT PRIMARY KEY, date TEXT NOT NULL, body TEXT NOT NULL, cutoff INTEGER NOT NULL,
-      capture_next INTEGER NOT NULL, result_next INTEGER NOT NULL, exhibition_next INTEGER NOT NULL DEFAULT 0
+      capture_next INTEGER NOT NULL, result_next INTEGER NOT NULL
     )`);
-    try {
-      this.sql.exec("SELECT exhibition_next FROM boat_races LIMIT 0");
-    } catch {
-      this.sql.exec("ALTER TABLE boat_races ADD COLUMN exhibition_next INTEGER NOT NULL DEFAULT 0");
-    }
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_day ON boat_races(date, cutoff, id)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_capture ON boat_races(capture_next, cutoff)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_result ON boat_races(result_next)");
-    this.sql.exec("CREATE INDEX IF NOT EXISTS boat_exhibition ON boat_races(exhibition_next, cutoff)");
+    this.collection.initialize();
     this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_result_revisions (
       id TEXT NOT NULL, fetched_at TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (id, fetched_at)
     )`);
@@ -287,23 +286,21 @@ export class BoatCollector {
     return this.sql.exec<Row>("SELECT * FROM boat_races WHERE id = ?", id).toArray()[0];
   }
 
-  private save(race: BoatRecord, captureNext: number, resultNext: number, exhibitionNext?: number) {
+  private save(race: BoatRecord, captureNext: number, resultNext: number) {
     const time = race.freeze?.cutoff ?? race.cutoff;
     const cutoff = time ? Date.parse(time) : 0;
-    const prevExNext = this.row(race.id)?.exhibition_next ?? 0;
-    const nextEx = exhibitionNext !== undefined ? exhibitionNext : prevExNext;
-    this.sql.exec(`INSERT INTO boat_races (id, date, body, cutoff, capture_next, result_next, exhibition_next)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+    this.sql.exec(`INSERT INTO boat_races (id, date, body, cutoff, capture_next, result_next)
+      VALUES (?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET body = excluded.body, cutoff = excluded.cutoff,
-        capture_next = excluded.capture_next, result_next = excluded.result_next,
-        exhibition_next = excluded.exhibition_next`,
-    race.id, race.date, JSON.stringify(race), cutoff, captureNext, resultNext, nextEx);
+        capture_next = excluded.capture_next, result_next = excluded.result_next`,
+    race.id, race.date, JSON.stringify(race), cutoff, captureNext, resultNext);
   }
 
   private async program(now: number, sync: ProgramSync) {
     if (!sync.pending.length) {
       const page = await this.source.page(officialUrl("index", sync.date));
       sync.pending = parseVenues(page);
+      await this.state.storage.put("boat-official-venues-" + sync.date, sync.pending.map(({ code }) => code));
       sync.errors = [];
     }
     const venues = sync.pending.splice(0, 6);
@@ -313,8 +310,9 @@ export class BoatCollector {
         for (const race of parseProgram(page, name)) {
           const prev = this.row(race.id);
           const existing = prev ? JSON.parse(prev.body) as BoatRecord : null;
-          try { this.freezeResearch(race, new Date(now)); } catch { /* 研究凍結の失敗で収集を止めない */ }
-          try { this.freezeShadowPredictions(race, new Date(now)); } catch { /* 予測凍結の失敗で収集を止めない */ }
+          const observedAt = new Date();
+          try { this.freezeResearch(race, observedAt); } catch { /* 研究凍結の失敗で収集を止めない */ }
+          try { this.freezeShadowPredictions(race, observedAt); } catch { /* 予測凍結の失敗で収集を止めない */ }
           if (existing?.freeze || existing?.result) continue;
           const cutoff = race.cutoff ? Date.parse(race.cutoff) : 0;
           const issue = cutoff ? (cutoff === prev?.cutoff ? existing?.issue : undefined) : "公式の締切予定時刻が未取得";
@@ -322,10 +320,13 @@ export class BoatCollector {
           const resultNext = existing?.result ? 0
             : cutoff === prev?.cutoff && prev.result_next > 0 ? prev.result_next
             : cutoff ? cutoff + RESULT_DELAY : 0;
-          const exNext = existing?.exhibition?.entries?.length ? 0
-            : cutoff === prev?.cutoff && (prev?.exhibition_next ?? 0) > 0 ? (prev?.exhibition_next ?? 0)
-            : cutoff ? cutoff - PRE_EXHIBITION_LEAD : 0;
-          this.save({ ...race, issue }, captureNext, resultNext, exNext);
+          const unchanged = prev?.cutoff === cutoff && JSON.stringify(existing?.entries) === JSON.stringify(race.entries);
+          this.save({
+            ...existing, ...race,
+            program: unchanged && existing ? existing.program : race.program,
+            issue,
+          }, captureNext, resultNext);
+          if (prev && prev.cutoff !== cutoff) this.collection.scheduleChanged(race.id, cutoff, Date.now());
         }
         return null;
       } catch (err) {
@@ -362,7 +363,7 @@ export class BoatCollector {
         if (Date.now() >= Date.parse(freeze.cutoff) || this.boughtIn(cycle) ||
           this.bankroll().balance < BET_COST || this.row(row.id)?.body !== row.body) return;
         this.sql.exec("INSERT INTO boat_auto_bets (race_id, hour, stake) VALUES (?, ?, ?)", race.id, cycle, BET_COST);
-        this.save({ ...race, freeze }, 0, cycle + CYCLE, 0);
+        this.save({ ...race, freeze }, 0, cycle + CYCLE);
       });
       try { this.freezeResearch({ ...race, freeze }, now); } catch { /* 研究凍結の失敗で収集を止めない */ }
       try { this.freezeShadowPredictions({ ...race, freeze }, now); } catch { /* 予測凍結の失敗で収集を止めない */ }
@@ -372,40 +373,17 @@ export class BoatCollector {
     }
   }
 
-  /** 締切前展示の取得率95%以上を目指し、v1購入枠とは独立して全レースの直前情報(beforeinfo)を事前取得・凍結する。 */
-  private async captureExhibition(row: Row) {
+  private saveExhibition = (id: string, cutoff: number, exhibition: BoatExhibition) => {
+    const row = this.row(id);
+    if (!row) return;
     const race = JSON.parse(row.body) as BoatRecord;
-    if (race.freeze || race.exhibition?.entries?.length) {
-      this.save(race, row.capture_next, row.result_next, 0);
-      return;
-    }
-    const now = Date.now();
-    if (row.cutoff > 0 && now >= row.cutoff) {
-      this.save(race, row.capture_next, row.result_next, 0);
-      return;
-    }
-    try {
-      const page = await this.source.page(officialUrl("beforeinfo", race.date, race.venue, race.number));
-      const entries = parseExhibition(page);
-      const times = parseExhibitionTimes(page);
-      const hasAllTimes = Object.keys(times).length === 6;
-      if (entries.length === 6 && hasAllTimes) {
-        race.exhibition = { evidence: page.evidence, entries, times };
-        const fresh = this.row(row.id);
-        if (!fresh || fresh.body !== row.body) return;
-        this.save(race, fresh.capture_next, fresh.result_next, 0);
-        try { this.freezeResearch(race, new Date(now)); } catch { /* ignore */ }
-        try { this.freezeShadowPredictions(race, new Date(now)); } catch { /* ignore */ }
-        return;
-      }
-    } catch { /* 一時エラー時は締切前リトライ */ }
-    const retryDelay = row.cutoff > 0 && now < row.cutoff - 90_000 ? 90_000 : 30_000;
-    const nextTry = row.cutoff > 0 && now + retryDelay < row.cutoff ? now + retryDelay : 0;
-    const fresh = this.row(row.id);
-    if (fresh && fresh.body === row.body) {
-      this.save(race, fresh.capture_next, fresh.result_next, nextTry);
-    }
-  }
+    const previous = race.exhibition;
+    if (previous?.evidence && Date.parse(previous.evidence.fetchedAt) < cutoff && exhibitionSize(previous) === 6) return;
+    const now = new Date();
+    this.save({ ...race, exhibition }, row.capture_next, row.result_next);
+    try { this.freezeResearch({ ...race, exhibition }, now); } catch { /* Existing research is optional. */ }
+    try { this.freezeShadowPredictions({ ...race, exhibition }, now); } catch { /* Existing shadow is optional. */ }
+  };
 
   private async result(row: Row) {
     const race = JSON.parse(row.body) as BoatRecord;
@@ -465,25 +443,17 @@ export class BoatCollector {
     const now = Date.now();
     const cycle = cycleStart(now);
     // Set a fallback first so transient failures cannot permanently stop collection.
-    await this.state.storage.setAlarm(now + MINUTE);
+    await this.state.storage.setAlarm(now + 2 * MINUTE);
     let sync = await this.state.storage.get<ProgramSync>("boat-program");
     if (sync?.date !== japanDate(now)) sync = { date: japanDate(now), pending: [], next: now, errors: [] };
     sync.next = Math.min(sync.next, cycle + CYCLE);
     let issue: string | null = null;
     try {
-      const results = this.sql.exec<Row>(`SELECT * FROM boat_races WHERE result_next > 0
-        AND result_next <= ?
-        ORDER BY (json_type(body, '$.freeze') IS NOT NULL) DESC, result_next, id LIMIT 6`, now).toArray();
-      await Promise.all(results.map((row) => this.result(row)));
-      if (sync.next <= now) await this.program(now, sync);
-      if (status.shadowExhibition) {
-        const exDue = this.sql.exec<Row>(
-          `SELECT * FROM boat_races WHERE exhibition_next > 0 AND exhibition_next <= ? AND cutoff > ?
-           ORDER BY cutoff, id LIMIT 6`,
-          now,
-          now,
-        ).toArray();
-        await Promise.all(exDue.map((row) => this.captureExhibition(row)));
+      this.collection.seed(sync.date, now);
+      await this.collection.collect(now, true, this.saveExhibition);
+      if (sync.next <= now) {
+        await this.program(now, sync);
+        this.collection.seed(sync.date, Date.now());
       }
       if (!this.boughtIn(cycle) && this.bankroll().balance >= BET_COST) {
         const at = Date.now();
@@ -492,6 +462,25 @@ export class BoatCollector {
         at, at, cycle + CYCLE).toArray()[0];
         if (capture && (await this.status()).enabled) await this.freeze(capture, cycle);
       }
+      if (this.collection.hasUrgentExhibition(Date.now())) {
+        await this.collection.collect(Date.now(), true, this.saveExhibition);
+      }
+      // Recheck after slow official requests. Defer retrospective network work
+      // when a live batch still needs this deadline window.
+      const urgent = this.collection.hasUrgentExhibition(Date.now());
+      const results = this.sql.exec<Row>(`SELECT * FROM boat_races WHERE result_next > 0
+        AND result_next <= ?
+        ORDER BY (json_type(body, '$.freeze') IS NOT NULL) DESC, result_next, id LIMIT ?`,
+      Date.now(), OFFICIAL_BATCH / 2).toArray();
+      if (!urgent) await Promise.all(results.map((row) => this.result(row)));
+      if (this.historicalSeedDate !== sync.date) {
+        const previousDates = this.sql.exec<{ date: string }>(
+          "SELECT DISTINCT date FROM boat_races WHERE date < ? ORDER BY date DESC", sync.date,
+        ).toArray();
+        for (const { date } of previousDates) this.collection.seed(date, now);
+        this.historicalSeedDate = sync.date;
+      }
+      if (!urgent) await this.collection.collect(Date.now(), false, this.saveExhibition);
       issue = sync.errors.length ? sync.errors.join(" / ") : null;
     } catch (err) {
       issue = message(err);
@@ -500,12 +489,6 @@ export class BoatCollector {
     const at = Date.now();
     const activeCycle = cycleStart(at);
     const earliestCutoff = this.boughtIn(activeCycle) ? activeCycle + CYCLE : at + 1;
-    const exWake = status.shadowExhibition
-      ? this.sql.exec<{ due: number | null }>(
-          "SELECT MIN(exhibition_next) AS due FROM boat_races WHERE exhibition_next > 0 AND cutoff > ?",
-          at,
-        ).one().due
-      : null;
     const wake = this.sql.exec<{ due: number | null }>(`
       SELECT MIN(due) AS due FROM (
         SELECT MIN(MAX(capture_next, cutoff - cutoff % ?)) AS due
@@ -513,14 +496,14 @@ export class BoatCollector {
         UNION ALL SELECT MIN(result_next) FROM boat_races
           WHERE result_next > 0
       )`, CYCLE, earliestCutoff, this.bankroll().balance >= BET_COST ? 1 : 0).one().due;
-    const nextWake = Math.min(wake ?? Infinity, exWake ?? Infinity);
+    const nextWake = Math.min(wake ?? Infinity, this.collection.next() ?? Infinity);
     if (!(await this.status()).enabled) return;
     await this.state.storage.put({
-      "boat-status": { enabled: true, shadowExhibition: Boolean(status.shadowExhibition), lastRun: new Date().toISOString(), issue },
+      "boat-status": { enabled: true, shadowExhibition: true, lastRun: new Date().toISOString(), issue },
       "boat-program": sync,
     });
     const midnight = Date.parse(`${japanDate()}T00:00:00+09:00`) + DAY;
-    await this.state.storage.setAlarm(Math.max(Date.now() + 5000, Math.min(nextWake, sync.next, midnight)));
+    await this.state.storage.setAlarm(Math.max(Date.now() + 2000, Math.min(nextWake, sync.next, midnight)));
   }
 
   async route(request: Request) {
@@ -530,18 +513,34 @@ export class BoatCollector {
     if (path === "collect" && ["POST", "DELETE"].includes(request.method)) {
       const status = await this.status();
       const enabled = request.method === "POST";
-      const shadowParam = url.searchParams.get("shadow");
-      const shadowExhibition = shadowParam !== null ? shadowParam !== "0" : status.shadowExhibition;
-      await this.state.storage.put("boat-status", { ...status, enabled, shadowExhibition });
+      await this.state.storage.put("boat-status", { ...status, enabled, shadowExhibition: true });
       if (enabled) {
         const sync = await this.state.storage.get<ProgramSync>("boat-program");
         if (sync && !status.enabled) await this.state.storage.put("boat-program", { ...sync, next: Date.now() });
         await this.state.storage.setAlarm(Date.now() + 1000);
       } else await this.state.storage.deleteAlarm();
-      return json({ enabled, shadowExhibition: Boolean(shadowExhibition) });
+      return json({ enabled, shadowExhibition: true });
+    }
+    if (path === "collection/backfill" && request.method === "POST") {
+      const date = url.searchParams.get("date") ?? "";
+      const now = Date.now();
+      if (!DATE_PATTERN.test(date) || !Number.isFinite(Date.parse(date)) || date >= japanDate(now))
+        return json({ error: "Specify a past race date" }, 400);
+      if (!(await this.status()).enabled) return json({ error: "Enable collection first" }, 409);
+      const races = this.collection.seed(date, now, true);
+      if (!races) return json({ error: "No program rows for that date" }, 404);
+      await this.state.storage.setAlarm(now + 1000);
+      return json({ date, races });
     }
     if (request.method !== "GET") return json({ error: "許可されていないメソッドです" }, 405);
-    if (path === "status") return json({ ...await this.status(), bankroll: this.bankroll() });
+    if (path === "status") return json({ ...await this.status(), shadowExhibition: true, bankroll: this.bankroll() });
+    if (path === "collection/dates") return json({ dates: this.collection.dates() });
+    if (path === "collection") {
+      const date = url.searchParams.get("date") ?? japanDate();
+      if (!DATE_PATTERN.test(date)) return json({ error: "Invalid race date" }, 400);
+      const venues = await this.state.storage.get<string[]>("boat-official-venues-" + date);
+      return json({ date, ...this.collection.coverage(date, Date.now(), venues) });
+    }
     if (path === "shadow") {
       const from = url.searchParams.get("from") ?? japanDate(Date.now() - 90 * DAY);
       if (!DATE_PATTERN.test(from)) return json({ error: "開始日が不正です" }, 400);
@@ -623,9 +622,11 @@ export class BoatCollector {
           "SELECT body FROM boat_research WHERE date = ? ORDER BY race_id", date);
         const shadowPredictions = this.sql.exec<{ body: string }>(
           "SELECT body FROM boat_shadow_predictions WHERE date = ? ORDER BY race_id", date);
+        const officialObservations = this.collection.observations(date);
         return json({ version: "boatrace-archive-v1", date, records, autoBets,
           research: Array.from(research, (r) => JSON.parse(r.body)),
           shadowPredictions: Array.from(shadowPredictions, (r) => JSON.parse(r.body)),
+          ...(officialObservations.length ? { officialObservations } : {}),
           revisions: Array.from(revisions, (r) => ({ raceId: r.id, result: JSON.parse(r.body) })) });
       }
       const now = Date.now();

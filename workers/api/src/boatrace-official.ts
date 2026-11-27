@@ -5,8 +5,30 @@ import {
 } from "../../../packages/shared/src/boatrace";
 
 const ROOT = "https://www.boatrace.jp/owpc/pc/race/";
-type PageName = "index" | "raceindex" | "odds2tf" | "odds3t" | "beforeinfo" | "raceresult";
+type PageName = "index" | "raceindex" | "racelist" | "odds2tf" | "odds3t" | "beforeinfo" | "raceresult";
 type Page = { html: string; evidence: Evidence };
+
+export interface RacelistEntry {
+  boat: number;
+  racerId: string | null;
+  name: string;
+  grade: Grade | null;
+  flyingCount: number | null;
+  lateCount: number | null;
+  avgSt: number | null;
+  nationalWinRate: number | null;
+  national2Rate: number | null;
+  national3Rate: number | null;
+  localWinRate: number | null;
+  local2Rate: number | null;
+  local3Rate: number | null;
+  motorNo: number | null;
+  motor2Rate: number | null;
+  motor3Rate: number | null;
+  boatNo: number | null;
+  boat2Rate: number | null;
+  boat3Rate: number | null;
+}
 
 export function officialUrl(page: PageName, date: string, venue?: string, race?: number) {
   const query = new URLSearchParams({ hd: date.replaceAll("-", "") });
@@ -74,9 +96,7 @@ export function parseProgram(page: Page, venueName: string): BoatRace[] {
 export function parseOdds(page: Page, kind: "exacta" | "trifecta"): BoatOdds {
   const $ = load(page.html);
   const date = dateOf(page);
-  const race = Number(pageUrl(page).searchParams.get("rno"));
-  const header = $("td").filter((_, el) => text($(el).text()) === "締切予定時刻").first();
-  const cutoff = clock(date, text(header.nextAll("td").eq(race - 1).text()));
+  const cutoff = pageCutoff($, page);
   const update = text($(".tab4_refreshText").text());
   const updatedAt = /オッズ更新時間/.test(update) ? clock(date, update) : null;
   const phase = /締切時オッズ/.test(text($(".tab4_time").text()))
@@ -134,6 +154,78 @@ export function parseExhibitionTimes(page: Page): Partial<Record<number, number>
     if (isBoat(boat) && /^\d+\.\d{2}$/.test(raw) && Number(raw) > 0) times[boat] = Number(raw);
   });
   return times;
+}
+
+const numOrNull = (raw: string): number | null => {
+  const cleaned = raw.trim();
+  if (!cleaned || /^[-―]+$/.test(cleaned)) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+};
+
+export function parseRacelist(page: Page): RacelistEntry[] {
+  const $ = load(page.html);
+  const entries: RacelistEntry[] = [];
+  $(".table1 table tbody").each((_, body) => {
+    const cells = $(body).find("tr").first().children("td");
+    if (cells.length < 8) return;
+    const boat = Number(text(cells.eq(0).text()));
+    if (!isBoat(boat) || entries.some((entry) => entry.boat === boat)) return;
+    const profileCell = cells.eq(2);
+    const profileText = text(profileCell.text());
+    const idGrade = profileText.match(/^(\d{4})\s*\/\s*(A1|A2|B1|B2)\b/);
+    const name = text(profileCell.find("a").first().text()) || profileText;
+    const grade = (idGrade?.[2] ?? text(profileCell.find(".is-fs12").last().text())) as Grade;
+    const stTokens = text(cells.eq(3).text()).split(" ").filter(Boolean);
+    const fMatch = stTokens.find((t) => /^F\d+$/.test(t));
+    const lMatch = stTokens.find((t) => /^L\d+$/.test(t));
+    const stVal = stTokens.find((t) => /^(?:0)?\.\d+$/.test(t));
+    const values = (column: number) => {
+      // BR tags, including adjacent tags, separate three positional values.
+      const content = cells.eq(column).clone();
+      content.find("br").replaceWith("|");
+      const raw = text(content.text());
+      return raw.includes("|") ? raw.split("|").map((part) => part.trim()) : raw.split(" ");
+    };
+    const nat = values(4);
+    const loc = values(5);
+    const mot = values(6);
+    const boa = values(7);
+    entries.push({
+      boat,
+      racerId: idGrade?.[1] ?? null,
+      name,
+      grade: GRADES.includes(grade) ? grade : null,
+      flyingCount: fMatch ? Number(fMatch.slice(1)) : null,
+      lateCount: lMatch ? Number(lMatch.slice(1)) : null,
+      avgSt: stVal ? numOrNull(stVal) : null,
+      nationalWinRate: nat[0] ? numOrNull(nat[0]) : null,
+      national2Rate: nat[1] ? numOrNull(nat[1]) : null,
+      national3Rate: nat[2] ? numOrNull(nat[2]) : null,
+      localWinRate: loc[0] ? numOrNull(loc[0]) : null,
+      local2Rate: loc[1] ? numOrNull(loc[1]) : null,
+      local3Rate: loc[2] ? numOrNull(loc[2]) : null,
+      motorNo: mot[0] && /^\d+$/.test(mot[0]) ? Number(mot[0]) : null,
+      motor2Rate: mot[1] ? numOrNull(mot[1]) : null,
+      motor3Rate: mot[2] ? numOrNull(mot[2]) : null,
+      boatNo: boa[0] && /^\d+$/.test(boa[0]) ? Number(boa[0]) : null,
+      boat2Rate: boa[1] ? numOrNull(boa[1]) : null,
+      boat3Rate: boa[2] ? numOrNull(boa[2]) : null,
+    });
+  });
+  return entries.sort((a, b) => a.boat - b.boat);
+}
+
+/** Race pages publish the venue-wide deadline row above the active tab. */
+export function parsePageCutoff(page: Page) {
+  return pageCutoff(load(page.html), page);
+}
+
+function pageCutoff($: ReturnType<typeof load>, page: Page) {
+  const race = Number(pageUrl(page).searchParams.get("rno"));
+  if (race < 1 || race > 12) return null;
+  const header = $("td").filter((_, el) => text($(el).text()) === "締切予定時刻").first();
+  return clock(dateOf(page), text(header.nextAll("td").eq(race - 1).text()));
 }
 
 export function parseResult(page: Page): BoatResult | null {
