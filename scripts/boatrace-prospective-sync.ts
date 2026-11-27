@@ -5,7 +5,7 @@ import { evaluateFrozenProtocol, prepareProspective, type FrozenProtocol } from 
 import { sha256Hex } from "./boatrace-research-cli";
 
 const PROTOCOL_PATH = "research/2026-11-27/b13v3-frozen-protocol-v1.json";
-const PROTOCOL_HASH = "98b85f3e1b864ac0511927b326d9d0d5132ef8387325b57adb1ae912abff33e5";
+const PROTOCOL_HASH = "51b9f9f3fde1ca9cb6abd85c4e9273547fdffc2678b4fcbb5444f8706b16e3d8";
 const RESULT_PATH = "research/2026-11-27/b13v3-frozen-prospective-v1.json";
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -17,7 +17,7 @@ export async function syncBoatProspectiveEvaluation(io: BridgeIO): Promise<Row> 
   const protocolFile = files.get(PROTOCOL_PATH);
   if (!protocolFile) return { status: "waiting", reason: "fixed_protocol_missing" };
   const raw = await io.read(protocolFile);
-  if (sha256Hex(raw) !== PROTOCOL_HASH) throw new BridgeError("競艇前向き検証の固定プロトコルが一致しません");
+  if (sha256Hex(raw.replaceAll("\r\n", "\n")) !== PROTOCOL_HASH) throw new BridgeError("競艇前向き検証の固定プロトコルが一致しません");
   const protocol = JSON.parse(raw) as FrozenProtocol;
 
   const today = new Date(io.now().getTime() + 9 * 3_600_000).toISOString().slice(0, 10);
