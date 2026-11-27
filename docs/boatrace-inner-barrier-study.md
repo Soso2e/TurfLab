@@ -59,7 +59,7 @@
 
 データは TurfLab-data `6e621b3867c85d5582a421f6f5636667a821447a`、比較実装の出発点は TurfLab `4df27ba1be6cd8590e09db25e641832110ac354d`。集計JSONにはコードファイルと入力のSHA-256、全日別スコア、距離・級差・F有無による着順分布と分母を保存した。ローカルSQLiteを読み取り専用で凍結し、同じ入力から2回生成した統合版のSHA-256は両方 `b4e581b3f57381386aae5b5453855db8339f60949a8ea6d4dbf49d4c520aed3d`。アーカイブ単独の再計算は520件で、B13v2Pre 4.13708、障壁ρ=0.5＋F 4.12187、過去日に基づく選択4.14451。統合版の完全再現にはローカルに保持したSQLiteスナップショットが必要。
 
-Node.js 24で、`DATA_CHECKOUT` はWindowsの同期スクリプトでmainを同期してから上記SHAに固定したチェックアウトを指定する。出力先は書き込み可能な未作成ファイルとする。
+今回の実行環境はNode.js 24.18.0。 `DATA_CHECKOUT` はWindowsの同期スクリプトでmainを同期してから上記SHAに固定したチェックアウトを指定する。ハッシュまで再現する場合は研究コードとデータをLFのままチェックアウトする（例 `git -c core.autocrlf=false worktree add --detach <path> <sha>`）。出力先は書き込み可能な未作成ファイルとする。
 
 ```powershell
 node scripts/run-tool.mjs tsx scripts/boatrace-inner-barrier-study.ts DATA_CHECKOUT archive.json
