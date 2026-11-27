@@ -30,6 +30,14 @@ export interface RacelistEntry {
   boat3Rate: number | null;
 }
 
+export interface BeforeInfoDetails {
+  entries: Exhibition[];
+  times: Partial<Record<number, number>>;
+  tilts: Partial<Record<number, number>>;
+  weights: Partial<Record<number, number>>;
+  adjustedWeights: Partial<Record<number, number>>;
+}
+
 export function officialUrl(page: PageName, date: string, venue?: string, race?: number) {
   const query = new URLSearchParams({ hd: date.replaceAll("-", "") });
   if (venue) query.set("jcd", venue);
@@ -216,6 +224,45 @@ export function parseRacelist(page: Page): RacelistEntry[] {
   return entries.sort((a, b) => a.boat - b.boat);
 }
 
+export function parseBeforeInfoDetails(page: Page): BeforeInfoDetails {
+  const $ = load(page.html);
+  const th = $("th").filter((_, el) => $(el).text().normalize("NFKC").replace(/\s+/g, "") === "展示タイム").first();
+  const table = th.closest("table");
+  const headers = table.find("thead th").toArray().map((el) => $(el).text().normalize("NFKC").replace(/\s+/g, ""));
+  const col = (label: string) => headers.indexOf(label);
+  const timeCol = col("展示タイム");
+  const tiltCol = col("チルト");
+  const weightCol = col("体重");
+  const adjCol = col("調整重量");
+  const times: Partial<Record<number, number>> = {};
+  const tilts: Partial<Record<number, number>> = {};
+  const weights: Partial<Record<number, number>> = {};
+  const adjustedWeights: Partial<Record<number, number>> = {};
+  table.children("tbody").each((_, body) => {
+    const cells = $(body).find("tr").first().children("td");
+    const boat = Number(text(cells.eq(0).text()));
+    if (!isBoat(boat)) return;
+    if (timeCol >= 0) {
+      const raw = text(cells.eq(timeCol).text());
+      if (/^\d+\.\d{2}$/.test(raw) && Number(raw) > 0) times[boat] = Number(raw);
+    }
+    if (tiltCol >= 0) {
+      const val = numOrNull(text(cells.eq(tiltCol).text()));
+      if (val !== null) tilts[boat] = val;
+    }
+    if (weightCol >= 0) {
+      const raw = text(cells.eq(weightCol).text()).replace(/kg$/i, "");
+      const val = numOrNull(raw);
+      if (val !== null) weights[boat] = val;
+    }
+    if (adjCol >= 0) {
+      const val = numOrNull(text(cells.eq(adjCol).text()));
+      if (val !== null) adjustedWeights[boat] = val;
+    }
+  });
+  return { entries: parseExhibition(page), times, tilts, weights, adjustedWeights };
+}
+
 /** Race pages publish the venue-wide deadline row above the active tab. */
 export function parsePageCutoff(page: Page) {
   return pageCutoff(load(page.html), page);
@@ -304,11 +351,14 @@ export class BoatOfficialSource {
   private nextRequest = 0;
   private backoffUntil = 0;
 
-  constructor(private request: typeof fetch = (input, init) => fetch(input, init)) {}
+  constructor(
+    private request: typeof fetch = (input, init) => fetch(input, init),
+    private minIntervalMs = 750,
+  ) {}
 
   async page(url: string): Promise<Page> {
     const at = Math.max(Date.now(), this.nextRequest);
-    this.nextRequest = at + 750;
+    this.nextRequest = at + this.minIntervalMs;
     if (at > Date.now()) await new Promise((resolve) => setTimeout(resolve, at - Date.now()));
     if (Date.now() < this.backoffUntil) throw new BoatDataMissing("公式サイトのアクセス制限により待機中");
     const response = await this.request(url, {
