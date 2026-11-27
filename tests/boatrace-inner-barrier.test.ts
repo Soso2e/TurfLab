@@ -4,7 +4,7 @@ import {
   abilityBarrier, classifyFDepth, evaluateScores, fitOffsets, gradeBarrier, stageDistribution,
 } from "../scripts/boatrace-inner-barrier";
 import {
-  buildAsOfPlayerStats, evaluateFrozenProtocol, prepare, resultOrderBefore, type FrozenProtocol,
+  buildAsOfPlayerStats, evaluateFrozenProtocol, prepare, prepareProspective, resultOrderBefore, type FrozenProtocol,
 } from "../scripts/boatrace-inner-barrier-study";
 
 const boats = [1, 2, 3, 4, 5, 6];
@@ -132,6 +132,23 @@ describe("Issue #129 research", () => {
       fallbackModel: dummyModel,
       candidates: [{ id: "H-0.5", barrier: 0.5, weights: [0.1], fallbackWeights: [0.1] }],
     };
+    const latestProgram = { ...r2, program: evidence("2026-11-28T01:59:00Z") };
+    const earlierCutoff = { ...r2, cutoff: "2026-11-28T01:58:00Z",
+      exhibition: { ...r2.exhibition!, evidence: evidence("2026-11-28T01:57:00Z") } };
+    const [prospective] = prepareProspective([
+      { file: "latest", date: r2.date, records: [latestProgram] },
+      { file: "earlier", date: r2.date, records: [earlierCutoff] },
+    ]);
+    expect(prospective.programPre).toBe(true);
+    expect(prospective.pre.exhibitionFetchedAt).toBe("2026-11-28T01:57:00Z");
+    const target = Array.from({ length: 500 }, (_, i) => ({
+      ...prospective, race: { ...prospective.race, id: String(i) },
+    }));
+    expect(evaluateFrozenProtocol(target.slice(1), protocol).sufficientSample).toBe(false);
+    expect(evaluateFrozenProtocol(target, protocol)).toMatchObject({
+      sufficientSample: true, observedRaces: 500, raceIds: target.map(({ race }) => race.id),
+    });
+
     const evalOut = evaluateFrozenProtocol(rows, protocol);
     expect(evalOut.observedRaces).toBe(1);
     expect(evalOut.sufficientSample).toBe(false);

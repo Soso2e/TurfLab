@@ -148,6 +148,37 @@ export function prepare(archives: BoatArchiveInput[], local: Local) {
   return { rows, duplicates: merged.duplicateRaces };
 }
 
+/** Reconstruct one strictly pre-deadline input for each untouched race. */
+export function prepareProspective(archives: BoatArchiveInput[]) {
+  const { rows } = prepare(archives, { records: [], revisions: [], frozen: [] });
+  const inputsById = new Map<string, BoatRecord[]>();
+  for (const { records } of archives) for (const record of records) {
+    const existing = inputsById.get(record.id) ?? [];
+    existing.push(record);
+    inputsById.set(record.id, existing);
+  }
+  return rows.map((row): Row => {
+    const versions = inputsById.get(row.race.id) ?? [];
+    const deadlines = versions.flatMap((record) => [record.cutoff, record.freeze?.cutoff])
+      .map((value) => Date.parse(value ?? "")).filter(Number.isFinite);
+    if (!deadlines.length) return { ...row, programPre: false };
+    const deadline = new Date(Math.min(...deadlines)).toISOString();
+    const program = versions.filter((record) => onTime(record.program.fetchedAt, deadline))
+      .sort((a, b) => Date.parse(b.program.fetchedAt) - Date.parse(a.program.fetchedAt))[0];
+    if (!program) return { ...row, programPre: false };
+    const input = { ...program, cutoff: deadline, freeze: undefined, exhibition: undefined };
+    const candidates = versions.flatMap((record) => [
+      { ...input, exhibition: record.exhibition },
+      { ...input, freeze: record.freeze ? { ...record.freeze, cutoff: deadline } : undefined },
+    ]).map((record) => extractB13V2Features(record, { preCutoffExhibitionOnly: true }))
+      .filter((features) => features.hasCompleteExhibition)
+      .sort((a, b) => Date.parse(a.exhibitionFetchedAt ?? "") - Date.parse(b.exhibitionFetchedAt ?? ""));
+    const pre = candidates[0] ?? extractB13V2Features(input, { preCutoffExhibitionOnly: true });
+    const order = row.race.result && !onTime(deadline, row.race.result.evidence.fetchedAt) ? null : row.order;
+    return { ...row, pre, programPre: true, order };
+  });
+}
+
 export function resultOrderBefore(row: Row, asOf: string) {
   return topThree({ ...row.race, result: row.revisions.find((version) => onTime(version.evidence.fetchedAt, asOf)) });
 }
@@ -537,6 +568,7 @@ export function evaluateFrozenProtocol(rows: Row[], protocol: FrozenProtocol) {
     explorationCutoffDate: protocol.explorationCutoffDate,
     targetMinRaces: protocol.targetMinRaces,
     observedRaces: target.length,
+    raceIds: target.map(({ race }) => race.id),
     sufficientSample: target.length >= protocol.targetMinRaces,
     baseline: summarize(ref, protocol.cohort),
     candidates: Object.fromEntries(protocol.candidates.map((c) => [
@@ -560,8 +592,7 @@ function main(args: string[]) {
   if (gitHead(root) !== dataSha) throw new Error("Archive checkout changed while reading inputs");
   if (localMode === "--eval-frozen") {
     const protocol = JSON.parse(readFileSync(localPath, "utf8")) as FrozenProtocol;
-    const { rows } = prepare(archives, { records: [], revisions: [], frozen: [] });
-    const evaluation = evaluateFrozenProtocol(rows, protocol);
+    const evaluation = evaluateFrozenProtocol(prepareProspective(archives), protocol);
     writeOnce(output, JSON.stringify({ dataSha, ...evaluation }, null, 2) + "\n");
     console.log(JSON.stringify({ observedRaces: evaluation.observedRaces, sufficientSample: evaluation.sufficientSample, output }));
     return;

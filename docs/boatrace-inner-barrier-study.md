@@ -57,6 +57,8 @@
 - 本探索結果から候補を **`H-0.5`, `H-max`, `H-near_decay`, `H-exists`, `H-exists_decay`** の5種に絞り、係数と評価条件を `b13v3-inner-barrier-frozen-v1`（`explorationCutoffDate: "2026-11-27"`, `targetMinRaces: 500`）として凍結した。
 - 未使用データが500R以上蓄積した段階で、`--eval-frozen` オプションにより再学習・係数変更なしで前向き検証を実行できる。
 
+Windows の GitHub 同期 Worker は、非公開のデータリポジトリにある固定プロトコルのSHA-256を照合し、前日以前のローカル日別アーカイブを毎時確認する。締切前の出走表、公式着順、必要な級別が揃った未使用レースを数える。締切前の完全展示がないレースには固定済みの展示なし係数を適用する。500件以上に達した最初の実行で入力アーカイブと採点結果 \`research/2026-11-27/b13v3-frozen-prospective-v1.json\` を追記し、対象ID・入力ハッシュ・固定係数のハッシュを保存する。進捗は同期レポートの \`boat_prospective_evaluation\` で確認できる。
+
 ## ⑤ 展示データの締切前取得率19.8%の原因調査
 
 1. **直接原因：`shadowExhibition` が未有効化のまま運用されていた**

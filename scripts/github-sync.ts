@@ -9,6 +9,7 @@ import {
 } from "./github-bridge";
 import { obj, rows, str, type Row } from "../packages/shared/src/domain";
 import { exportBoatArchives } from "./boatrace-github-export";
+import { syncBoatProspectiveEvaluation } from "./boatrace-prospective-sync";
 import { checkpointCore, writeWorkerHealth } from "./worker-health";
 
 const arg = (name: string) => process.argv[process.argv.indexOf(name) + 1];
@@ -105,6 +106,8 @@ try {
   let nextBoatExport = 0;
   let boatExport: Row | null = null;
   let nextResearchSync = 0;
+  let nextBoatProspective = 0;
+  let boatProspective: Row | null = null;
   const exchange = path.join(home, "local-predictions", "exchange");
   do {
     const ack: string[] = [];
@@ -173,10 +176,20 @@ try {
           boatExport = { status: "failed", at: new Date().toISOString(), reason: "競艇アーカイブ同期失敗" };
         }
       }
+      if (Date.now() >= nextBoatProspective && boatProspective?.status !== "published") {
+        nextBoatProspective = Date.now() + 3_600_000;
+        try {
+          await gh.verify();
+          boatProspective = await syncBoatProspectiveEvaluation({ ...gh, api, now: () => new Date() });
+        } catch {
+          boatProspective = { status: "failed", reason: "競艇前向き検証の入力または保存を確認してください" };
+        }
+      }
       await api("/github-bridge/report", {
         status: {
           ...bridge.status(),
           boat_archive_sync: boatExport,
+          boat_prospective_evaluation: boatProspective,
           ...(commandError ? { last_error: commandError } : {}),
         },
         ack,
