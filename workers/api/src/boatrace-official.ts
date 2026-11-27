@@ -5,8 +5,38 @@ import {
 } from "../../../packages/shared/src/boatrace";
 
 const ROOT = "https://www.boatrace.jp/owpc/pc/race/";
-type PageName = "index" | "raceindex" | "odds2tf" | "odds3t" | "beforeinfo" | "raceresult";
+type PageName = "index" | "raceindex" | "racelist" | "odds2tf" | "odds3t" | "beforeinfo" | "raceresult";
 type Page = { html: string; evidence: Evidence };
+
+export interface RacelistEntry {
+  boat: number;
+  racerId: string | null;
+  name: string;
+  grade: Grade | null;
+  flyingCount: number | null;
+  lateCount: number | null;
+  avgSt: number | null;
+  nationalWinRate: number | null;
+  national2Rate: number | null;
+  national3Rate: number | null;
+  localWinRate: number | null;
+  local2Rate: number | null;
+  local3Rate: number | null;
+  motorNo: number | null;
+  motor2Rate: number | null;
+  motor3Rate: number | null;
+  boatNo: number | null;
+  boat2Rate: number | null;
+  boat3Rate: number | null;
+}
+
+export interface BeforeInfoDetails {
+  entries: Exhibition[];
+  times: Partial<Record<number, number>>;
+  tilts: Partial<Record<number, number>>;
+  weights: Partial<Record<number, number>>;
+  adjustedWeights: Partial<Record<number, number>>;
+}
 
 export function officialUrl(page: PageName, date: string, venue?: string, race?: number) {
   const query = new URLSearchParams({ hd: date.replaceAll("-", "") });
@@ -136,6 +166,98 @@ export function parseExhibitionTimes(page: Page): Partial<Record<number, number>
   return times;
 }
 
+const numOrNull = (raw: string): number | null => {
+  const cleaned = raw.trim();
+  if (!cleaned || /^[-―]+$/.test(cleaned)) return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+};
+
+export function parseRacelist(page: Page): RacelistEntry[] {
+  const $ = load(page.html);
+  const entries: RacelistEntry[] = [];
+  $(".table1 table tbody").each((_, body) => {
+    const cells = $(body).find("tr").first().children("td");
+    if (cells.length < 8) return;
+    const boat = Number(text(cells.eq(0).text()));
+    if (!isBoat(boat) || entries.some((entry) => entry.boat === boat)) return;
+    const profileCell = cells.eq(2);
+    const profileText = text(profileCell.text());
+    const idGrade = profileText.match(/^(\d{4})\s*\/\s*(A1|A2|B1|B2)\b/);
+    const name = text(profileCell.find("a").first().text()) || profileText;
+    const grade = (idGrade?.[2] ?? text(profileCell.find(".is-fs12").last().text())) as Grade;
+    const stTokens = text(cells.eq(3).text()).split(" ").filter(Boolean);
+    const fMatch = stTokens.find((t) => /^F\d+$/.test(t));
+    const lMatch = stTokens.find((t) => /^L\d+$/.test(t));
+    const stVal = stTokens.find((t) => /^\d+\.\d+$/.test(t));
+    const nat = text(cells.eq(4).text()).split(" ").filter(Boolean);
+    const loc = text(cells.eq(5).text()).split(" ").filter(Boolean);
+    const mot = text(cells.eq(6).text()).split(" ").filter(Boolean);
+    const boa = text(cells.eq(7).text()).split(" ").filter(Boolean);
+    entries.push({
+      boat,
+      racerId: idGrade?.[1] ?? null,
+      name,
+      grade: GRADES.includes(grade) ? grade : null,
+      flyingCount: fMatch ? Number(fMatch.slice(1)) : null,
+      lateCount: lMatch ? Number(lMatch.slice(1)) : null,
+      avgSt: stVal ? numOrNull(stVal) : null,
+      nationalWinRate: nat[0] ? numOrNull(nat[0]) : null,
+      national2Rate: nat[1] ? numOrNull(nat[1]) : null,
+      national3Rate: nat[2] ? numOrNull(nat[2]) : null,
+      localWinRate: loc[0] ? numOrNull(loc[0]) : null,
+      local2Rate: loc[1] ? numOrNull(loc[1]) : null,
+      local3Rate: loc[2] ? numOrNull(loc[2]) : null,
+      motorNo: mot[0] && /^\d+$/.test(mot[0]) ? Number(mot[0]) : null,
+      motor2Rate: mot[1] ? numOrNull(mot[1]) : null,
+      motor3Rate: mot[2] ? numOrNull(mot[2]) : null,
+      boatNo: boa[0] && /^\d+$/.test(boa[0]) ? Number(boa[0]) : null,
+      boat2Rate: boa[1] ? numOrNull(boa[1]) : null,
+      boat3Rate: boa[2] ? numOrNull(boa[2]) : null,
+    });
+  });
+  return entries.sort((a, b) => a.boat - b.boat);
+}
+
+export function parseBeforeInfoDetails(page: Page): BeforeInfoDetails {
+  const $ = load(page.html);
+  const th = $("th").filter((_, el) => $(el).text().normalize("NFKC").replace(/\s+/g, "") === "展示タイム").first();
+  const table = th.closest("table");
+  const headers = table.find("thead th").toArray().map((el) => $(el).text().normalize("NFKC").replace(/\s+/g, ""));
+  const col = (label: string) => headers.indexOf(label);
+  const timeCol = col("展示タイム");
+  const tiltCol = col("チルト");
+  const weightCol = col("体重");
+  const adjCol = col("調整重量");
+  const times: Partial<Record<number, number>> = {};
+  const tilts: Partial<Record<number, number>> = {};
+  const weights: Partial<Record<number, number>> = {};
+  const adjustedWeights: Partial<Record<number, number>> = {};
+  table.children("tbody").each((_, body) => {
+    const cells = $(body).find("tr").first().children("td");
+    const boat = Number(text(cells.eq(0).text()));
+    if (!isBoat(boat)) return;
+    if (timeCol >= 0) {
+      const raw = text(cells.eq(timeCol).text());
+      if (/^\d+\.\d{2}$/.test(raw) && Number(raw) > 0) times[boat] = Number(raw);
+    }
+    if (tiltCol >= 0) {
+      const val = numOrNull(text(cells.eq(tiltCol).text()));
+      if (val !== null) tilts[boat] = val;
+    }
+    if (weightCol >= 0) {
+      const raw = text(cells.eq(weightCol).text()).replace(/kg$/i, "");
+      const val = numOrNull(raw);
+      if (val !== null) weights[boat] = val;
+    }
+    if (adjCol >= 0) {
+      const val = numOrNull(text(cells.eq(adjCol).text()));
+      if (val !== null) adjustedWeights[boat] = val;
+    }
+  });
+  return { entries: parseExhibition(page), times, tilts, weights, adjustedWeights };
+}
+
 export function parseResult(page: Page): BoatResult | null {
   const $ = load(page.html);
   const base = { evidence: page.evidence, courses: parseExhibition(page) };
@@ -212,11 +334,14 @@ export class BoatOfficialSource {
   private nextRequest = 0;
   private backoffUntil = 0;
 
-  constructor(private request: typeof fetch = (input, init) => fetch(input, init)) {}
+  constructor(
+    private request: typeof fetch = (input, init) => fetch(input, init),
+    private minIntervalMs = 750,
+  ) {}
 
   async page(url: string): Promise<Page> {
     const at = Math.max(Date.now(), this.nextRequest);
-    this.nextRequest = at + 750;
+    this.nextRequest = at + this.minIntervalMs;
     if (at > Date.now()) await new Promise((resolve) => setTimeout(resolve, at - Date.now()));
     if (Date.now() < this.backoffUntil) throw new BoatDataMissing("公式サイトのアクセス制限により待機中");
     const response = await this.request(url, {

@@ -4,7 +4,7 @@ import {
   BOATS, freezeBoatRace, settleBoatRace, summarizeBoatRaces, type BoatCapture, type BoatRecord, type Grade,
 } from "../packages/shared/src/boatrace";
 import { BoatCollector } from "../workers/api/src/boatrace-collector";
-import { officialUrl, parseOdds, parseResult } from "../workers/api/src/boatrace-official";
+import { officialUrl, parseBeforeInfoDetails, parseOdds, parseRacelist, parseResult } from "../workers/api/src/boatrace-official";
 
 const date = "2026-11-23";
 const cutoff = `${date}T15:27:00+09:00`;
@@ -313,4 +313,59 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
   } finally {
     database.close();
   }
+});
+
+describe("公式出走表(racelist)と直前情報詳細(beforeinfo)の抽出", () => {
+  it("racelistから登録番号・級別・平均ST・勝率・モーター2連率等を抽出する", () => {
+    const html = `<div class="table1"><table>
+      <tbody><tr><td>締切予定時刻</td><td>10:45</td></tr></tbody>
+      <tbody><tr>
+        <td>1</td><td></td>
+        <td>4448 / A1 <a href="#">青木 玄太</a> 滋賀/滋賀 38歳/52.0kg</td>
+        <td>F0 L0 0.16</td>
+        <td>6.48 43.41 65.12</td>
+        <td>6.71 58.82 58.82</td>
+        <td>24 21.43 35.71</td>
+        <td>33 32.00 53.33</td>
+      </tr></tbody>
+      <tbody><tr>
+        <td>2</td><td></td>
+        <td>5320 / B1 <a href="#">新人 選手</a> 群馬/群馬 20歳/47.0kg</td>
+        <td>F1 L0 -</td>
+        <td>1.50 0.00 5.00</td>
+        <td>- - -</td>
+        <td>53 37.70 50.82</td>
+        <td>37 42.86 52.86</td>
+      </tr></tbody>
+    </table></div>`;
+    const entries = parseRacelist({ html, evidence: evidence(officialUrl("racelist", date, "15", 12)) });
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({
+      boat: 1, racerId: "4448", grade: "A1", flyingCount: 0, lateCount: 0, avgSt: 0.16,
+      nationalWinRate: 6.48, national2Rate: 43.41, localWinRate: 6.71,
+      motorNo: 24, motor2Rate: 21.43, boatNo: 33, boat2Rate: 32.0,
+    });
+    expect(entries[1]).toMatchObject({
+      boat: 2, racerId: "5320", grade: "B1", flyingCount: 1, lateCount: 0, avgSt: null,
+      nationalWinRate: 1.5, localWinRate: null, motorNo: 53, motor2Rate: 37.7,
+    });
+  });
+
+  it("beforeinfoから展示タイム・チルト・体重・調整重量・展示STを抽出する", () => {
+    const html = `<table><thead><tr><th>枠</th><th>写真</th><th>ボートレーサー</th><th>体重</th><th>展示タイム</th><th>チルト</th><th>プロペラ</th><th>部品交換</th><th>前走成績</th><th>調整重量</th></tr></thead>
+      <tbody><tr><td>1</td><td></td><td>選手1</td><td>52.0kg</td><td>6.76</td><td>-0.5</td><td></td><td></td><td></td><td>0.5</td></tr></tbody>
+      <tbody><tr><td>2</td><td></td><td>選手2</td><td>47.5kg</td><td>6.69</td><td>0.0</td><td></td><td></td><td></td><td></td></tr></tbody>
+    </table>
+    <div class="table1_boatImage1"><span class="table1_boatImage1Number">1</span><span class="table1_boatImage1Time">.08</span></div>
+    <div class="table1_boatImage1"><span class="table1_boatImage1Number">2</span><span class="table1_boatImage1Time">F.01</span></div>`;
+    const details = parseBeforeInfoDetails({ html, evidence: evidence(officialUrl("beforeinfo", date, "15", 12)) });
+    expect(details.times).toEqual({ 1: 6.76, 2: 6.69 });
+    expect(details.tilts).toEqual({ 1: -0.5, 2: 0 });
+    expect(details.weights).toEqual({ 1: 52.0, 2: 47.5 });
+    expect(details.adjustedWeights).toEqual({ 1: 0.5 });
+    expect(details.entries).toEqual([
+      { boat: 1, course: 1, st: ".08", flying: false },
+      { boat: 2, course: 2, st: "F.01", flying: true },
+    ]);
+  });
 });

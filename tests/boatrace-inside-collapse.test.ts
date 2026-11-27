@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { BoatRecord, BoatResult } from "../packages/shared/src/boatrace";
+import { BOATS, type BoatRecord, type BoatResult, type Grade } from "../packages/shared/src/boatrace";
 import { b13Distribution } from "../packages/shared/src/boatrace-b13";
 import { emptyLocal, exhibitionSt, outcome, outcomeClass, prepare, resultBefore } from "../scripts/boatrace-inside-collapse-input";
 import { meetingSignal } from "../scripts/boatrace-inside-collapse-study";
 import { calibrate, factor, fitFactor, marginalize, metrics, sigmoid } from "../scripts/boatrace-inside-collapse-stats";
+import { prepareBackfill } from "../scripts/boatrace-inside-collapse-ability-study";
 
 const day = "2026-11-28";
 const evidence = (time: string) => ({ url: "https://example.test", fetchedAt: `${day}T${time}+09:00` });
@@ -97,5 +98,51 @@ describe("inside-collapse probabilities", () => {
     const fixed = Array.from({ length: 12 }, () => ({ p, y: 2 }));
     expect(calibrate(fixed).predict(p)[2]).toBeGreaterThan(p[2]);
     expect(metrics([{ p, y: 0 }, { p, y: 2 }])?.averagePrecision).toBe(0.5);
+  });
+
+  it("prepares backfill records with racelist and exhibition features", () => {
+    const grades: Grade[] = ["A1", "A2", "B1", "A1", "B1", "B2"];
+    const rows = prepareBackfill([{
+      schemaVersion: "boatrace-backfill-v1",
+      date: "2026-11-27",
+      generatedAt: "2026-11-27T21:00:00Z",
+      venues: [{ code: "15", name: "丸亀" }],
+      races: [{
+        id: "2026-11-27-15-12",
+        date: "2026-11-27",
+        venue: "15",
+        venueName: "丸亀",
+        number: 12,
+        cutoff: "2026-11-27T20:42:00+09:00",
+        fetchedAt: "2026-11-27T21:00:00Z",
+        errors: [],
+        racelist: BOATS.map((boat, idx) => ({
+          boat, racerId: String(4000 + boat), name: `選手${boat}`, grade: grades[idx],
+          flyingCount: 0, lateCount: 0, avgSt: 0.15,
+          nationalWinRate: 6 + idx * 0.1, national2Rate: 40, national3Rate: 60,
+          localWinRate: 6, local2Rate: 40, local3Rate: 60,
+          motorNo: boat, motor2Rate: 30 + idx * 5, motor3Rate: 50,
+          boatNo: boat, boat2Rate: 30, boat3Rate: 50,
+        })),
+        beforeinfo: {
+          entries: BOATS.map((boat) => ({ boat, course: boat, st: ".10", flying: false })),
+          times: { 1: 6.76, 2: 6.75, 3: 6.84, 4: 6.85, 5: 6.80, 6: 6.82 },
+          tilts: { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 },
+          weights: { 1: 52, 2: 52, 3: 46, 4: 54, 5: 52, 6: 54 },
+          adjustedWeights: {},
+        },
+        result: {
+          evidence: { url: "https://example.com", fetchedAt: "2026-11-27T20:55:00+09:00" },
+          status: "official",
+          payouts: { "3-2-5": 1000 },
+          refundBoats: [],
+          courses: [],
+          finishes: [3, 2, 5, 4, 1, 6].map((boat, pos) => ({ boat, position: String(pos + 1) })),
+        },
+      }],
+    }]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ label: "clean", y: 2, hasCompleteRacelist: true, hasCompleteExhibition: true, hasCompleteSt: true });
+    expect(rows[0].motor2Rates[2]).toBe(40);
   });
 });
