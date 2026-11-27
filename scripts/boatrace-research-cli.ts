@@ -19,6 +19,7 @@ import {
 import type { B11Stats, B11Summary } from "../packages/shared/src/boatrace-b11";
 import { summarizeGradeOrder } from "../packages/shared/src/boatrace-grade-order";
 import { evaluateB13, B13_VERSION } from "../packages/shared/src/boatrace-b13";
+import { evaluateB13V2, B13V2_VERSION } from "../packages/shared/src/boatrace-b13-v2";
 
 export interface CliOptions {
   command: "audit" | "normalize" | "features" | "backtest" | "report" | "run";
@@ -97,6 +98,7 @@ export function runResearchPipeline(opts: CliOptions) {
   const report = buildEvaluationReport(merged, period);
   const gradeOrder = summarizeGradeOrder(merged.races);
   const b13 = evaluateB13(merged.races);
+  const b13v2 = evaluateB13V2(merged.races);
 
   const normalizedByDay = new Map<string, ReturnType<typeof normalizeBoatRace>[]>();
   const featuresByDay = new Map<string, ReturnType<typeof extractBoatFeatures>[]>();
@@ -142,6 +144,7 @@ export function runResearchPipeline(opts: CliOptions) {
     emit("evaluations", "evaluations", `b11-eval-${span}`, report);
     emit("evaluations", "evaluations", `grade-order-${span}`, { period, ...gradeOrder });
     emit("evaluations", "evaluations", `b13-${span}`, { period, ...b13 });
+    emit("evaluations", "evaluations", `b13v2-${span}`, { period, ...b13v2 });
   }
 
   const deterministicHash = sha256Hex(canonical({
@@ -150,6 +153,7 @@ export function runResearchPipeline(opts: CliOptions) {
     report,
     gradeOrder,
     b13,
+    b13v2,
     outputs: outputs.map((o) => ({ layer: o.layer, path: o.path, deterministicSha256: o.deterministicSha256 })),
   }));
 
@@ -164,6 +168,7 @@ export function runResearchPipeline(opts: CliOptions) {
     config: {
       b11Version: "b11-sigma-research-v1",
       b13Version: B13_VERSION,
+      b13v2Version: B13V2_VERSION,
       evaluatorVersion: report.evaluatorVersion,
       courseGate: "exhibition-123456",
     },
@@ -189,7 +194,7 @@ export function runResearchPipeline(opts: CliOptions) {
     }
   }
 
-  return { report, gradeOrder, b13, manifest, outputs };
+  return { report, gradeOrder, b13, b13v2, manifest, outputs };
 }
 
 function pct(v: number | null) {
@@ -240,7 +245,7 @@ if (process.argv[1]?.endsWith("boatrace-research-cli.ts")) {
   const dataRoot = resolve(positional[0] ?? "../TurfLab-data");
   const outDir = resolve(opt("--out-dir") ?? join(dataRoot, "boatrace-research"));
   const write = args.includes("--write") || ["normalize", "features", "backtest", "run"].includes(cmd);
-  const { report, gradeOrder, b13, manifest, outputs } = runResearchPipeline({
+  const { report, gradeOrder, b13, b13v2, manifest, outputs } = runResearchPipeline({
     command: cmd,
     dataRoot,
     outDir,
@@ -259,6 +264,11 @@ if (process.argv[1]?.endsWith("boatrace-research-cli.ts")) {
     console.log("\n[B13 / reconstructed shadow]");
     for (const [id, s] of Object.entries(b13.models)) {
       console.log(`${id} 対象${s.targets} 適用${s.applied} 見送${s.skipped} 精算${s.settled} 未確定${s.pending} 除外${s.excluded} 的中${s.hits} 投入${s.stake} 払戻${s.payout} 返還${s.refund} 損益${s.net} 回収${pct(s.roi)} | log loss=${s.logLoss ?? "—"}`);
+    }
+    console.log(`\n[B13v2 / contextual Plackett-Luce shadow (main=${b13v2.mainModel}, 初期仮想予算=${b13v2.virtualBankrollInitialYen}円)]`);
+    console.log(`  締切前展示取得: ${b13v2.missingness.preCutoffExhibition}/${b13v2.missingness.totalRaces}R (${pct(b13v2.missingness.preCutoffExhibitionRate)}) | 展示欠損: ${b13v2.missingness.missingExhibition}R`);
+    for (const [id, s] of Object.entries(b13v2.models)) {
+      console.log(`${id.padEnd(9)} 対象${s.targets} 適用${s.applied} 見送${s.skipped} 精算${s.settled} 的中${s.hits} ${pct(s.hitRate)} 投入${s.stake} 払戻${s.payout} 返還${s.refund} 損益${s.net} 残高${s.balanceEnd} 回収${pct(s.roi)} | LL=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"} Brier=${s.brierScore !== null ? s.brierScore.toFixed(5) : "—"}`);
     }
     printSummaryRows("reconstructed", report.reconstructed, false);
     printSummaryRows("reconstructed", report.reconstructed, true);

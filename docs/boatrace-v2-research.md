@@ -41,3 +41,10 @@ v2の学習コード・予測器は未実装。下記B11研究（Issue #113）�
 - 上位2組の仮想評価と固定B01(123/132)、B02(123/124)、B11（級別のみ・進入ゲートなし）の比較を同じB13適格母集団で実施。B11固有の見送りで適用分母は異なるので必ず表示する。未確定・払戻欠損・返還・不成立は区別。全日・日別の対象、適用、見送り、精算、払戻、返還、仮想損益、回収率、B13順位分布log lossを出力。
 - 既存CLI: `npm run boatrace:research -- report ../TurfLab-data` で表示、`npm run boatrace:research -- run ../TurfLab-data --data-sha <sha> --code-sha <sha>` で既存manifestと `evaluations/b13-*.json` を追記保存。入力アーカイブを上書きしない。最初の利用可能日には先行学習がないため未適用。期間指定時は指定期間の最初の日より前の学習データも含むようfromを設定すること。
 - 全アーカイブ統合と結果取得時刻チェックは、以前の各日最大アーカイブを用いたチャット検証より厳格であり、結果が一致するとは限らない。現時点では固定B01に対する優位性は未証明。前向きの凍結予測ではなく再構成研究であり、既存自動購入、実購入、UIは変更しない。
+
+## B13v2 — 特徴量付き Plackett–Luce（shadow only）
+
+- 実装: `packages/shared/src/boatrace-b13-v2.ts`、テスト: `tests/boatrace-b13-v2.test.ts`、研究CLI: `scripts/boatrace-b13-v2-study.ts`、詳細レポート: `docs/boatrace-b13-v2-study.md`。version: `b13-context-pl-shadow-v1`。
+- 特徴量: 枠別切片、コース別等級係数（6艇別）、コース別展示F係数（一律+1ランク補正を廃止し実データ推定）、展示タイム偏差（z-score）、展示タイムσ、展示STσ、内3艇等級降順（`1>=2>=3`）、1号艇と他5艇の等級差、展示枠なり進入（`123456`）。
+- 評価: JST日付単位の expanding window で学習・標準化し、`B13v2`（全展示）と `B13v2Pre`（締切前取得確認済みの展示のみ）を既存 `B13`・固定 `FIXED123`・`B01`・`B02`・`B11` と同一母集団で比較。`npm run boatrace:research -- run` で `evaluations/b13v2-*.json` へ追記保存。
+- 位置づけ: 2026-11-23〜11-26 は探索用（exploratory）とし、2026-11-27以降の未使用データで前向き検証を行う。現時点で自動仮想購入・実購入・UIは変更しない。

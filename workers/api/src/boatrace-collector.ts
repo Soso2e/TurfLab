@@ -5,6 +5,13 @@ import {
   freezeB11, reconstructB11, summarizeB11, evaluateCourseGate, type B11ResearchItem, type B11ResearchRecord,
 } from "../../../packages/shared/src/boatrace-b11";
 import {
+  b13Distribution, fitB13, topThree,
+} from "../../../packages/shared/src/boatrace-b13";
+import {
+  B13V2_CONFIG, B13V2_VERSION, evaluateB13V2, extractB13V2Features, fitB13V2, fitB13V2NoEx,
+  predictB13V2, VIRTUAL_BANKROLL_INITIAL_YEN, type B13V2FittedModel, type B13V2RaceFeatures,
+} from "../../../packages/shared/src/boatrace-b13-v2";
+import {
   BoatOfficialSource, japanDate, officialUrl, parseExhibition, parseExhibitionTimes, parseOdds,
   parseProgram, parseResult, parseVenues,
 } from "./boatrace-official";
@@ -13,6 +20,7 @@ const MINUTE = 60_000;
 const CYCLE = 30 * MINUTE;
 const DAY = 1440 * MINUTE;
 const FIRST_CAPTURE = 145_000;
+const PRE_EXHIBITION_LEAD = 6 * MINUTE;
 const RESULT_DELAY = 15 * MINUTE;
 const INITIAL_BANKROLL = 100_000;
 const BET_COST = 2 * BOAT_STAKE;
@@ -26,8 +34,41 @@ const json = (body: unknown, status = 200) => Response.json(body, {
 
 interface CollectorStatus {
   enabled: boolean;
+  shadowExhibition?: boolean;
   lastRun: string | null;
   issue: string | null;
+}
+
+export interface ShadowPredictionRecord {
+  schemaVersion: typeof B13V2_VERSION;
+  raceId: string;
+  date: string;
+  cutoff: string;
+  frozenAt: string;
+  mainModel: "B13v2Pre";
+  virtualBudgetYen: typeof VIRTUAL_BANKROLL_INITIAL_YEN;
+  hasPreCutoffExhibition: boolean;
+  preUsedNoEx: boolean;
+  inputs: B13V2RaceFeatures;
+  trainingCount: number;
+  predictions: {
+    B13v2Pre: { version: string; tickets: string[]; top5: { combination: string; probability: number }[] };
+    B13v2: { version: string; tickets: string[]; top5: { combination: string; probability: number }[] };
+    B13v2NoEx: { version: string; tickets: string[]; top5: { combination: string; probability: number }[] };
+    B13: { version: string; tickets: string[]; top5: { combination: string; probability: number }[] };
+    B01: { version: string; tickets: string[] };
+    B02: { version: string; tickets: string[] };
+    FIXED123: { version: string; tickets: string[] };
+  };
+}
+
+interface CachedDayModels {
+  date: string;
+  trainingCount: number;
+  modelPre: B13V2FittedModel | null;
+  modelFull: B13V2FittedModel | null;
+  modelNoEx: B13V2FittedModel | null;
+  b13Weights: number[] | null;
 }
 
 interface ProgramSync {
@@ -43,6 +84,7 @@ type Row = {
   cutoff: number;
   capture_next: number;
   result_next: number;
+  exhibition_next?: number;
 };
 
 export class BoatCollector {
@@ -63,11 +105,17 @@ export class BoatCollector {
   private initialize() {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_races (
       id TEXT PRIMARY KEY, date TEXT NOT NULL, body TEXT NOT NULL, cutoff INTEGER NOT NULL,
-      capture_next INTEGER NOT NULL, result_next INTEGER NOT NULL
+      capture_next INTEGER NOT NULL, result_next INTEGER NOT NULL, exhibition_next INTEGER NOT NULL DEFAULT 0
     )`);
+    try {
+      this.sql.exec("SELECT exhibition_next FROM boat_races LIMIT 0");
+    } catch {
+      this.sql.exec("ALTER TABLE boat_races ADD COLUMN exhibition_next INTEGER NOT NULL DEFAULT 0");
+    }
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_day ON boat_races(date, cutoff, id)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_capture ON boat_races(capture_next, cutoff)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_result ON boat_races(result_next)");
+    this.sql.exec("CREATE INDEX IF NOT EXISTS boat_exhibition ON boat_races(exhibition_next, cutoff)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_result_revisions (
       id TEXT NOT NULL, fetched_at TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (id, fetched_at)
     )`);
@@ -80,6 +128,121 @@ export class BoatCollector {
       race_id TEXT PRIMARY KEY, date TEXT NOT NULL, frozen_at TEXT NOT NULL, body TEXT NOT NULL
     )`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS boat_research_day ON boat_research(date)");
+    // 仮想運用モデル群（B13v2Pre メイン＋並行モデル）の予測凍結テーブル。データリーク防止用。
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_shadow_predictions (
+      race_id TEXT PRIMARY KEY, date TEXT NOT NULL, frozen_at TEXT NOT NULL, body TEXT NOT NULL
+    )`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS boat_shadow_day ON boat_shadow_predictions(date)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS boat_shadow_models (
+      date TEXT PRIMARY KEY, body TEXT NOT NULL
+    )`);
+  }
+
+  private getOrFitDayModels(date: string): CachedDayModels {
+    const cached = this.sql.exec<{ body: string }>("SELECT body FROM boat_shadow_models WHERE date = ?", date).toArray()[0];
+    if (cached) return JSON.parse(cached.body) as CachedDayModels;
+    const asOfMs = Date.parse(`${date}T00:00:00+09:00`);
+    const rows = this.sql.exec<{ body: string }>(
+      "SELECT body FROM boat_races WHERE date < ? ORDER BY date, id",
+      date,
+    ).toArray();
+    const trainingRaw: { race: BoatRecord; order: number[] }[] = [];
+    for (const row of rows) {
+      const r = JSON.parse(row.body) as BoatRecord;
+      const pMs = Date.parse(r.program?.fetchedAt ?? "");
+      const cMs = Date.parse(r.freeze?.cutoff ?? r.cutoff ?? "");
+      const resMs = Date.parse(r.result?.evidence?.fetchedAt ?? "");
+      if (!Number.isFinite(pMs) || !Number.isFinite(cMs) || pMs >= cMs) continue;
+      if (!Number.isFinite(resMs) || resMs >= asOfMs) continue;
+      const order = topThree(r);
+      if (order) trainingRaw.push({ race: r, order });
+    }
+    const modelPre = fitB13V2(
+      trainingRaw.map(({ race, order }) => ({ features: extractB13V2Features(race, { preCutoffExhibitionOnly: true }), order })),
+    );
+    const modelFull = fitB13V2(
+      trainingRaw.map(({ race, order }) => ({ features: extractB13V2Features(race, { preCutoffExhibitionOnly: false }), order })),
+    );
+    const modelNoEx = fitB13V2NoEx(
+      trainingRaw.map(({ race, order }) => ({ features: extractB13V2Features(race, { preCutoffExhibitionOnly: true }), order })),
+    );
+    const b13Weights = fitB13(trainingRaw.map((t) => t.order));
+    const built: CachedDayModels = { date, trainingCount: trainingRaw.length, modelPre, modelFull, modelNoEx, b13Weights };
+    this.sql.exec("INSERT OR REPLACE INTO boat_shadow_models (date, body) VALUES (?, ?)", date, JSON.stringify(built));
+    return built;
+  }
+
+  /** 発走前（now < cutoff）に B13v2Pre メインおよび並行モデルの入力・出力・バージョンを凍結する。 */
+  private freezeShadowPredictions(race: BoatRecord, now: Date) {
+    const cutoffIso = race.freeze?.cutoff ?? race.cutoff;
+    if (!cutoffIso) return;
+    const cutoffMs = Date.parse(cutoffIso);
+    if (!Number.isFinite(cutoffMs) || now.getTime() >= cutoffMs) return;
+
+    const fPre = extractB13V2Features(race, { preCutoffExhibitionOnly: true });
+    const prev = this.sql.exec<{ body: string }>(
+      "SELECT body FROM boat_shadow_predictions WHERE race_id = ?",
+      race.id,
+    ).toArray()[0];
+    if (prev) {
+      const old = JSON.parse(prev.body) as ShadowPredictionRecord;
+      if (old.hasPreCutoffExhibition || !fPre.hasCompleteExhibition) return;
+    }
+
+    const models = this.getOrFitDayModels(race.date);
+    if (!models.modelPre || !models.modelFull || !models.modelNoEx || !models.b13Weights) return;
+
+    const fFull = extractB13V2Features(race, { preCutoffExhibitionOnly: false });
+    const predFull = predictB13V2(models.modelFull, fFull);
+    const predNoEx = predictB13V2(models.modelNoEx, fPre);
+    const preUsedNoEx = !fPre.hasCompleteExhibition;
+    const predPre = fPre.hasCompleteExhibition ? predictB13V2(models.modelPre, fPre) : predNoEx;
+    const b13Dist = b13Distribution(models.b13Weights);
+
+    const pick = (dist: readonly { combination: string; probability: number }[]) => ({
+      tickets: dist.slice(0, B13V2_CONFIG.ticketCount).map((d) => d.combination),
+      top5: dist.slice(0, 5),
+    });
+
+    const record: ShadowPredictionRecord = {
+      schemaVersion: B13V2_VERSION,
+      raceId: race.id,
+      date: race.date,
+      cutoff: cutoffIso,
+      frozenAt: now.toISOString(),
+      mainModel: "B13v2Pre",
+      virtualBudgetYen: VIRTUAL_BANKROLL_INITIAL_YEN,
+      hasPreCutoffExhibition: fPre.hasCompleteExhibition,
+      preUsedNoEx,
+      inputs: fPre,
+      trainingCount: models.trainingCount,
+      predictions: {
+        B13v2Pre: { version: B13V2_VERSION, ...pick(predPre.distribution) },
+        B13v2: { version: B13V2_VERSION, ...pick(predFull.distribution) },
+        B13v2NoEx: { version: B13V2_VERSION, ...pick(predNoEx.distribution) },
+        B13: { version: "b13-lane-pl-shadow-v1", ...pick(b13Dist) },
+        B01: { version: "fixed-123-132", tickets: ["1-2-3", "1-3-2"] },
+        B02: { version: "fixed-123-124", tickets: ["1-2-3", "1-2-4"] },
+        FIXED123: { version: "fixed-123", tickets: ["1-2-3"] },
+      },
+    };
+
+    if (prev) {
+      this.sql.exec(
+        "UPDATE boat_shadow_predictions SET frozen_at = ?, body = ? WHERE race_id = ?",
+        record.frozenAt,
+        JSON.stringify(record),
+        race.id,
+      );
+    } else {
+      this.sql.exec(
+        "INSERT INTO boat_shadow_predictions (race_id, date, frozen_at, body) VALUES (?, ?, ?, ?)",
+        race.id,
+        race.date,
+        record.frozenAt,
+        JSON.stringify(record),
+      );
+    }
   }
 
   /** 発走前の番組・展示から事前特徴量・B11出力・各閾値判定を凍結する。級別欠損または展示進入未凍結の行のみ、締切前なら更新可。 */
@@ -124,14 +287,17 @@ export class BoatCollector {
     return this.sql.exec<Row>("SELECT * FROM boat_races WHERE id = ?", id).toArray()[0];
   }
 
-  private save(race: BoatRecord, captureNext: number, resultNext: number) {
+  private save(race: BoatRecord, captureNext: number, resultNext: number, exhibitionNext?: number) {
     const time = race.freeze?.cutoff ?? race.cutoff;
     const cutoff = time ? Date.parse(time) : 0;
-    this.sql.exec(`INSERT INTO boat_races (id, date, body, cutoff, capture_next, result_next)
-      VALUES (?, ?, ?, ?, ?, ?)
+    const prevExNext = this.row(race.id)?.exhibition_next ?? 0;
+    const nextEx = exhibitionNext !== undefined ? exhibitionNext : prevExNext;
+    this.sql.exec(`INSERT INTO boat_races (id, date, body, cutoff, capture_next, result_next, exhibition_next)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET body = excluded.body, cutoff = excluded.cutoff,
-        capture_next = excluded.capture_next, result_next = excluded.result_next`,
-    race.id, race.date, JSON.stringify(race), cutoff, captureNext, resultNext);
+        capture_next = excluded.capture_next, result_next = excluded.result_next,
+        exhibition_next = excluded.exhibition_next`,
+    race.id, race.date, JSON.stringify(race), cutoff, captureNext, resultNext, nextEx);
   }
 
   private async program(now: number, sync: ProgramSync) {
@@ -148,6 +314,7 @@ export class BoatCollector {
           const prev = this.row(race.id);
           const existing = prev ? JSON.parse(prev.body) as BoatRecord : null;
           try { this.freezeResearch(race, new Date(now)); } catch { /* 研究凍結の失敗で収集を止めない */ }
+          try { this.freezeShadowPredictions(race, new Date(now)); } catch { /* 予測凍結の失敗で収集を止めない */ }
           if (existing?.freeze || existing?.result) continue;
           const cutoff = race.cutoff ? Date.parse(race.cutoff) : 0;
           const issue = cutoff ? (cutoff === prev?.cutoff ? existing?.issue : undefined) : "公式の締切予定時刻が未取得";
@@ -155,7 +322,10 @@ export class BoatCollector {
           const resultNext = existing?.result ? 0
             : cutoff === prev?.cutoff && prev.result_next > 0 ? prev.result_next
             : cutoff ? cutoff + RESULT_DELAY : 0;
-          this.save({ ...race, issue }, captureNext, resultNext);
+          const exNext = existing?.exhibition?.entries?.length ? 0
+            : cutoff === prev?.cutoff && (prev?.exhibition_next ?? 0) > 0 ? (prev?.exhibition_next ?? 0)
+            : cutoff ? cutoff - PRE_EXHIBITION_LEAD : 0;
+          this.save({ ...race, issue }, captureNext, resultNext, exNext);
         }
         return null;
       } catch (err) {
@@ -192,12 +362,48 @@ export class BoatCollector {
         if (Date.now() >= Date.parse(freeze.cutoff) || this.boughtIn(cycle) ||
           this.bankroll().balance < BET_COST || this.row(row.id)?.body !== row.body) return;
         this.sql.exec("INSERT INTO boat_auto_bets (race_id, hour, stake) VALUES (?, ?, ?)", race.id, cycle, BET_COST);
-        this.save({ ...race, freeze }, 0, cycle + CYCLE);
+        this.save({ ...race, freeze }, 0, cycle + CYCLE, 0);
       });
       try { this.freezeResearch({ ...race, freeze }, now); } catch { /* 研究凍結の失敗で収集を止めない */ }
+      try { this.freezeShadowPredictions({ ...race, freeze }, now); } catch { /* 予測凍結の失敗で収集を止めない */ }
     } catch (err) {
       if (this.row(row.id)?.body !== row.body) return;
       this.save({ ...race, issue: message(err) }, Date.now() + 18_000, row.result_next);
+    }
+  }
+
+  /** 締切前展示の取得率95%以上を目指し、v1購入枠とは独立して全レースの直前情報(beforeinfo)を事前取得・凍結する。 */
+  private async captureExhibition(row: Row) {
+    const race = JSON.parse(row.body) as BoatRecord;
+    if (race.freeze || race.exhibition?.entries?.length) {
+      this.save(race, row.capture_next, row.result_next, 0);
+      return;
+    }
+    const now = Date.now();
+    if (row.cutoff > 0 && now >= row.cutoff) {
+      this.save(race, row.capture_next, row.result_next, 0);
+      return;
+    }
+    try {
+      const page = await this.source.page(officialUrl("beforeinfo", race.date, race.venue, race.number));
+      const entries = parseExhibition(page);
+      const times = parseExhibitionTimes(page);
+      const hasAllTimes = Object.keys(times).length === 6;
+      if (entries.length === 6 && hasAllTimes) {
+        race.exhibition = { evidence: page.evidence, entries, times };
+        const fresh = this.row(row.id);
+        if (!fresh || fresh.body !== row.body) return;
+        this.save(race, fresh.capture_next, fresh.result_next, 0);
+        try { this.freezeResearch(race, new Date(now)); } catch { /* ignore */ }
+        try { this.freezeShadowPredictions(race, new Date(now)); } catch { /* ignore */ }
+        return;
+      }
+    } catch { /* 一時エラー時は締切前リトライ */ }
+    const retryDelay = row.cutoff > 0 && now < row.cutoff - 90_000 ? 90_000 : 30_000;
+    const nextTry = row.cutoff > 0 && now + retryDelay < row.cutoff ? now + retryDelay : 0;
+    const fresh = this.row(row.id);
+    if (fresh && fresh.body === row.body) {
+      this.save(race, fresh.capture_next, fresh.result_next, nextTry);
     }
   }
 
@@ -270,6 +476,15 @@ export class BoatCollector {
         ORDER BY (json_type(body, '$.freeze') IS NOT NULL) DESC, result_next, id LIMIT 6`, now).toArray();
       await Promise.all(results.map((row) => this.result(row)));
       if (sync.next <= now) await this.program(now, sync);
+      if (status.shadowExhibition) {
+        const exDue = this.sql.exec<Row>(
+          `SELECT * FROM boat_races WHERE exhibition_next > 0 AND exhibition_next <= ? AND cutoff > ?
+           ORDER BY cutoff, id LIMIT 6`,
+          now,
+          now,
+        ).toArray();
+        await Promise.all(exDue.map((row) => this.captureExhibition(row)));
+      }
       if (!this.boughtIn(cycle) && this.bankroll().balance >= BET_COST) {
         const at = Date.now();
         const capture = this.sql.exec<Row>(`SELECT * FROM boat_races WHERE capture_next > 0
@@ -285,6 +500,12 @@ export class BoatCollector {
     const at = Date.now();
     const activeCycle = cycleStart(at);
     const earliestCutoff = this.boughtIn(activeCycle) ? activeCycle + CYCLE : at + 1;
+    const exWake = status.shadowExhibition
+      ? this.sql.exec<{ due: number | null }>(
+          "SELECT MIN(exhibition_next) AS due FROM boat_races WHERE exhibition_next > 0 AND cutoff > ?",
+          at,
+        ).one().due
+      : null;
     const wake = this.sql.exec<{ due: number | null }>(`
       SELECT MIN(due) AS due FROM (
         SELECT MIN(MAX(capture_next, cutoff - cutoff % ?)) AS due
@@ -292,13 +513,14 @@ export class BoatCollector {
         UNION ALL SELECT MIN(result_next) FROM boat_races
           WHERE result_next > 0
       )`, CYCLE, earliestCutoff, this.bankroll().balance >= BET_COST ? 1 : 0).one().due;
+    const nextWake = Math.min(wake ?? Infinity, exWake ?? Infinity);
     if (!(await this.status()).enabled) return;
     await this.state.storage.put({
-      "boat-status": { enabled: true, lastRun: new Date().toISOString(), issue },
+      "boat-status": { enabled: true, shadowExhibition: Boolean(status.shadowExhibition), lastRun: new Date().toISOString(), issue },
       "boat-program": sync,
     });
     const midnight = Date.parse(`${japanDate()}T00:00:00+09:00`) + DAY;
-    await this.state.storage.setAlarm(Math.max(Date.now() + 5000, Math.min(wake ?? Infinity, sync.next, midnight)));
+    await this.state.storage.setAlarm(Math.max(Date.now() + 5000, Math.min(nextWake, sync.next, midnight)));
   }
 
   async route(request: Request) {
@@ -308,16 +530,40 @@ export class BoatCollector {
     if (path === "collect" && ["POST", "DELETE"].includes(request.method)) {
       const status = await this.status();
       const enabled = request.method === "POST";
-      await this.state.storage.put("boat-status", { ...status, enabled });
+      const shadowParam = url.searchParams.get("shadow");
+      const shadowExhibition = shadowParam !== null ? shadowParam !== "0" : status.shadowExhibition;
+      await this.state.storage.put("boat-status", { ...status, enabled, shadowExhibition });
       if (enabled) {
         const sync = await this.state.storage.get<ProgramSync>("boat-program");
         if (sync && !status.enabled) await this.state.storage.put("boat-program", { ...sync, next: Date.now() });
         await this.state.storage.setAlarm(Date.now() + 1000);
       } else await this.state.storage.deleteAlarm();
-      return json({ enabled });
+      return json({ enabled, shadowExhibition: Boolean(shadowExhibition) });
     }
     if (request.method !== "GET") return json({ error: "許可されていないメソッドです" }, 405);
     if (path === "status") return json({ ...await this.status(), bankroll: this.bankroll() });
+    if (path === "shadow") {
+      const from = url.searchParams.get("from") ?? japanDate(Date.now() - 90 * DAY);
+      if (!DATE_PATTERN.test(from)) return json({ error: "開始日が不正です" }, 400);
+      const records = this.sql.exec<{ body: string }>(
+        "SELECT body FROM boat_races WHERE date >= ? ORDER BY date, cutoff, id",
+        from,
+      ).toArray().map((r) => JSON.parse(r.body) as BoatRecord);
+      const frozen = this.sql.exec<{ race_id: string; body: string }>(
+        "SELECT race_id, body FROM boat_shadow_predictions WHERE date >= ? ORDER BY date, race_id",
+        from,
+      ).toArray().map((r) => JSON.parse(r.body) as ShadowPredictionRecord);
+      const evaluation = evaluateB13V2(records);
+      return json({
+        from,
+        mainModel: evaluation.mainModel,
+        virtualBankrollInitialYen: evaluation.virtualBankrollInitialYen,
+        missingness: evaluation.missingness,
+        models: evaluation.models,
+        frozenCount: frozen.length,
+        frozenPreExhibitionCount: frozen.filter((f) => f.hasPreCutoffExhibition).length,
+      });
+    }
     if (path === "stats") {
       const date = japanDate(Date.now() - 90 * DAY);
       const rows = this.sql.exec<{ body: string }>("SELECT body FROM boat_races WHERE date >= ? ORDER BY cutoff, id", date);
@@ -375,8 +621,11 @@ export class BoatCollector {
           JOIN boat_races AS r ON r.id = b.race_id WHERE r.date = ? ORDER BY b.hour`, date).toArray();
         const research = this.sql.exec<{ body: string }>(
           "SELECT body FROM boat_research WHERE date = ? ORDER BY race_id", date);
+        const shadowPredictions = this.sql.exec<{ body: string }>(
+          "SELECT body FROM boat_shadow_predictions WHERE date = ? ORDER BY race_id", date);
         return json({ version: "boatrace-archive-v1", date, records, autoBets,
           research: Array.from(research, (r) => JSON.parse(r.body)),
+          shadowPredictions: Array.from(shadowPredictions, (r) => JSON.parse(r.body)),
           revisions: Array.from(revisions, (r) => ({ raceId: r.id, result: JSON.parse(r.body) })) });
       }
       const now = Date.now();
