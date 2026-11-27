@@ -104,9 +104,7 @@ export function parseProgram(page: Page, venueName: string): BoatRace[] {
 export function parseOdds(page: Page, kind: "exacta" | "trifecta"): BoatOdds {
   const $ = load(page.html);
   const date = dateOf(page);
-  const race = Number(pageUrl(page).searchParams.get("rno"));
-  const header = $("td").filter((_, el) => text($(el).text()) === "締切予定時刻").first();
-  const cutoff = clock(date, text(header.nextAll("td").eq(race - 1).text()));
+  const cutoff = pageCutoff($, page);
   const update = text($(".tab4_refreshText").text());
   const updatedAt = /オッズ更新時間/.test(update) ? clock(date, update) : null;
   const phase = /締切時オッズ/.test(text($(".tab4_time").text()))
@@ -189,11 +187,18 @@ export function parseRacelist(page: Page): RacelistEntry[] {
     const stTokens = text(cells.eq(3).text()).split(" ").filter(Boolean);
     const fMatch = stTokens.find((t) => /^F\d+$/.test(t));
     const lMatch = stTokens.find((t) => /^L\d+$/.test(t));
-    const stVal = stTokens.find((t) => /^\d+\.\d+$/.test(t));
-    const nat = text(cells.eq(4).text()).split(" ").filter(Boolean);
-    const loc = text(cells.eq(5).text()).split(" ").filter(Boolean);
-    const mot = text(cells.eq(6).text()).split(" ").filter(Boolean);
-    const boa = text(cells.eq(7).text()).split(" ").filter(Boolean);
+    const stVal = stTokens.find((t) => /^(?:0)?\.\d+$/.test(t));
+    const values = (column: number) => {
+      // BR tags, including adjacent tags, separate three positional values.
+      const content = cells.eq(column).clone();
+      content.find("br").replaceWith("|");
+      const raw = text(content.text());
+      return raw.includes("|") ? raw.split("|").map((part) => part.trim()) : raw.split(" ");
+    };
+    const nat = values(4);
+    const loc = values(5);
+    const mot = values(6);
+    const boa = values(7);
     entries.push({
       boat,
       racerId: idGrade?.[1] ?? null,
@@ -256,6 +261,18 @@ export function parseBeforeInfoDetails(page: Page): BeforeInfoDetails {
     }
   });
   return { entries: parseExhibition(page), times, tilts, weights, adjustedWeights };
+}
+
+/** Race pages publish the venue-wide deadline row above the active tab. */
+export function parsePageCutoff(page: Page) {
+  return pageCutoff(load(page.html), page);
+}
+
+function pageCutoff($: ReturnType<typeof load>, page: Page) {
+  const race = Number(pageUrl(page).searchParams.get("rno"));
+  if (race < 1 || race > 12) return null;
+  const header = $("td").filter((_, el) => text($(el).text()) === "締切予定時刻").first();
+  return clock(dateOf(page), text(header.nextAll("td").eq(race - 1).text()));
 }
 
 export function parseResult(page: Page): BoatResult | null {

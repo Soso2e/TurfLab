@@ -1,3 +1,4 @@
+import { BoatOfficialCollection, sourcePhase } from "../workers/api/src/boatrace-official-collection";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -196,11 +197,17 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
     `<tr>${td(`<a href="${path.replace("rno=1", `rno=${number}`)}">${number}R</a>`)}${td(time)}${td("発売前")}${
       race.entries.map((entry) => td(`<a>${entry.name}</a><div class="is-fs12">${entry.grade_original}</div>`)).join("")
     }</tr>`;
+  const racelist = `<div class="table1"><table>${race.entries.map((entry) => `
+    <tbody><tr>${td(entry.boat.toString())}${td("")}
+    ${td(`<div>123${entry.boat} / ${entry.grade_original}</div><a>${entry.name}</a>`)}
+    ${td("F0 L0 .16")}${td("7.50<br>40.00<br>50.00")}${td("0.00<br><br>0.00")}
+    ${td("62<br>40.00<br>50.00")}${td("30<br>40.00<br>50.00")}</tr></tbody>`).join("")}</table></div>`;
   const contents: Record<string, () => string> = {
     index: () => `<table><tbody><tr><td><img src="/text_place1_12.png" alt="住之江"></td>
       <td><a href="/owpc/pc/race/raceindex?hd=20261123&jcd=12">開催</a></td></tr></tbody></table>`,
     raceindex: () => `<table><tbody>${programRow(1, "15:27")}${programRow(2, "15:28")}${
       programRow(3, "15:57")}${programRow(4, "16:27")}</tbody></table>`,
+    racelist: () => racelist,
     odds2tf: () => oddsHtml("odds2tf"),
     odds3t: () => oddsHtml("odds3t"),
     beforeinfo: () => `<div class="table1_boatImage1"><span class="table1_boatImage1Number">2</span>
@@ -235,18 +242,18 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
       kind: "forward", evaluation: { b11: { status: "bet", branch: "inner-outer", tickets: ["1-2-3", "1-3-2"] }, sigmaClass: "large" },
     });
     expect(await bankroll()).toMatchObject({ stake: 0 });
-    expect(new Date(alarmTime).toISOString()).toBe(new Date(Date.parse(cutoff) - 145_000).toISOString());
+    expect(alarmTime).toBeLessThan(Date.parse(cutoff) - 145_000);
     vi.setSystemTime(freezeTime);
     await collector.alarm();
     const saved = (await (await collector.route(request(detail))).json() as { race: BoatRecord }).race.freeze;
     expect(saved?.plans.adjusted.second).toBe(2);
     expect(await bankroll()).toMatchObject({ balance: 99_800, stake: 200, pending: 200 });
-    expect(new Date(alarmTime)).toEqual(new Date(`${date}T15:30:00+09:00`));
+    expect(alarmTime).toBeLessThanOrEqual(Date.parse(`${date}T15:30:00+09:00`));
     collector = new BoatCollector(state, source);
     vi.setSystemTime(new Date(`${date}T15:26:00+09:00`));
     source.page.mockClear();
     await collector.alarm();
-    expect(source.page).not.toHaveBeenCalled();
+    expect(source.page.mock.calls.flat().some((url) => url.includes("/odds"))).toBe(false);
     expect(await (await collector.route(request(`races/${date}-12-2`))).json()).toMatchObject({ funded: false });
     vi.setSystemTime(new Date(`${date}T15:30:00+09:00`));
     await collector.alarm();
@@ -268,7 +275,7 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
     vi.setSystemTime(new Date(`${date}T16:25:00+09:00`));
     source.page.mockClear();
     await collector.alarm();
-    expect(source.page).not.toHaveBeenCalled();
+    expect(source.page.mock.calls.flat().some((url) => url.includes("/odds"))).toBe(false);
     expect(await bankroll()).toMatchObject({ balance: 100 });
     published = payouts(["1-2-4/900"], [[1, 1], [2, 2], [4, 3]], [5]);
     vi.setSystemTime(new Date(`${date}T16:30:00+09:00`));
@@ -280,7 +287,13 @@ it("30分に1レースを購入し、再起動後の精算・訂正・残高不�
     expect(await bankroll()).toMatchObject({ balance: 200, payout: 900, refund: 300, pending: 0 });
     expect(await (await collector.route(request("stats"))).json()).toMatchObject({ settled: 2 });
     expect(await (await collector.route(request("archive?date=" + date))).json()).toMatchObject({
-      date, records: [
+      date, officialObservations: expect.arrayContaining([
+        expect.objectContaining({
+          raceId: race.id, kind: "racelist", phase: "pre-cutoff", complete: true,
+          entries: expect.arrayContaining([expect.objectContaining({ racerId: "1231", avgSt: 0.16,
+            localWinRate: 0, local2Rate: null, local3Rate: 0, motorNo: 62, boatNo: 30 })]),
+        }),
+      ]), records: [
         { freeze: saved },
         { id: `${date}-12-2`, exhibition: { entries: [{ boat: 2, st: "F.03", flying: true }] }, result: { payouts: { "1-2-4": 900 } } },
         { id: `${date}-12-3` },
@@ -368,4 +381,63 @@ describe("公式出走表(racelist)と直前情報詳細(beforeinfo)の抽出", 
       { boat: 2, course: 2, st: "F.01", flying: true },
     ]);
   });
+});
+
+it("uses the earlier observed cutoff and treats responses completed at the cutoff as post-cutoff", () => {
+  const program = Date.parse("2026-11-27T04:03:00Z");
+  const page = "2026-11-27T04:00:00Z";
+  expect(sourcePhase("2026-11-27T03:59:59.999Z", program, page, false)?.phase).toBe("pre-cutoff");
+  expect(sourcePhase(page, program, page, false)?.phase).toBe("post-cutoff");
+  expect(sourcePhase("2026-11-27T03:59:59Z", program, page, true)?.phase).toBe("post-cutoff");
+  expect(sourcePhase(page, 0, null, false)).toBeNull();
+});
+
+it("processes more than six simultaneous race deadlines and keeps completed-after-deadline responses out of live evidence", async () => {
+  vi.useFakeTimers();
+  const now = Date.parse("2026-11-27T03:50:00Z");
+  const deadline = now + 8 * 60_000;
+  vi.setSystemTime(now);
+  const database = new DatabaseSync(":memory:");
+  try {
+    const sql = { exec: (query: string, ...bind: (string | number)[]) => {
+      const statement = database.prepare(query);
+      const read = query.trimStart().startsWith("SELECT");
+      if (!read) statement.run(...bind);
+      const rows = read ? statement.all(...bind) : [];
+      return { toArray: () => rows, one: () => rows[0] };
+    } } as unknown as SqlStorage;
+    sql.exec("CREATE TABLE boat_races (id TEXT PRIMARY KEY, date TEXT, cutoff INTEGER, body TEXT)");
+    const boats = [1, 2, 3, 4, 5, 6];
+    const html = `<table><thead><tr><th>艇</th><th>展示タイム</th></tr></thead>
+      ${boats.map((boat) => `<tbody><tr><td>${boat}</td><td>6.85</td></tr></tbody>`).join("")}</table>
+      ${boats.map((boat) => `<div class="table1_boatImage1"><span class="table1_boatImage1Number">${boat}</span>
+      <span class="table1_boatImage1Time">.12</span></div>`).join("")}`;
+    const source = { page: vi.fn(async (url: string) => {
+      const page = new URL(url);
+      const exhibition = page.pathname.endsWith("beforeinfo");
+      const late = page.searchParams.get("jcd") === "08";
+      return { html: exhibition ? html : "", evidence: { url, fetchedAt: new Date(late ? deadline : now).toISOString() } };
+    }) };
+    const collection = new BoatOfficialCollection(sql, source);
+    collection.initialize();
+    for (let venue = 1; venue <= 8; venue++) {
+      const code = String(venue).padStart(2, "0");
+      const record = { ...race, id: `2026-11-27-${code}-1`, date: "2026-11-27", venue: code, number: 1 };
+      sql.exec("INSERT INTO boat_races VALUES (?, ?, ?, ?)", record.id, record.date, deadline, JSON.stringify(record));
+    }
+    collection.seed("2026-11-27", now);
+    const save = vi.fn();
+    expect(await collection.collect(now, true, save)).toBe(6);
+    expect(await collection.collect(now, true, save)).toBe(6);
+    expect(await collection.collect(now, true, save)).toBe(4);
+    expect(save).toHaveBeenCalledTimes(7);
+    expect(collection.observations("2026-11-27").map(({ phase }) => phase).sort())
+      .toEqual(["post-cutoff", ...Array(7).fill("pre-cutoff")]);
+    expect(collection.coverage("2026-11-27", deadline)).toMatchObject({
+      denominator: 8, preCutoffExhibition: 7, rate: 7 / 8, postCutoffObservations: 1,
+    });
+  } finally {
+    database.close();
+    vi.useRealTimers();
+  }
 });
