@@ -265,9 +265,10 @@ if (process.argv[1]?.endsWith("boatrace-research-cli.ts")) {
     for (const [id, s] of Object.entries(b13.models)) {
       console.log(`${id} 対象${s.targets} 適用${s.applied} 見送${s.skipped} 精算${s.settled} 未確定${s.pending} 除外${s.excluded} 的中${s.hits} 投入${s.stake} 払戻${s.payout} 返還${s.refund} 損益${s.net} 回収${pct(s.roi)} | log loss=${s.logLoss ?? "—"}`);
     }
-    console.log("\n[B13v2 / contextual Plackett-Luce shadow]");
+    console.log(`\n[B13v2 / contextual Plackett-Luce shadow (main=${b13v2.mainModel}, 初期仮想予算=${b13v2.virtualBankrollInitialYen}円)]`);
+    console.log(`  締切前展示取得: ${b13v2.missingness.preCutoffExhibition}/${b13v2.missingness.totalRaces}R (${pct(b13v2.missingness.preCutoffExhibitionRate)}) | 展示欠損: ${b13v2.missingness.missingExhibition}R`);
     for (const [id, s] of Object.entries(b13v2.models)) {
-      console.log(`${id.padEnd(8)} 対象${s.targets} 適用${s.applied} 見送${s.skipped} 精算${s.settled} 未確定${s.pending} 除外${s.excluded} 的中${s.hits} 投入${s.stake} 払戻${s.payout} 返還${s.refund} 損益${s.net} 回収${pct(s.roi)} | log loss=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"}`);
+      console.log(`${id.padEnd(9)} 対象${s.targets} 適用${s.applied} 見送${s.skipped} 精算${s.settled} 的中${s.hits} ${pct(s.hitRate)} 投入${s.stake} 払戻${s.payout} 返還${s.refund} 損益${s.net} 残高${s.balanceEnd} 回収${pct(s.roi)} | LL=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"} Brier=${s.brierScore !== null ? s.brierScore.toFixed(5) : "—"}`);
     }
     printSummaryRows("reconstructed", report.reconstructed, false);
     printSummaryRows("reconstructed", report.reconstructed, true);

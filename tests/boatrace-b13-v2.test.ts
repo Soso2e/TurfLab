@@ -1,12 +1,19 @@
-import { describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoatRecord, Grade } from "../packages/shared/src/boatrace";
 import {
+  B13V2_CONFIG,
   B13V2_FEATURE_NAMES,
+  buildBoatFeatureMatrix,
   evaluateB13V2,
   extractB13V2Features,
   fitB13V2,
+  fitB13V2NoEx,
   predictB13V2,
+  scoreDistribution,
+  VIRTUAL_BANKROLL_INITIAL_YEN,
 } from "../packages/shared/src/boatrace-b13-v2";
+import { BoatCollector } from "../workers/api/src/boatrace-collector";
 
 function makeRace(
   id: string,
@@ -125,8 +132,129 @@ describe("B13v2 contextual Plackett-Luce shadow", () => {
     expect(report.days[1].trainingCount).toBe(1);
     expect(report.days[1].rows.find((x) => x.raceId === "d2PostProg")?.status).toBe("program-not-pre-cutoff");
     expect(report.days[1].models.B13v2).toMatchObject({ applied: 1, settled: 1, hits: 1, stake: 200, payout: 900 });
-    expect(report.days[1].models.FIXED123).toMatchObject({ applied: 1, settled: 1, hits: 1, stake: 100, payout: 900 });
+    expect(report.days[1].models.B13v2Pre).toMatchObject({ applied: 1, settled: 1, hits: 1, stake: 200, payout: 900 });
+    expect(report.days[1].models.B13v2NoEx).toMatchObject({ applied: 1, settled: 1, hits: 1, stake: 200, payout: 900 });
+    expect(report.days[1].models.FIXED123).toMatchObject({ applied: 1, settled: 1, hits: 1, stake: 200, payout: 1800 });
+    expect(report.days[1].models.B13v2Pre.balanceEnd).toBe(VIRTUAL_BANKROLL_INITIAL_YEN + 700);
     expect(report.days[1].models.B13v2.logLoss).not.toBeNull();
+    expect(report.days[1].models.B13v2.brierScore).not.toBeNull();
     expect(report).toEqual(evaluateB13V2([d1a, d1Late, d2a, d2PostProg]));
+  });
+
+  it("prevents race-level feature cancellation via zero-sum contrasts and supports NoEx fallback", () => {
+    const sumSlope = B13V2_CONFIG.innerSlope.reduce((a, b) => a + b, 0);
+    const sumB1 = B13V2_CONFIG.b1FocusContrast.reduce((a, b) => a + b, 0);
+    expect(sumSlope).toBeCloseTo(0, 12);
+    expect(sumB1).toBeCloseTo(0, 12);
+
+    const s1 = makeRace("z1", "2026-11-23", [1, 2, 3], { exTimes: [6.70, 6.71, 6.72, 6.73, 6.74, 6.75] });
+    const s2 = makeRace("z2", "2026-11-23", [4, 5, 6], {
+      grades: ["B1", "B1", "B1", "A1", "A1", "A1"],
+      exCourse: [2, 1, 3, 4, 5, 6],
+      exTimes: [6.85, 6.84, 6.80, 6.65, 6.66, 6.67],
+    });
+    const full = fitB13V2([
+      { features: extractB13V2Features(s1), order: [1, 2, 3] },
+      { features: extractB13V2Features(s2), order: [4, 5, 6] },
+    ])!;
+    const noEx = fitB13V2NoEx([
+      { features: extractB13V2Features(s1), order: [1, 2, 3] },
+      { features: extractB13V2Features(s2), order: [4, 5, 6] },
+    ])!;
+
+    const fWaku = extractB13V2Features(makeRace("w1", "2026-11-24", [1, 2, 3], { exCourse: [1, 2, 3, 4, 5, 6] }));
+    const fChanged = extractB13V2Features(makeRace("w2", "2026-11-24", [1, 2, 3], { exCourse: [2, 1, 3, 4, 5, 6] }));
+    const m1 = buildBoatFeatureMatrix(fWaku, full.norm);
+    const m2 = buildBoatFeatureMatrix(fChanged, full.norm);
+    // Race-level wakunari feature differs across boats (non-constant shift)
+    expect(m1.map((r) => r[23])).not.toEqual(m2.map((r) => r[23]));
+    expect(predictB13V2(full, fWaku).distribution).not.toEqual(predictB13V2(full, fChanged).distribution);
+
+    const pNoEx = predictB13V2(noEx, extractB13V2Features(makeRace("nx", "2026-11-24", [1, 2, 3], { withEx: false })));
+    expect(pNoEx.distribution).toHaveLength(120);
+    const metrics = scoreDistribution(pNoEx.distribution, "1-2-3");
+    expect(metrics.brierScore).toBeGreaterThanOrEqual(0);
+    expect(metrics.brierScore).toBeLessThanOrEqual(2);
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("captures pre-cutoff exhibition for all races and freezes shadow predictions when shadowExhibition is enabled", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const db = new DatabaseSync(":memory:");
+    const kv = new Map<string, unknown>();
+    const state = {
+      storage: {
+        sql: {
+          exec: (sql: string, ...bind: (string | number)[]) => {
+            const stmt = db.prepare(sql);
+            const read = sql.trimStart().startsWith("SELECT") || sql.trimStart().startsWith("PRAGMA");
+            if (!read) stmt.run(...bind);
+            const rows = read ? stmt.all(...bind) : [];
+            return { toArray: () => rows, one: () => rows[0], [Symbol.iterator]: () => rows[Symbol.iterator]() };
+          },
+        },
+        transactionSync: (fn: () => void) => {
+          db.exec("BEGIN");
+          try { fn(); db.exec("COMMIT"); } catch (e) { db.exec("ROLLBACK"); throw e; }
+        },
+        get: async (k: string) => structuredClone(kv.get(k)),
+        put: async (k: string | Record<string, unknown>, v?: unknown) => {
+          for (const [kk, vv] of Object.entries(typeof k === "string" ? { [k]: v } : k)) kv.set(kk, structuredClone(vv));
+        },
+        setAlarm: async () => {},
+        deleteAlarm: async () => {},
+      },
+    } as unknown as DurableObjectState;
+
+    const d1 = "2026-11-23";
+    const d2 = "2026-11-24";
+    const priorRace = makeRace(`${d1}-12-1`, d1, [1, 2, 3]);
+    const progRow = (n: number, time: string) =>
+      `<tr><td><a href="/owpc/pc/race/racelist?hd=20261124&jcd=12&rno=${n}">${n}R</a></td><td>${time}</td><td>発売前</td>` +
+      [1, 2, 3, 4, 5, 6].map((b) => `<td><a>R${b}</a><div class="is-fs12">${b === 1 ? "A1" : "B1"}</div></td>`).join("") +
+      "</tr>";
+    const beforeHtml =
+      [1, 2, 3, 4, 5, 6].map((b) => `<div class="table1_boatImage1"><span class="table1_boatImage1Number">${b}</span><span class="table1_boatImage1Time">.1${b}</span></div>`).join("") +
+      `<table><thead><tr><th>枠</th><th>選手</th><th>展示タイム</th></tr></thead>${[1, 2, 3, 4, 5, 6].map((b) => `<tbody><tr><td>${b}</td><td>R${b}</td><td>6.7${b}</td></tr></tbody>`).join("")}</table>`;
+    const oddsHtml = '<p class="tab4_refreshText">オッズ更新時間 15:24</p><table><tr><td>締切予定時刻</td><td>15:27</td></tr></table>';
+
+    const source = {
+      page: vi.fn(async (url: string) => {
+        const p = new URL(url).pathname.split("/").at(-1)!;
+        const html =
+          p === "index" ? '<table><tbody><tr><td><img src="/text_place1_12.png" alt="住之江"></td><td><a href="/owpc/pc/race/raceindex?hd=20261124&jcd=12">開催</a></td></tr></tbody></table>'
+          : p === "raceindex" ? `<table><tbody>${progRow(1, "15:27")}${progRow(2, "15:28")}</tbody></table>`
+          : p === "beforeinfo" ? beforeHtml
+          : p === "odds2tf" || p === "odds3t" ? oddsHtml
+          : "";
+        return { html, evidence: { url, fetchedAt: new Date().toISOString() } };
+      }),
+    };
+
+    try {
+      const collector = new BoatCollector(state, source);
+      await collector.route(new Request("https://example.test/api/boatrace/collect?shadow=1", { method: "POST" }));
+      db.prepare("INSERT INTO boat_races (id, date, body, cutoff, capture_next, result_next) VALUES (?, ?, ?, ?, 0, 0)")
+        .run(priorRace.id, d1, JSON.stringify(priorRace), Date.parse(priorRace.cutoff!));
+
+      vi.setSystemTime(new Date(`${d2}T15:10:00+09:00`));
+      await collector.alarm(); // program sync + initial shadow prediction (NoEx)
+
+      vi.setSystemTime(new Date(`${d2}T15:22:00+09:00`));
+      await collector.alarm(); // 6 min before cutoff -> captures beforeinfo for BOTH 1R & 2R independently of 30m bet limit!
+
+      const frozen = db.prepare("SELECT race_id, body FROM boat_shadow_predictions ORDER BY race_id").all() as { race_id: string; body: string }[];
+      expect(frozen).toHaveLength(2);
+      expect(JSON.parse(frozen[0].body)).toMatchObject({ mainModel: "B13v2Pre", hasPreCutoffExhibition: true, preUsedNoEx: false });
+      expect(JSON.parse(frozen[1].body)).toMatchObject({ mainModel: "B13v2Pre", hasPreCutoffExhibition: true, preUsedNoEx: false });
+
+      const shadowRes = await (await collector.route(new Request(`https://example.test/api/boatrace/shadow?from=${d1}`))).json() as {
+        mainModel: string; frozenCount: number; frozenPreExhibitionCount: number;
+      };
+      expect(shadowRes).toMatchObject({ mainModel: "B13v2Pre", frozenCount: 2, frozenPreExhibitionCount: 2 });
+    } finally {
+      db.close();
+    }
   });
 });

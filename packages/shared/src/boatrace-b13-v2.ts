@@ -1,11 +1,14 @@
-// 研究専用（shadow only）: B13v2 — 特徴量付き Plackett–Luce モデル（コース別等級・枠別F・展示偏差・枠なり）。
-// 既存v1の自動購入・既存B13（boatrace-b13.ts）は変更しない。実購入なし。
-// JST日付単位の expanding window で学習し、標準化統計量も学習データ内のみで算出する。
+// 研究専用（shadow only）: B13v2 — 特徴量付き Plackett–Luce モデル群。
+// - B13v2Pre (メイン昇格): 締切前展示あり時は展示特徴量モデル、欠損時は展示欠損専用モデル(B13v2NoEx)を使用。
+// - B13v2: 全展示データ（事後含む）を使う再構成比較用モデル。
+// - B13v2NoEx: 展示欠損時の専用モデル（枠番・コース別級別・内3艇降順・1号艇能力差のみ）。
+// - 既存 B13 / B01 / B02 / FIXED123 も廃止せず同一レース・同一予算条件（仮想予算10万円、1R=200円）で並行比較。
 import { BOATS, type BoatRecord } from "./boatrace";
-import { decideB11, gradePoint, settleB11 } from "./boatrace-b11";
+import { decideB11, gradePoint } from "./boatrace-b11";
 import { b13Distribution, fitB13, topThree } from "./boatrace-b13";
 
-export const B13V2_VERSION = "b13-context-pl-shadow-v1" as const;
+export const B13V2_VERSION = "b13-context-pl-shadow-v2" as const;
+export const VIRTUAL_BANKROLL_INITIAL_YEN = 100_000 as const;
 export const B13V2_CONFIG = {
   iterations: 350,
   step: 0.25,
@@ -13,7 +16,9 @@ export const B13V2_CONFIG = {
   l2Feature: 0.1,
   stakePerTicket: 100,
   ticketCount: 2,
+  /** 合計0のゼロ和コントラスト。Plackett-Luce の Softmax でレース共通特徴量が相殺されないことを保証する。 */
   innerSlope: [1.0, 0.4, 0.1, -0.4, -0.5, -0.6] as readonly number[],
+  b1FocusContrast: [5 / 6, -1 / 6, -1 / 6, -1 / 6, -1 / 6, -1 / 6] as readonly number[],
 } as const;
 
 export const B13V2_FEATURE_NAMES = [
@@ -28,7 +33,14 @@ export const B13V2_FEATURE_NAMES = [
   "race_ex_wakunari",
 ] as const;
 
-export type B13V2ModelId = "B13v2" | "B13v2Pre" | "B13" | "FIXED123" | "B01" | "B02" | "B11";
+export const B13V2_NOEX_FEATURE_NAMES = [
+  "lane_1", "lane_2", "lane_3", "lane_4", "lane_5", "lane_6",
+  "grade_c1", "grade_c2", "grade_c3", "grade_c4", "grade_c5", "grade_c6",
+  "race_inner_desc",
+  "race_b1_minus_others",
+] as const;
+
+export type B13V2ModelId = "B13v2Pre" | "B13v2" | "B13v2NoEx" | "B13" | "B01" | "B02" | "FIXED123" | "B11";
 
 export interface B13V2RaceFeatures {
   hasAllGrades: boolean;
@@ -38,6 +50,7 @@ export interface B13V2RaceFeatures {
   exhibitionSource: "freeze" | "exhibition" | null;
   exhibitionFetchedAt: string | null;
   exhibitionPreCutoff: boolean;
+  hasCompleteExhibition: boolean;
   exhibitionWakunari: boolean | null;
   exhibitionOrder: string | null;
   timeStd: number | null;
@@ -59,10 +72,12 @@ export interface B13V2NormStats {
 }
 
 export interface B13V2FittedModel {
+  version: typeof B13V2_VERSION;
+  kind: "full" | "noex";
   weights: number[];
   norm: B13V2NormStats;
   trainingCount: number;
-  namedWeights: Record<(typeof B13V2_FEATURE_NAMES)[number], number>;
+  namedWeights: Record<string, number>;
 }
 
 function before(a: string | null | undefined, b: string | null | undefined) {
@@ -185,6 +200,7 @@ export function extractB13V2Features(
 
   const exhibitionF = BOATS.map((b) => (fMap.size === 6 ? (fMap.get(b) ?? null) : null));
   const exhibitionFDepth = BOATS.map((b) => (fDepthMap.size === 6 ? (fDepthMap.get(b) ?? null) : null));
+  const hasCompleteExhibition = timeStd !== null && stStd !== null && exhibitionWakunari !== null && fMap.size === 6;
 
   return {
     hasAllGrades,
@@ -194,6 +210,7 @@ export function extractB13V2Features(
     exhibitionSource,
     exhibitionFetchedAt,
     exhibitionPreCutoff,
+    hasCompleteExhibition,
     exhibitionWakunari,
     exhibitionOrder,
     timeStd,
@@ -233,7 +250,7 @@ function computeNorm(items: readonly B13V2RaceFeatures[]): B13V2NormStats {
   };
 }
 
-/** 6艇分の特徴量行列（6×24）を構築する。欠損項目は標準化中心 0（影響なし）として安全にフォールバック。 */
+/** 6艇分の特徴量行列（6×24）を構築する。すべてのレース共通特徴量はゼロ和コントラストで相殺を防止。 */
 export function buildBoatFeatureMatrix(feat: B13V2RaceFeatures, norm: B13V2NormStats): number[][] {
   const gPoints = feat.hasAllGrades ? (feat.gradePoints as number[]) : [2.5, 2.5, 2.5, 2.5, 2.5, 2.5];
   const gMean = gPoints.reduce((a, b) => a + b, 0) / 6;
@@ -246,6 +263,7 @@ export function buildBoatFeatureMatrix(feat: B13V2RaceFeatures, norm: B13V2NormS
   return BOATS.map((_, i) => {
     const v = new Array<number>(B13V2_FEATURE_NAMES.length).fill(0);
     const slope = B13V2_CONFIG.innerSlope[i];
+    const b1Contrast = B13V2_CONFIG.b1FocusContrast[i];
     v[i] = 1;
     v[6 + i] = gPoints[i] - gMean;
     v[12 + i] = feat.exhibitionF[i] === true ? 1 : 0;
@@ -253,14 +271,32 @@ export function buildBoatFeatureMatrix(feat: B13V2RaceFeatures, norm: B13V2NormS
     v[19] = tStdC * slope;
     v[20] = stStdC * slope;
     v[21] = idC * slope;
-    v[22] = i === 0 ? b1C : 0;
+    v[22] = b1C * b1Contrast;
     v[23] = wakuC * slope;
     return v;
   });
 }
 
-export function fitB13V2(
+/** 展示欠損専用モデル用の特徴量行列（6×14）。展示情報に一切依存しない。 */
+export function buildNoExFeatureMatrix(feat: B13V2RaceFeatures, norm: B13V2NormStats): number[][] {
+  const gPoints = feat.hasAllGrades ? (feat.gradePoints as number[]) : [2.5, 2.5, 2.5, 2.5, 2.5, 2.5];
+  const gMean = gPoints.reduce((a, b) => a + b, 0) / 6;
+  const b1C = feat.b1MinusOthers !== null ? (feat.b1MinusOthers - norm.b1DiffMean) / norm.b1DiffStd : 0;
+  const idC = feat.innerDesc !== null ? Number(feat.innerDesc) - norm.innerDescMean : 0;
+
+  return BOATS.map((_, i) => {
+    const v = new Array<number>(B13V2_NOEX_FEATURE_NAMES.length).fill(0);
+    v[i] = 1;
+    v[6 + i] = gPoints[i] - gMean;
+    v[12] = idC * B13V2_CONFIG.innerSlope[i];
+    v[13] = b1C * B13V2_CONFIG.b1FocusContrast[i];
+    return v;
+  });
+}
+
+function fitLinearPL(
   samples: readonly { features: B13V2RaceFeatures; order: readonly number[] }[],
+  kind: "full" | "noex",
 ): B13V2FittedModel | null {
   if (!samples.length) return null;
   for (const s of samples) {
@@ -269,8 +305,10 @@ export function fitB13V2(
     }
   }
   const norm = computeNorm(samples.map((s) => s.features));
-  const matrices = samples.map((s) => ({ x: buildBoatFeatureMatrix(s.features, norm), order: s.order }));
-  const dim = B13V2_FEATURE_NAMES.length;
+  const featureNames = kind === "full" ? B13V2_FEATURE_NAMES : B13V2_NOEX_FEATURE_NAMES;
+  const builder = kind === "full" ? buildBoatFeatureMatrix : buildNoExFeatureMatrix;
+  const matrices = samples.map((s) => ({ x: builder(s.features, norm), order: s.order }));
+  const dim = featureNames.length;
   const w = new Array<number>(dim).fill(0);
   const n = matrices.length;
 
@@ -303,18 +341,37 @@ export function fitB13V2(
     }
   }
 
-  const namedWeights = Object.fromEntries(
-    B13V2_FEATURE_NAMES.map((name, i) => [name, w[i]]),
-  ) as Record<(typeof B13V2_FEATURE_NAMES)[number], number>;
+  const namedWeights = Object.fromEntries(featureNames.map((name, i) => [name, w[i]]));
+  return { version: B13V2_VERSION, kind, weights: w, norm, trainingCount: n, namedWeights };
+}
 
-  return { weights: w, norm, trainingCount: n, namedWeights };
+export function fitB13V2(samples: readonly { features: B13V2RaceFeatures; order: readonly number[] }[]) {
+  return fitLinearPL(samples, "full");
+}
+
+export function fitB13V2NoEx(samples: readonly { features: B13V2RaceFeatures; order: readonly number[] }[]) {
+  return fitLinearPL(samples, "noex");
 }
 
 export function predictB13V2(model: B13V2FittedModel, features: B13V2RaceFeatures) {
-  const x = buildBoatFeatureMatrix(features, model.norm);
+  const x = model.kind === "full" ? buildBoatFeatureMatrix(features, model.norm) : buildNoExFeatureMatrix(features, model.norm);
   const scores = x.map((row) => row.reduce((sum, v, k) => sum + v * model.weights[k], 0));
   const distribution = b13Distribution(scores);
   return { scores, distribution };
+}
+
+/** 120通り3連単確率分布に対する Multi-class Brier Score と Top-3 Log Loss を計算する。 */
+export function scoreDistribution(dist: readonly { combination: string; probability: number }[], actual: string) {
+  let pActual = 0;
+  let sumSq = 0;
+  for (const item of dist) {
+    sumSq += item.probability * item.probability;
+    if (item.combination === actual) pActual = item.probability;
+  }
+  return {
+    logLoss: pActual > 0 ? -Math.log(pActual) : null,
+    brierScore: 1 - 2 * pActual + sumSq,
+  };
 }
 
 function makeStats() {
@@ -331,60 +388,81 @@ function makeStats() {
     refund: 0,
     logLossSum: 0,
     logLossCount: 0,
+    brierSum: 0,
+    brierCount: 0,
   };
 }
 type Stats = ReturnType<typeof makeStats>;
 
 function finishStats(s: Stats) {
+  const net = s.payout + s.refund - s.stake;
   return {
     ...s,
-    net: s.payout + s.refund - s.stake,
+    net,
+    balanceEnd: VIRTUAL_BANKROLL_INITIAL_YEN + net,
     roi: s.stake ? (s.payout + s.refund) / s.stake : null,
     hitRate: s.settled ? s.hits / s.settled : null,
     logLoss: s.logLossCount ? s.logLossSum / s.logLossCount : null,
+    brierScore: s.brierCount ? s.brierSum / s.brierCount : null,
   };
 }
 
-function recordOutcome(s: Stats, tickets: string[] | null, race: BoatRecord) {
+function recordOutcome(s: Stats, tickets: string[] | null, race: BoatRecord, unitStakePerTicket: number = B13V2_CONFIG.stakePerTicket) {
   s.targets++;
   if (!tickets) { s.skipped++; return; }
   s.applied++;
-  const outcome = settleB11(tickets, race.result);
-  if (outcome.state === "pending") { s.pending++; return; }
-  if (outcome.state === "excluded") { s.excluded++; return; }
+  const result = race.result;
+  if (!result) { s.pending++; return; }
+  if (result.status === "official" && !Object.keys(result.payouts).length && !result.special) { s.excluded++; return; }
   s.settled++;
-  s.stake += outcome.stake;
-  s.payout += outcome.payout;
-  s.refund += outcome.refund;
-  s.hits += Number(
-    race.result!.status === "official" &&
-      tickets.some(
-        (t) =>
-          !t.split("-").some((b) => race.result!.refundBoats.includes(Number(b))) &&
-          (race.result!.payouts[t] ?? 0) > 0,
-      ),
-  );
+  let stake = 0;
+  let payout = 0;
+  let refund = 0;
+  let hit = false;
+  for (const t of tickets) {
+    stake += unitStakePerTicket;
+    const refunded = result.status === "void" || t.split("-").some((b) => result.refundBoats.includes(Number(b)));
+    if (refunded) {
+      refund += unitStakePerTicket;
+    } else {
+      const p100 = result.payouts[t] ?? 0;
+      const mult = unitStakePerTicket / 100;
+      payout += p100 * mult;
+      if (p100 > 0) hit = true;
+    }
+  }
+  s.stake += stake;
+  s.payout += payout;
+  s.refund += refund;
+  s.hits += Number(hit);
 }
 
-const MODEL_IDS: B13V2ModelId[] = ["B13v2", "B13v2Pre", "B13", "FIXED123", "B01", "B02", "B11"];
+const MODEL_IDS: B13V2ModelId[] = ["B13v2Pre", "B13v2", "B13v2NoEx", "B13", "B01", "B02", "FIXED123", "B11"];
 const initModels = () => Object.fromEntries(MODEL_IDS.map((id) => [id, makeStats()])) as Record<B13V2ModelId, Stats>;
 const finalizeModels = (m: Record<B13V2ModelId, Stats>) =>
   Object.fromEntries(MODEL_IDS.map((id) => [id, finishStats(m[id])])) as Record<B13V2ModelId, ReturnType<typeof finishStats>>;
 
+/** 固定モデル（B01, B02, FIXED123）にも疑似確率分布を割り当てて Brier/LogLoss を算出したい場合のヘルパー。 */
+function fixedTicketsAndDist(model: "B01" | "B02" | "FIXED123") {
+  if (model === "FIXED123") return [{ combination: "1-2-3", probability: 1 }];
+  if (model === "B01") return [{ combination: "1-2-3", probability: 0.5 }, { combination: "1-3-2", probability: 0.5 }];
+  return [{ combination: "1-2-3", probability: 0.5 }, { combination: "1-2-4", probability: 0.5 }];
+}
+
 /**
- * JST日付単位 expanding window による時系列比較評価（shadow only）。
- * - B13v2: 全展示データ利用（再構成研究）
- * - B13v2Pre: 締切前取得確認済みの展示データのみ利用（厳格リーク防止）
- * - B13: 既存の艇番のみ Plackett–Luce
- * - FIXED123: 固定 1-2-3 単点（100円）
- * - B01 (1-2-3 / 1-3-2), B02 (1-2-3 / 1-2-4), B11
+ * JST日付単位 expanding window による全モデル同一レース・同一予算条件（1R=200円、仮想予算10万円）比較。
+ * - B13v2Pre (メイン): 締切前展示あり時は展示特徴量モデル、欠損時は B13v2NoEx を使用
+ * - B13v2: 全展示データ利用（再構成比較）
+ * - B13v2NoEx: 展示欠損専用モデル（全レースに適用）
+ * - B13 / B01 / B02 / FIXED123(200円相当) / B11
  */
-export function evaluateB13V2(races: readonly BoatRecord[]) {
+export function evaluateB13V2(races: readonly BoatRecord[], options: { from?: string } = {}) {
   if (new Set(races.map((r) => r.id)).size !== races.length) {
     throw new Error("B13v2 requires deduplicated race IDs");
   }
   const sorted = [...races].sort((a, b) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id));
   const dates = [...new Set(sorted.map((r) => r.date))];
+  const evalFrom = options.from ?? "0000-00-00";
   const overall = initModels();
 
   const missingness = {
@@ -393,6 +471,7 @@ export function evaluateB13V2(races: readonly BoatRecord[]) {
     missingExhibition: 0,
     preCutoffExhibition: 0,
     postCutoffExhibition: 0,
+    preCutoffExhibitionRate: 0,
   };
   for (const r of sorted) {
     const f = extractB13V2Features(r, { preCutoffExhibitionOnly: false });
@@ -401,6 +480,7 @@ export function evaluateB13V2(races: readonly BoatRecord[]) {
     else if (f.exhibitionPreCutoff) missingness.preCutoffExhibition++;
     else missingness.postCutoffExhibition++;
   }
+  missingness.preCutoffExhibitionRate = sorted.length ? missingness.preCutoffExhibition / sorted.length : 0;
 
   const days = dates.map((date) => {
     const asOf = date + "T00:00:00+09:00";
@@ -424,54 +504,87 @@ export function evaluateB13V2(races: readonly BoatRecord[]) {
         order,
       })),
     );
+    const modelNoEx = fitB13V2NoEx(
+      trainingRaw.map(({ race, order }) => ({
+        features: extractB13V2Features(race, { preCutoffExhibitionOnly: true }),
+        order,
+      })),
+    );
     const b13Weights = fitB13(trainingRaw.map((t) => t.order));
     const b13Dist = b13Weights ? b13Distribution(b13Weights) : null;
 
     const dayStats = initModels();
     const targets = sorted.filter((r) => r.date === date);
+    const includeInOverall = date >= evalFrom;
+
     const rows = targets.map((race) => {
       const programOk = before(race.program.fetchedAt, race.cutoff);
       const status = !programOk ? "program-not-pre-cutoff" : !modelFull ? "no-prior-training" : "eligible";
       const fFull = extractB13V2Features(race, { preCutoffExhibitionOnly: false });
       const fPre = extractB13V2Features(race, { preCutoffExhibitionOnly: true });
+
       const predFull = status === "eligible" && modelFull ? predictB13V2(modelFull, fFull) : null;
-      const predPre = status === "eligible" && modelPre ? predictB13V2(modelPre, fPre) : null;
+      // B13v2Pre (メイン): 締切前展示が揃っていれば modelPre、欠損なら専用モデル modelNoEx を使用
+      const preUsedNoEx = status === "eligible" && !fPre.hasCompleteExhibition;
+      const predPre =
+        status === "eligible"
+          ? fPre.hasCompleteExhibition && modelPre
+            ? predictB13V2(modelPre, fPre)
+            : modelNoEx
+              ? predictB13V2(modelNoEx, fPre)
+              : null
+          : null;
+      const predNoEx = status === "eligible" && modelNoEx ? predictB13V2(modelNoEx, fPre) : null;
       const b11 = decideB11(BOATS.map((b) => race.entries.find((e) => e.boat === b)?.grade_original ?? null));
 
       const tickets: Record<B13V2ModelId, string[] | null> =
         status === "eligible"
           ? {
-              B13v2: predFull!.distribution.slice(0, B13V2_CONFIG.ticketCount).map((p) => p.combination),
               B13v2Pre: predPre!.distribution.slice(0, B13V2_CONFIG.ticketCount).map((p) => p.combination),
+              B13v2: predFull!.distribution.slice(0, B13V2_CONFIG.ticketCount).map((p) => p.combination),
+              B13v2NoEx: predNoEx!.distribution.slice(0, B13V2_CONFIG.ticketCount).map((p) => p.combination),
               B13: b13Dist!.slice(0, B13V2_CONFIG.ticketCount).map((p) => p.combination),
-              FIXED123: ["1-2-3"],
               B01: ["1-2-3", "1-3-2"],
               B02: ["1-2-3", "1-2-4"],
+              FIXED123: ["1-2-3"],
               B11: b11.status === "bet" ? b11.tickets : null,
             }
-          : { B13v2: null, B13v2Pre: null, B13: null, FIXED123: null, B01: null, B02: null, B11: null };
+          : { B13v2Pre: null, B13v2: null, B13v2NoEx: null, B13: null, B01: null, B02: null, FIXED123: null, B11: null };
 
       for (const id of MODEL_IDS) {
-        recordOutcome(dayStats[id], tickets[id], race);
-        recordOutcome(overall[id], tickets[id], race);
+        // 同一予算条件（1レース200円）で比較するため FIXED123 も 1点200円換算で記録
+        const unit = id === "FIXED123" ? 200 : B13V2_CONFIG.stakePerTicket;
+        recordOutcome(dayStats[id], tickets[id], race, unit);
+        if (includeInOverall) recordOutcome(overall[id], tickets[id], race, unit);
       }
 
       const order = topThree(race);
       const actual = order?.join("-") ?? null;
       if (status === "eligible" && actual) {
-        const addLoss = (id: "B13v2" | "B13v2Pre" | "B13", dist: { combination: string; probability: number }[] | null) => {
-          const p = dist?.find((x) => x.combination === actual)?.probability;
-          if (p !== undefined && p > 0) {
-            const loss = -Math.log(p);
-            dayStats[id].logLossSum += loss;
-            dayStats[id].logLossCount++;
-            overall[id].logLossSum += loss;
-            overall[id].logLossCount++;
+        const addProbMetrics = (
+          id: B13V2ModelId,
+          dist: readonly { combination: string; probability: number }[] | null,
+          includeLogLoss = true,
+        ) => {
+          if (!dist) return;
+          const m = scoreDistribution(dist, actual);
+          const targetsStats = includeInOverall ? [dayStats[id], overall[id]] : [dayStats[id]];
+          for (const st of targetsStats) {
+            if (includeLogLoss && m.logLoss !== null) {
+              st.logLossSum += m.logLoss;
+              st.logLossCount++;
+            }
+            st.brierSum += m.brierScore;
+            st.brierCount++;
           }
         };
-        addLoss("B13v2", predFull?.distribution ?? null);
-        addLoss("B13v2Pre", predPre?.distribution ?? null);
-        addLoss("B13", b13Dist);
+        addProbMetrics("B13v2Pre", predPre?.distribution ?? null);
+        addProbMetrics("B13v2", predFull?.distribution ?? null);
+        addProbMetrics("B13v2NoEx", predNoEx?.distribution ?? null);
+        addProbMetrics("B13", b13Dist);
+        addProbMetrics("B01", fixedTicketsAndDist("B01"), false);
+        addProbMetrics("B02", fixedTicketsAndDist("B02"), false);
+        addProbMetrics("FIXED123", fixedTicketsAndDist("FIXED123"), false);
       }
 
       return {
@@ -480,9 +593,10 @@ export function evaluateB13V2(races: readonly BoatRecord[]) {
         number: race.number,
         cutoff: race.cutoff,
         status,
+        preUsedNoEx,
         actual,
         tickets,
-        topProbs: predFull ? predFull.distribution.slice(0, 5) : null,
+        topProbs: predPre ? predPre.distribution.slice(0, 5) : null,
       };
     });
 
@@ -492,28 +606,36 @@ export function evaluateB13V2(races: readonly BoatRecord[]) {
       trainingCount: trainingRaw.length,
       modelFull: modelFull ? { namedWeights: modelFull.namedWeights, norm: modelFull.norm } : null,
       modelPre: modelPre ? { namedWeights: modelPre.namedWeights, norm: modelPre.norm } : null,
+      modelNoEx: modelNoEx ? { namedWeights: modelNoEx.namedWeights, norm: modelNoEx.norm } : null,
       models: finalizeModels(dayStats),
       rows,
     };
   });
 
-  // 全期間（探索用）で推定した最終係数スナップショット（前向き検証用のモデル定義）
   const allTrain = sorted.flatMap((r) => {
     if (!before(r.program.fetchedAt, r.cutoff)) return [];
     const order = topThree(r);
     return order ? [{ features: extractB13V2Features(r, { preCutoffExhibitionOnly: false }), order }] : [];
   });
-  const frozenFullFit = fitB13V2(allTrain);
+  const allTrainPre = sorted.flatMap((r) => {
+    if (!before(r.program.fetchedAt, r.cutoff)) return [];
+    const order = topThree(r);
+    return order ? [{ features: extractB13V2Features(r, { preCutoffExhibitionOnly: true }), order }] : [];
+  });
 
   return {
     schemaVersion: B13V2_VERSION,
     kind: "reconstructed-shadow" as const,
+    mainModel: "B13v2Pre" as const,
+    virtualBankrollInitialYen: VIRTUAL_BANKROLL_INITIAL_YEN,
     config: B13V2_CONFIG,
     featureNames: B13V2_FEATURE_NAMES,
+    noExFeatureNames: B13V2_NOEX_FEATURE_NAMES,
     missingness,
     totalRaces: sorted.length,
     models: finalizeModels(overall),
-    frozenExploratoryModel: frozenFullFit,
+    frozenExploratoryModel: fitB13V2(allTrain),
+    frozenExploratoryNoExModel: fitB13V2NoEx(allTrainPre),
     days,
   };
 }

@@ -18,23 +18,23 @@ const evalReport = evaluateB13V2(merged.races);
 
 const pct = (v: number | null) => (v === null ? "—" : `${(v * 100).toFixed(1)}%`);
 
-console.log("=== B13v2 EXPANDING-WINDOW OVERALL COMPARISON ===");
+console.log("=== B13v2 EXPANDING-WINDOW OVERALL COMPARISON (1R=200円同一予算, 初期100,000円) ===");
 console.log(
-  `Missingness: total=${evalReport.missingness.totalRaces}, missingGrades=${evalReport.missingness.missingGrades}, missingEx=${evalReport.missingness.missingExhibition}, preCutoffEx=${evalReport.missingness.preCutoffExhibition}, postCutoffEx=${evalReport.missingness.postCutoffExhibition}`,
+  `Missingness: total=${evalReport.missingness.totalRaces}, missingGrades=${evalReport.missingness.missingGrades}, missingEx=${evalReport.missingness.missingExhibition}, preCutoffEx=${evalReport.missingness.preCutoffExhibition} (${pct(evalReport.missingness.preCutoffExhibitionRate)}), postCutoffEx=${evalReport.missingness.postCutoffExhibition}`,
 );
 for (const [id, s] of Object.entries(evalReport.models)) {
   console.log(
-    `${id.padEnd(9)} | applied=${String(s.applied).padStart(3)} settled=${String(s.settled).padStart(3)} hits=${String(s.hits).padStart(2)} (${pct(s.hitRate).padStart(5)}) | stake=${String(s.stake).padStart(5)} pay=${String(s.payout).padStart(5)} ref=${String(s.refund).padStart(4)} net=${String(s.net).padStart(6)} ROI=${pct(s.roi).padStart(6)} | LL=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"}`,
+    `${id.padEnd(9)} | settled=${String(s.settled).padStart(3)} hits=${String(s.hits).padStart(2)} (${pct(s.hitRate).padStart(5)}) | stake=${String(s.stake).padStart(5)} net=${String(s.net).padStart(6)} bal=${String(s.balanceEnd).padStart(6)} ROI=${pct(s.roi).padStart(6)} | LL=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"} Brier=${s.brierScore !== null ? s.brierScore.toFixed(5) : "—"}`,
   );
 }
 
-console.log("\n=== DAILY BREAKDOWN (B13v2 vs B13v2Pre vs B13 vs FIXED123) ===");
+console.log("\n=== DAILY BREAKDOWN (B13v2Pre [MAIN] vs B13v2 vs B13v2NoEx vs B13 vs FIXED123) ===");
 for (const d of evalReport.days) {
   console.log(`\n[${d.date}] train=${d.trainingCount}R`);
-  for (const id of ["B13v2", "B13v2Pre", "B13", "FIXED123", "B01", "B02", "B11"] as const) {
+  for (const id of ["B13v2Pre", "B13v2", "B13v2NoEx", "B13", "B01", "B02", "FIXED123", "B11"] as const) {
     const s = d.models[id];
     console.log(
-      `  ${id.padEnd(9)} | settled=${String(s.settled).padStart(3)} hits=${String(s.hits).padStart(2)} (${pct(s.hitRate).padStart(5)}) | ROI=${pct(s.roi).padStart(6)} | LL=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"}`,
+      `  ${id.padEnd(9)} | settled=${String(s.settled).padStart(3)} hits=${String(s.hits).padStart(2)} (${pct(s.hitRate).padStart(5)}) | ROI=${pct(s.roi).padStart(6)} | LL=${s.logLoss !== null ? s.logLoss.toFixed(4) : "—"} Brier=${s.brierScore !== null ? s.brierScore.toFixed(5) : "—"}`,
     );
   }
 }
