@@ -11,20 +11,26 @@ import {
 } from "../packages/shared/src/boatrace-b13-v2";
 import { mergeBoatArchives, type BoatArchiveInput } from "../packages/shared/src/boatrace-research";
 import { loadArchiveInputs, sha256Hex } from "./boatrace-research-cli";
-import { addTerms, average, bootstrap, evaluateScores, fitOffsets, gradeBarrier, wilson, type Barrier } from "./boatrace-inner-barrier";
+import {
+  abilityBarrier, addTerms, average, bootstrap, classifyFDepth, evaluateScores, fitOffsets, gradeBarrier,
+  wilson, type Barrier, type FDepthBin,
+} from "./boatrace-inner-barrier";
 
 type Revision = NonNullable<BoatArchiveInput["revisions"]>[number];
-type Frozen = { raceId: string; frozenAt: string; cutoff: string; hasPreCutoffExhibition: boolean;
-  predictions: { B13v2Pre: { top5: { combination: string; probability: number }[] } } };
+type Frozen = {
+  raceId: string; frozenAt: string; cutoff: string; hasPreCutoffExhibition: boolean;
+  predictions: { B13v2Pre: { top5: { combination: string; probability: number }[] } };
+};
 type Local = { records: BoatRecord[]; revisions: Revision[]; frozen: Frozen[] };
 type Cohort = "pre" | "noex" | "reconstructed";
-type Row = {
+type AbilityKind = "asof" | "ex" | "combined";
+export type Row = {
   race: BoatRecord; pre: B13V2RaceFeatures; full: B13V2RaceFeatures; programPre: boolean;
   order: number[] | null; revisions: BoatResult[]; inspiration: boolean;
 };
 type Candidate = {
-  id: string; barrier?: Barrier; f?: "binary" | "depth" | "lane"; interaction?: boolean;
-  unrestricted?: boolean; ridge?: number;
+  id: string; barrier?: Barrier; ability?: AbilityKind; f?: "binary" | "depth" | "lane" | "stage";
+  interaction?: boolean; unrestricted?: boolean; ridge?: number;
 };
 const baseline: Candidate = { id: "B13v2" };
 const onTime = (a: string | null | undefined, b: string | null | undefined) =>
@@ -32,6 +38,55 @@ const onTime = (a: string | null | undefined, b: string | null | undefined) =>
 const cutoff = (race: BoatRecord) => race.freeze?.cutoff ?? race.cutoff;
 const cohortFeatures = (row: Row, cohort: Cohort) => cohort === "reconstructed" ? row.full : row.pre;
 const names = ["live", "noex", "reconstructed"] as const;
+
+export type AsOfPlayerStats = Map<string, { starts: number; wins: number; places: number }>;
+
+/** Build leak-free player stats using only results fetched before `asOf`. */
+export function buildAsOfPlayerStats(rows: Row[], asOf: string): AsOfPlayerStats {
+  const stats: AsOfPlayerStats = new Map();
+  for (const row of rows) {
+    if (row.inspiration) continue;
+    const order = resultOrderBefore(row, asOf);
+    if (!order) continue;
+    for (const entry of row.race.entries) {
+      const prev = stats.get(entry.name) ?? { starts: 0, wins: 0, places: 0 };
+      prev.starts += 1;
+      if (order[0] === entry.boat) prev.wins += 1;
+      if (order.includes(entry.boat)) prev.places += 1;
+      stats.set(entry.name, prev);
+    }
+  }
+  return stats;
+}
+
+const GRADE_PLACE_PRIOR: Record<number, number> = { 4: 0.65, 3: 0.55, 2: 0.42, 1: 0.30 };
+
+export function computeAbilityValues(
+  row: Row,
+  cohort: Cohort,
+  kind: AbilityKind,
+  playerStats: AsOfPlayerStats,
+): { values: number[]; asofMatched: number } {
+  const f = cohortFeatures(row, cohort);
+  const grades = f.gradePoints as number[];
+  const priorWeight = 6;
+  let asofMatched = 0;
+  const values = BOATS.map((boat, i) => {
+    const grade = grades[i];
+    const name = row.race.entries.find((e) => e.boat === boat)?.name ?? "";
+    const st = playerStats.get(name);
+    if (st && st.starts > 0) asofMatched++;
+    const prior = GRADE_PLACE_PRIOR[grade] ?? 0.45;
+    const shrunkPlace = st ? (st.places + priorWeight * prior) / (st.starts + priorWeight) : prior;
+    const asofDelta = 2.0 * (shrunkPlace - prior);
+    const timeZ = cohort === "noex" ? null : f.timeZ[i];
+    const exDelta = timeZ !== null && Number.isFinite(timeZ) ? -0.5 * timeZ : 0;
+    if (kind === "asof") return grade + asofDelta;
+    if (kind === "ex") return grade + exDelta;
+    return grade + asofDelta + exDelta;
+  });
+  return { values, asofMatched };
+}
 
 function readLocal(path: string): Local {
   const db = new DatabaseSync(path, { readOnly: true });
@@ -102,46 +157,76 @@ function coursesFor(features: B13V2RaceFeatures, cohort: Cohort): number[] {
   return order ? BOATS.map((boat) => order.indexOf(String(boat)) + 1) : [...BOATS];
 }
 
-function inputs(row: Row, cohort: Cohort, model: B13V2FittedModel, candidate: Candidate) {
+function inputs(
+  row: Row,
+  cohort: Cohort,
+  model: B13V2FittedModel,
+  candidate: Candidate,
+  playerStats: AsOfPlayerStats,
+) {
   const features = cohortFeatures(row, cohort);
   const modelMatrix = model.kind === "full"
     ? buildBoatFeatureMatrix(features, model.norm) : buildNoExFeatureMatrix(features, model.norm);
-  const base = modelMatrix.map((row) => row.reduce((sum, value, j) => sum + value * model.weights[j], 0));
+  const base = modelMatrix.map((r) => r.reduce((sum, value, j) => sum + value * model.weights[j], 0));
   const matrix = BOATS.map((): number[] => []);
   if (candidate.barrier !== undefined) {
-    const barriers = gradeBarrier(features.gradePoints as number[], coursesFor(features, cohort), candidate.barrier);
-    barriers.forEach((values, i) => matrix[i].push(...values.map((h) => -h)));
+    const courses = coursesFor(features, cohort);
+    const values = candidate.ability
+      ? computeAbilityValues(row, cohort, candidate.ability, playerStats).values
+      : (features.gradePoints as number[]);
+    const barriers = abilityBarrier(values, courses, candidate.barrier);
+    barriers.forEach((valuesRow, i) => matrix[i].push(...valuesRow.map((h) => -h)));
   }
+  let stageMatrices: number[][][] | undefined;
   if (candidate.f) {
     for (let i = 0; i < BOATS.length; i++) {
       const f = features.exhibitionF[i];
       if (f === null) throw new Error("Unknown exhibition F in complete exhibition cohort");
-      // Replace the original six F terms, leaving all other offsets intact.
       const fColumn = B13V2_FEATURE_NAMES.indexOf("f_c1") + i;
       base[i] -= modelMatrix[i][fColumn] * model.weights[fColumn];
       if (candidate.f === "lane") matrix[i].push(...BOATS.map((b) => Number(f && b === i + 1)));
+      else if (candidate.f === "stage") matrix[i].push(Number(f), 0);
       else matrix[i].push(candidate.f === "depth" ? 10 * (features.exhibitionFDepth[i] ?? 0) : Number(f));
       if (candidate.interaction) matrix[i].push(matrix[i][0] * Number(f));
     }
+    if (candidate.f === "stage") {
+      const colOffset = matrix[0].length - 2;
+      const stage0 = matrix.map((r) => [...r]);
+      const stage12 = matrix.map((r, i) => {
+        const copy = [...r];
+        copy[colOffset] = 0;
+        copy[colOffset + 1] = Number(features.exhibitionF[i]);
+        return copy;
+      });
+      stageMatrices = [stage0, stage12, stage12];
+    }
   }
-  return { base, matrix };
+  return { base, matrix, stageMatrices };
 }
 
 function variants(cohort: Cohort): Candidate[] {
-  const h: Candidate[] = [0, 0.25, 0.5, 0.75, 1, "near", "max", "separate"].map((barrier) => ({
-    id: `H-${barrier}`, barrier: barrier as Barrier,
-  }));
-  h.push({ id: "H-free", barrier: 0.5, unrestricted: true },
+  const barriers: Barrier[] = [0, 0.25, 0.5, 0.75, 1, "max", "max_decay", "near", "near_decay", "exists", "exists_decay", "separate"];
+  const h: Candidate[] = barriers.map((barrier) => ({ id: `H-${barrier}`, barrier }));
+  h.push(
+    { id: "H-free", barrier: 0.5, unrestricted: true },
     { id: "H-separate-free", barrier: "separate", unrestricted: true },
     { id: "H-0.5-ridge-low", barrier: 0.5, ridge: 0.02 },
-    { id: "H-0.5-ridge-high", barrier: 0.5, ridge: 0.5 });
+    { id: "H-0.5-ridge-high", barrier: 0.5, ridge: 0.5 },
+    { id: "H-ability-asof", barrier: 0.5, ability: "asof" },
+  );
   if (cohort === "noex") return [baseline, ...h];
-  return [baseline, ...h,
-    { id: "F-positive", f: "binary" }, { id: "F-free", f: "binary", unrestricted: true },
+  return [
+    baseline, ...h,
+    { id: "H-ability-ex", barrier: 0.5, ability: "ex" },
+    { id: "H-ability-combined", barrier: 0.5, ability: "combined" },
+    { id: "F-positive", f: "binary" },
+    { id: "F-free", f: "binary", unrestricted: true },
+    { id: "F-stage-free", f: "stage", unrestricted: true },
     { id: "F-depth-free", f: "depth", unrestricted: true },
     { id: "F-lane-positive", f: "lane" },
     ...[0.25, 0.5, 0.75, 1].map((barrier): Candidate => ({ id: `HF-${barrier}`, barrier, f: "binary" })),
     { id: "HF-free", barrier: 0.5, f: "binary", unrestricted: true },
+    { id: "HF-stage-free", barrier: 0.5, f: "stage", unrestricted: true },
     { id: "HF-interaction", barrier: 0.5, f: "binary", interaction: true },
   ];
 }
@@ -153,7 +238,7 @@ function eligible(row: Row, cohort: Cohort) {
   return row.programPre && (cohort === "noex" || f.hasCompleteExhibition);
 }
 
-type Prediction = { row: Row; scores: number[]; score: ReturnType<typeof evaluateScores> };
+type Prediction = { row: Row; score: ReturnType<typeof evaluateScores> };
 function summarize(predictions: Prediction[], cohort: Cohort, reference?: Prediction[]) {
   const metric = (key: "logLoss" | "brierScore" | "exact" | "winHit") =>
     average(predictions.flatMap(({ score }) => score[key] ?? []));
@@ -206,17 +291,40 @@ function summarize(predictions: Prediction[], cohort: Cohort, reference?: Predic
       byVenue: Object.fromEntries([...groupBy(deltas, (d) => d.venue)]
         .map(([key, items]) => [key, { n: items.length, logLoss: average(items.map((x) => x.ll)) }])),
       byCourseGrade: Object.fromEntries([...groupBy(deltas.flatMap((d) => d.rank), (d) => `${d.course}:${GRADES[d.grade! - 1]}`)]
-        .map(([key, items]) => [key, { n: items.length, winBrier: average(items.map((x) => x.winBrier)),
-          placeBrier: average(items.map((x) => x.placeBrier)) }])),
+        .map(([key, items]) => [key, {
+          n: items.length,
+          winBrier: average(items.map((x) => x.winBrier)),
+          placeBrier: average(items.map((x) => x.placeBrier)),
+        }])),
     },
   };
 }
 
 type BoatOutcome = {
   course: number; grade: number; barrier: number; nearest: number; a1: boolean;
-  gap: number; f: boolean | null; position: string; win: number; place: number;
+  gap: number; f: boolean | null; fDepth: number | null; fDepthBin: FDepthBin | null;
+  position: string; pos1: number; pos2: number; pos3: number; pos4Plus: number;
+  win: number; place: number;
 };
 type RaceOutcomes = { day: string; venue: string; boats: BoatOutcome[] };
+
+function outcomeCounts(items: BoatOutcome[]) {
+  const n = items.length;
+  const pos1 = items.reduce((s, b) => s + b.pos1, 0);
+  const pos2 = items.reduce((s, b) => s + b.pos2, 0);
+  const pos3 = items.reduce((s, b) => s + b.pos3, 0);
+  const pos4Plus = items.reduce((s, b) => s + b.pos4Plus, 0);
+  const places = pos1 + pos2 + pos3;
+  return {
+    n,
+    pos1, pos1Rate: n ? pos1 / n : null, pos1CI: wilson(pos1, n),
+    pos2, pos2Rate: n ? pos2 / n : null, pos2CI: wilson(pos2, n),
+    pos3, pos3Rate: n ? pos3 / n : null, pos3CI: wilson(pos3, n),
+    pos4Plus, pos4PlusRate: n ? pos4Plus / n : null, pos4PlusCI: wilson(pos4Plus, n),
+    places, placeRate: n ? places / n : null, placeCI: wilson(places, n),
+    positions: Object.fromEntries([...groupBy(items, (b) => b.position)].map(([k, v]) => [k, v.length])),
+  };
+}
 
 function describe(rows: Row[], cohort: Cohort) {
   const races: RaceOutcomes[] = rows.filter((row) => row.order && !row.inspiration &&
@@ -229,32 +337,31 @@ function describe(rows: Row[], cohort: Cohort) {
       day: row.race.date, venue: row.race.venue,
       boats: BOATS.map((b, i) => {
         const higher = BOATS.map((_, j) => j).filter((j) => courses[j] < courses[i] && grades[j] > grades[i]);
+        const isF = cohort === "noex" ? null : f.exhibitionF[i];
+        const fDepth = cohort === "noex" ? null : f.exhibitionFDepth[i];
+        const pos1 = Number(row.order![0] === b);
+        const pos2 = Number(row.order![1] === b);
+        const pos3 = Number(row.order![2] === b);
         return {
           course: courses[i], grade: grades[i], barrier: barriers[i][0],
           nearest: higher.length ? Math.min(...higher.map((j) => courses[i] - courses[j])) : 0,
           gap: higher.length ? Math.max(...higher.map((j) => grades[j] - grades[i])) : 0,
           a1: higher.some((j) => grades[j] === 4),
-          f: cohort === "noex" ? null : f.exhibitionF[i],
+          f: isF,
+          fDepth,
+          fDepthBin: classifyFDepth(isF, fDepth),
           position: row.race.result!.finishes.find((x) => x.boat === b)?.position ?? "missing",
-          win: Number(row.order![0] === b), place: Number(row.order!.includes(b)),
+          pos1, pos2, pos3, pos4Plus: Number(pos1 + pos2 + pos3 === 0),
+          win: pos1, place: pos1 + pos2 + pos3,
         };
       }),
     };
   });
 
   const groups = [...groupBy(races, (r) => r.day).values()];
-  function counts(items: BoatOutcome[]) {
-    const n = items.length;
-    const wins = items.reduce((s, b) => s + b.win, 0);
-    const places = items.reduce((s, b) => s + b.place, 0);
-    return { n, wins, winRate: n ? wins / n : null, winCI: wilson(wins, n),
-      places, placeRate: n ? places / n : null, placeCI: wilson(places, n),
-      positions: Object.fromEntries([...groupBy(items, (b) => b.position)].map(([k, v]) => [k, v.length])),
-    };
-  }
   const boats = races.flatMap((r) => r.boats);
   const table = (key: (b: BoatOutcome) => string) =>
-    Object.fromEntries([...groupBy(boats, key)].map(([k, items]) => [k, counts(items)]));
+    Object.fromEntries([...groupBy(boats, key)].map(([k, items]) => [k, outcomeCounts(items)]));
 
   function contrast(group: (b: BoatOutcome) => number, controlVenue = false) {
     const keyed = races.map((r) => r.boats.flatMap((b) => {
@@ -267,26 +374,35 @@ function describe(rows: Row[], cohort: Cohort) {
       const cells = [...strata.values()].map((items) => {
         const left = items.filter((x) => x.side === 1).map((x) => x.b);
         const right = items.filter((x) => x.side === 0).map((x) => x.b);
-        return { left, right, weight: left.length * right.length / items.length };
+        return { left, right, weight: (left.length * right.length) / items.length };
       }).filter((x) => x.weight > 0);
       const denom = cells.reduce((sum, x) => sum + x.weight, 0);
-      const delta = (field: "win" | "place") => denom ? cells.reduce((sum, x) =>
+      const delta = (field: "pos1" | "pos2" | "pos3" | "pos4Plus" | "place") => denom ? cells.reduce((sum, x) =>
         sum + x.weight * (average(x.left.map((b) => b[field]))! - average(x.right.map((b) => b[field]))!), 0) / denom : null;
       return {
-        strata: cells.length, ...(details ? { left: counts(cells.flatMap((x) => x.left)), right: counts(cells.flatMap((x) => x.right)) } : {}),
-        win: delta("win"), place: delta("place"),
+        strata: cells.length,
+        ...(details ? { left: outcomeCounts(cells.flatMap((x) => x.left)), right: outcomeCounts(cells.flatMap((x) => x.right)) } : {}),
+        pos1: delta("pos1"), pos2: delta("pos2"), pos3: delta("pos3"), pos4Plus: delta("pos4Plus"), place: delta("place"),
       };
     }
     const result = paired(keyed, true);
     if (!result.strata) return result;
     const lookup = new Map(races.map((r, i) => [r, keyed[i]]));
     const blocks = groups.map((items) => items.map((r) => lookup.get(r)!));
-    return { ...result, winCI: bootstrap(blocks, (sample) => paired(sample).win, 700),
-      placeCI: bootstrap(blocks, (sample) => paired(sample).place, 700) };
+    return {
+      ...result,
+      pos1CI: bootstrap(blocks, (sample) => paired(sample).pos1, 700),
+      pos2CI: bootstrap(blocks, (sample) => paired(sample).pos2, 700),
+      pos3CI: bootstrap(blocks, (sample) => paired(sample).pos3, 700),
+      pos4PlusCI: bootstrap(blocks, (sample) => paired(sample).pos4Plus, 700),
+      placeCI: bootstrap(blocks, (sample) => paired(sample).place, 700),
+    };
   }
 
   const higher = (b: BoatOutcome) => b.nearest ? 1 : -1;
   const f = (b: BoatOutcome) => b.f === null ? 0 : b.f ? 1 : -1;
+  const fDepthContrast = (bin: Exclude<FDepthBin, "none">) => (b: BoatOutcome) =>
+    b.fDepthBin === bin ? 1 : b.fDepthBin === "none" ? -1 : 0;
   return {
     races: races.length,
     byCourseGrade: table((b) => `${b.course}:${GRADES[b.grade - 1]}`),
@@ -294,7 +410,16 @@ function describe(rows: Row[], cohort: Cohort) {
     byGap: table((b) => String(b.gap)),
     byH: table((b) => b.barrier === 0 ? "0" : b.barrier < 1 ? "0<H<1" : b.barrier < 2 ? "1<=H<2" : "H>=2"),
     byFandH: table((b) => `${b.f}:${b.nearest > 0}`),
-    byCourseGradeDistanceF: table((b) => `${b.course}:${GRADES[b.grade - 1]}:${b.nearest}:${b.f}`),
+    ...(cohort === "noex" ? {} : {
+      fDetail: {
+        byF: table((b) => String(b.f)),
+        byFDepth: table((b) => b.fDepthBin ?? "missing"),
+        byCourseBandAndF: table((b) => `${b.course === 1 ? "c1" : b.course <= 3 ? "c2_3" : "c4_6"}:${b.f}`),
+        depthShallowVsNone: contrast(fDepthContrast("shallow")),
+        depthMediumVsNone: contrast(fDepthContrast("medium")),
+        depthDeepVsNone: contrast(fDepthContrast("deep")),
+      },
+    }),
     contrasts: {
       higher: contrast(higher), higherWithVenue: contrast(higher, true),
       adjacentVsFar: contrast((b) => b.nearest === 1 ? 1 : b.nearest > 1 ? -1 : 0),
@@ -302,10 +427,49 @@ function describe(rows: Row[], cohort: Cohort) {
       A2InnerA1: contrast((b) => b.grade === 3 ? b.a1 ? 1 : -1 : 0),
       ...(cohort === "noex" ? {} : {
         F: contrast(f), FWithVenue: contrast(f, true),
+        FCourse1: contrast((b) => b.course === 1 ? f(b) : 0),
+        FCourse23: contrast((b) => b.course === 2 || b.course === 3 ? f(b) : 0),
+        FCourse46: contrast((b) => b.course >= 4 ? f(b) : 0),
         FinBarrier: contrast((b) => b.nearest ? f(b) : 0),
         FWithoutBarrier: contrast((b) => b.nearest ? 0 : f(b)),
       }),
     },
+  };
+}
+
+function exhibitionAudit(rows: Row[]) {
+  const postDelaysSec: number[] = [];
+  const cutoffs = rows.map((r) => Date.parse(cutoff(r.race) ?? "")).filter(Number.isFinite).sort((a, b) => a - b);
+  let maxConcurrent10m = 0;
+  let left = 0;
+  for (let right = 0; right < cutoffs.length; right++) {
+    while (cutoffs[right] - cutoffs[left] > 10 * 60_000) left++;
+    maxConcurrent10m = Math.max(maxConcurrent10m, right - left + 1);
+  }
+  const byDate = Object.fromEntries([...groupBy(rows, (r) => r.race.date)].map(([date, items]) => {
+    const freezeCount = items.filter((r) => Boolean(r.race.freeze)).length;
+    const preExCount = items.filter((r) => r.pre.exhibitionPreCutoff).length;
+    const postExItems = items.filter((r) => r.full.exhibitionSource && !r.full.exhibitionPreCutoff);
+    for (const r of postExItems) {
+      const c = Date.parse(cutoff(r.race) ?? "");
+      const fAt = Date.parse(r.full.exhibitionFetchedAt ?? "");
+      if (Number.isFinite(c) && Number.isFinite(fAt)) postDelaysSec.push((fAt - c) / 1000);
+    }
+    return [date, { races: items.length, freezeCount, preExCount, postExCount: postExItems.length }];
+  }));
+  postDelaysSec.sort((a, b) => a - b);
+  const q = (p: number) => postDelaysSec.length ? postDelaysSec[Math.min(postDelaysSec.length - 1, Math.floor(p * postDelaysSec.length))] : null;
+  const entryKeys = new Set(rows.flatMap((r) => r.race.entries.flatMap((e) => Object.keys(e))));
+  return {
+    byDate,
+    postExDelaySec: {
+      n: postDelaysSec.length, min: q(0), median: q(0.5), p90: q(0.9), max: q(1),
+      within15m: postDelaysSec.filter((s) => s <= 900).length,
+      between15and30m: postDelaysSec.filter((s) => s > 900 && s <= 1800).length,
+      over30m: postDelaysSec.filter((s) => s > 1800).length,
+    },
+    maxConcurrent10m,
+    programEntryKeys: [...entryKeys].sort(),
   };
 }
 
@@ -330,16 +494,78 @@ function writeOnce(path: string, content: string) {
   }
 }
 
+export type FrozenProtocol = {
+  version: string;
+  explorationCutoffDate: string;
+  targetMinRaces: number;
+  cohort: Cohort;
+  baseModel: B13V2FittedModel;
+  fallbackModel: B13V2FittedModel;
+  candidates: {
+    id: string;
+    barrier: Barrier;
+    weights: number[];
+    fallbackWeights: number[];
+  }[];
+};
+
+/** Evaluate a frozen protocol on unused races without re-fitting any weights. */
+export function evaluateFrozenProtocol(rows: Row[], protocol: FrozenProtocol) {
+  const target = rows.filter((r) =>
+    !r.inspiration && r.race.date > protocol.explorationCutoffDate && r.order &&
+    (eligible(r, protocol.cohort) || eligible(r, "noex")),
+  );
+  const playerStats = buildAsOfPlayerStats(
+    rows.filter((r) => r.race.date <= protocol.explorationCutoffDate),
+    `${protocol.explorationCutoffDate}T23:59:59+09:00`,
+  );
+  const scoreSet = (cand: Candidate, weights: number[], fallbackWeights: number[]) =>
+    target.map((row): Prediction => {
+      const usable = eligible(row, protocol.cohort);
+      const { base, matrix, stageMatrices } = inputs(
+        row, usable ? protocol.cohort : "noex",
+        usable ? protocol.baseModel : protocol.fallbackModel,
+        cand, playerStats,
+      );
+      const w = usable ? weights : fallbackWeights;
+      const scores = stageMatrices ? stageMatrices.map((m) => addTerms(base, m, w)) : addTerms(base, matrix, w);
+      return { row, score: evaluateScores(scores, row.order!) };
+    });
+  const ref = scoreSet(baseline, [], []);
+  return {
+    protocolVersion: protocol.version,
+    explorationCutoffDate: protocol.explorationCutoffDate,
+    targetMinRaces: protocol.targetMinRaces,
+    observedRaces: target.length,
+    sufficientSample: target.length >= protocol.targetMinRaces,
+    baseline: summarize(ref, protocol.cohort),
+    candidates: Object.fromEntries(protocol.candidates.map((c) => [
+      c.id,
+      summarize(scoreSet({ id: c.id, barrier: c.barrier }, c.weights, c.fallbackWeights), protocol.cohort, ref),
+    ])),
+  };
+}
+
 function main(args: string[]) {
   const [data, output, localMode, localPath, snapshotPath] = args;
-  if (!data || !output || (localMode && !["--sqlite", "--snapshot"].includes(localMode)) ||
+  if (!data || !output || (localMode && !["--sqlite", "--snapshot", "--eval-frozen"].includes(localMode)) ||
       (localMode && !localPath) || (snapshotPath && localMode !== "--sqlite") || args.length > 5) {
-    throw new Error("Usage: boatrace-inner-barrier-study.ts DATA_ROOT OUTPUT [--sqlite DATABASE [SNAPSHOT_OUT] | --snapshot SNAPSHOT]");
+    throw new Error(
+      "Usage: boatrace-inner-barrier-study.ts DATA_ROOT OUTPUT [--sqlite DATABASE [SNAPSHOT_OUT] | --snapshot SNAPSHOT | --eval-frozen PROTOCOL_JSON]",
+    );
   }
   const root = resolve(data);
   const dataSha = gitHead(root);
   const { archives, inputFiles, missingDays } = loadArchiveInputs(root);
   if (gitHead(root) !== dataSha) throw new Error("Archive checkout changed while reading inputs");
+  if (localMode === "--eval-frozen") {
+    const protocol = JSON.parse(readFileSync(localPath, "utf8")) as FrozenProtocol;
+    const { rows } = prepare(archives, { records: [], revisions: [], frozen: [] });
+    const evaluation = evaluateFrozenProtocol(rows, protocol);
+    writeOnce(output, JSON.stringify({ dataSha, ...evaluation }, null, 2) + "\n");
+    console.log(JSON.stringify({ observedRaces: evaluation.observedRaces, sufficientSample: evaluation.sufficientSample, output }));
+    return;
+  }
   const local: Local = localMode === "--sqlite" ? readLocal(localPath) : localMode === "--snapshot"
     ? JSON.parse(readFileSync(localPath, "utf8")) : { records: [], revisions: [], frozen: [] };
   const localJson = JSON.stringify(local) + "\n";
@@ -374,6 +600,8 @@ function main(args: string[]) {
       top5: Number(record.predictions.B13v2Pre.top5.some((p) => p.combination === row.order!.join("-"))),
     }] : [];
   });
+  const wf = Object.fromEntries(names.map((mode) => [mode, walkForward(rows, dates, mode)]));
+  const frozenProtocol = buildFrozenProtocol(rows, dates[dates.length - 1]);
   const report = {
     issue: 129, dataSha, baselineCode: "b13-context-pl-shadow-v2",
     studyFilesSha256: Object.fromEntries(["boatrace-inner-barrier-study.ts", "boatrace-inner-barrier.ts"]
@@ -385,23 +613,68 @@ function main(args: string[]) {
       overlap: [...archiveIds].filter((id) => localIds.has(id)).length, duplicates,
       venues: new Set(rows.map((r) => r.race.venue)).size,
       inspirationRaces: count((r) => r.inspiration), frozenStored: local.frozen.length,
+      exhibitionAudit: exhibitionAudit(rows),
       byDate: Object.fromEntries([...groupBy(rows, (r) => r.race.date)].map(([k, v]) => [k, coverage(v)])),
       byVenue: Object.fromEntries([...groupBy(rows, (r) => r.race.venue)].map(([k, v]) => [k, coverage(v)])),
     },
-    frozenBaseline: { n: frozen.length, complete: frozen.filter((r) => r.complete).length,
-      exact: average(frozen.map((r) => r.exact)), top5: average(frozen.map((r) => r.top5)) },
+    frozenBaseline: {
+      n: frozen.length, complete: frozen.filter((r) => r.complete).length,
+      exact: average(frozen.map((r) => r.exact)), top5: average(frozen.map((r) => r.top5)),
+    },
     descriptive: Object.fromEntries((["noex", "pre", "reconstructed"] as const).map((c) => [c, describe(rows, c)])),
-    models: Object.fromEntries(names.map((mode) => [mode, walkForward(rows, dates, mode)])),
+    models: wf,
+    frozenProtocol,
   };
   writeOnce(output, JSON.stringify(report, null, 2) + "\n");
   console.log(JSON.stringify({ ...report.coverage, byVenue: undefined, report: output }));
+}
+
+function buildFrozenProtocol(rows: Row[], explorationCutoffDate: string): FrozenProtocol | null {
+  const asOf = `${explorationCutoffDate}T23:59:59+09:00`;
+  const training = rows.flatMap((row) => {
+    if (row.inspiration || !row.programPre) return [];
+    const order = resultOrderBefore(row, asOf);
+    return order ? [{ row, order }] : [];
+  });
+  const baseModel = fitB13V2(training.map(({ row, order }) => ({ features: row.pre, order })));
+  const fallbackModel = fitB13V2NoEx(training.map(({ row, order }) => ({ features: row.pre, order })));
+  if (!baseModel || !fallbackModel) return null;
+  const playerStats = buildAsOfPlayerStats(rows, asOf);
+  const fixedBarriers: { id: string; barrier: Barrier }[] = [
+    { id: "H-0.5", barrier: 0.5 },
+    { id: "H-max", barrier: "max" },
+    { id: "H-near_decay", barrier: "near_decay" },
+    { id: "H-exists", barrier: "exists" },
+    { id: "H-exists_decay", barrier: "exists_decay" },
+  ];
+  const candidates = fixedBarriers.map(({ id, barrier }) => {
+    const train = training.filter(({ row }) => eligible(row, "pre"))
+      .map(({ row, order }) => ({ ...inputs(row, "pre", baseModel, { id, barrier }, playerStats), order }));
+    const fallbackTrain = training.filter(({ row }) => eligible(row, "noex"))
+      .map(({ row, order }) => ({ ...inputs(row, "noex", fallbackModel, { id, barrier }, playerStats), order }));
+    return {
+      id,
+      barrier,
+      weights: fitOffsets(train, [true], 0.1),
+      fallbackWeights: fitOffsets(fallbackTrain, [true], 0.1),
+    };
+  });
+  return {
+    version: "b13v3-inner-barrier-frozen-v1",
+    explorationCutoffDate,
+    targetMinRaces: 500,
+    cohort: "pre",
+    baseModel,
+    fallbackModel,
+    candidates,
+  };
 }
 
 function walkForward(rows: Row[], dates: string[], mode: typeof names[number]) {
   const cohort: Cohort = mode === "live" ? "pre" : mode;
   const candidates = variants(cohort);
   const all = new Map([...candidates.map((c) => c.id), "prior-fold-selection"].map((id) => [id, [] as Prediction[]]));
-  const rejected = new Set(["H-free", "H-separate-free", "F-free", "F-depth-free", "HF-free"]);
+  const rejected = new Set(["H-free", "H-separate-free", "F-free", "F-stage-free", "F-depth-free", "HF-free", "HF-stage-free"]);
   const folds = [];
   for (const date of dates) {
     const asOf = `${date}T00:00:00+09:00`;
@@ -422,22 +695,27 @@ function walkForward(rows: Row[], dates: string[], mode: typeof names[number]) {
       (eligible(row, cohort) || (mode === "live" && eligible(row, "noex"))));
     if (!target.length) continue;
 
+    const playerStats = buildAsOfPlayerStats(rows, asOf);
+    const asofMatchedBoats = target.reduce((sum, r) =>
+      sum + (eligible(r, "noex") ? computeAbilityValues(r, "noex", "asof", playerStats).asofMatched : 0), 0);
     const priorScores = candidates.filter(({ id }) => !rejected.has(id)).map(({ id }) => ({
-      id, loss: average(all.get(id)!.flatMap(({ row, scores }) => {
+      id, loss: average(all.get(id)!.flatMap(({ row, score }) => {
         const order = resultOrderBefore(row, asOf);
-        return order ? evaluateScores(scores, order).logLoss! : [];
+        return order ? evaluateScoresFromExisting(row, order, score) : [];
       })),
     }));
     const selected = priorScores.sort((a, b) => (a.loss ?? Infinity) - (b.loss ?? Infinity))[0].id;
     const fits = candidates.map((candidate) => {
       const train = training.filter(({ row }) => eligible(row, cohort) && (cohort !== "reconstructed" || exhibitionKnown(row)))
-        .map(({ row, order }) => ({ ...inputs(row, cohort, primary, candidate), order }));
+        .map(({ row, order }) => ({ ...inputs(row, cohort, primary, candidate, playerStats), order }));
       const bounds = (train[0]?.matrix[0] ?? []).map((_, j) => !candidate.unrestricted && !(candidate.interaction && j === 2));
       const weights = fitOffsets(train, bounds, candidate.ridge ?? 0.1);
-      const fallbackCandidate: Candidate = { id: candidate.id, barrier: candidate.barrier, unrestricted: candidate.unrestricted };
+      const fallbackCandidate: Candidate = {
+        id: candidate.id, barrier: candidate.barrier, ability: candidate.ability, unrestricted: candidate.unrestricted,
+      };
       const fallbackTrain = mode === "live" && candidate.barrier !== undefined
         ? training.filter(({ row }) => eligible(row, "noex"))
-          .map(({ row, order }) => ({ ...inputs(row, "noex", fallback, fallbackCandidate), order }))
+          .map(({ row, order }) => ({ ...inputs(row, "noex", fallback, fallbackCandidate, playerStats), order }))
         : [];
       const fallbackBounds = (fallbackTrain[0]?.matrix[0] ?? []).map(() => !candidate.unrestricted);
       const fallbackWeights = fitOffsets(fallbackTrain, fallbackBounds, candidate.ridge ?? 0.1);
@@ -445,17 +723,27 @@ function walkForward(rows: Row[], dates: string[], mode: typeof names[number]) {
         const usable = eligible(row, cohort);
         const effective = usable ? (train.length ? candidate : baseline) :
           (fallbackTrain.length ? fallbackCandidate : baseline);
-        const { base, matrix } = inputs(row, usable ? cohort : "noex", usable ? primary : fallback, effective);
-        const scores = addTerms(base, matrix, usable ? weights : fallbackWeights);
-        return { row, scores, score: evaluateScores(scores, row.order!) };
+        const w = usable ? weights : fallbackWeights;
+        const { base, matrix, stageMatrices } = inputs(
+          row, usable ? cohort : "noex", usable ? primary : fallback, effective, playerStats,
+        );
+        const scores = stageMatrices ? stageMatrices.map((m) => addTerms(base, m, w)) : addTerms(base, matrix, w);
+        return { row, score: evaluateScores(scores, row.order!) };
       });
       all.get(candidate.id)!.push(...result);
       if (candidate.id === selected) all.get("prior-fold-selection")!.push(...result);
-      return { id: candidate.id, weights, training: train.length, fallbackWeights, fallbackTraining: fallbackTrain.length,
+      return {
+        id: candidate.id, weights, training: train.length, fallbackWeights, fallbackTraining: fallbackTrain.length,
         logLoss: average(result.map((p) => p.score.logLoss!)),
-        completeLogLoss: average(result.filter(({ row }) => eligible(row, cohort)).map((p) => p.score.logLoss!)) };
+        completeLogLoss: average(result.filter(({ row }) => eligible(row, cohort)).map((p) => p.score.logLoss!)),
+      };
     });
-    folds.push({ date, training: training.length, test: target.length, complete: target.filter((row) => eligible(row, cohort)).length, selected, fits });
+    folds.push({
+      date, training: training.length, test: target.length,
+      complete: target.filter((row) => eligible(row, cohort)).length,
+      asofMatchedRate: target.length ? asofMatchedBoats / (6 * target.length) : 0,
+      selected, fits,
+    });
   }
   const reference = all.get(baseline.id)!;
   const complete = (p: Prediction[]) => p.filter(({ row }) => eligible(row, cohort));
@@ -469,6 +757,11 @@ function walkForward(rows: Row[], dates: string[], mode: typeof names[number]) {
         id === baseline.id ? undefined : beforeInspiration(reference)),
     }])),
   };
+}
+
+function evaluateScoresFromExisting(row: Row, order: number[], score: ReturnType<typeof evaluateScores>) {
+  // If the label matches the already-evaluated order, reuse logLoss directly; otherwise skip (rare revision diff).
+  return row.order && order.join("-") === row.order.join("-") ? [score.logLoss!] : [];
 }
 
 if (process.argv[1]?.endsWith("boatrace-inner-barrier-study.ts")) main(process.argv.slice(2));
