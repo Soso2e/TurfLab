@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import type { Row } from "../packages/shared/src/domain";
 import { exportBoatArchives } from "../scripts/boatrace-github-export";
 import { blobSha, type BridgeIO } from "../scripts/github-bridge";
 
@@ -8,7 +9,7 @@ it("exports JST boat archives once, keeps revisions, and rejects wrong dates", a
   let invalid = false;
   const io: BridgeIO = {
     now: () => new Date("2026-11-23T16:00:00Z"),
-    api: async (route) => {
+    api: async (route): Promise<Row> => {
       const date = route.split("=")[1];
       return { version: "boatrace-archive-v1", date: invalid ? "wrong" : date,
         records: date === "2026-11-24" ? [{ date, id: "test", result: changed ? "official" : null }] : [],
@@ -38,7 +39,7 @@ it("exports older backfills when the historical observation revision changes", a
   let archivedOld = 0;
   const io: BridgeIO = {
     now: () => new Date("2026-11-27T13:00:00Z"),
-    api: async (route) => {
+    api: async (route): Promise<Row> => {
       if (route.endsWith("/collection/dates")) return {
         dates: [{ date: oldDate, count, latest: "2026-11-27T13:00:00Z" }],
       };
